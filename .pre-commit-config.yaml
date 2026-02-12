@@ -1,0 +1,42 @@
+repos:
+  - repo: local
+    hooks:
+      - id: go-fmt
+        name: gofmt
+        entry: gofmt -w
+        language: system
+        types: [go]
+
+      - id: go-vet
+        name: go vet
+        entry: go vet ./cmd/... ./internal/...
+        language: system
+        pass_filenames: false
+
+      - id: golangci-lint
+        name: golangci-lint
+        entry: bash -c 'if command -v golangci-lint >/dev/null 2>&1; then golangci-lint run ./cmd/... ./internal/...; elif [ -x "$HOME/go/bin/golangci-lint" ]; then "$HOME/go/bin/golangci-lint" run ./cmd/... ./internal/...; else echo "golangci-lint not installed; skipped"; fi'
+        language: system
+        pass_filenames: false
+
+      - id: go-test-adapter
+        name: go test adapter
+        entry: bash -c 'mkdir -p .cache/go-build && GOCACHE=$PWD/.cache/go-build go test ./cmd/adapter/...'
+        language: system
+        pass_filenames: false
+
+      - id: go-test-config
+        name: go test config
+        entry: bash -c 'mkdir -p .cache/go-build && GOCACHE=$PWD/.cache/go-build go test ./internal/config/...'
+        language: system
+        pass_filenames: false
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: check-json
+      - id: check-yaml
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+      - id: check-added-large-files
+        args: ["--maxkb=5000"]

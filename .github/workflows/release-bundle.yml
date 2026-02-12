@@ -1,0 +1,253 @@
+name: Release Bundle
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-bundle-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-all:
+    name: Build (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            goos: darwin
+            goarch: arm64
+            target: darwin-arm64
+          # darwin-amd64 omitted: free Intel macOS runners retired by GitHub
+          - os: ubuntu-latest
+            goos: linux
+            goarch: amd64
+            target: linux-amd64
+          - os: windows-latest
+            goos: windows
+            goarch: amd64
+            target: windows-amd64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Init submodules
+        shell: bash
+        run: |
+          git submodule update --init submodules/git-lfs
+          git submodule update --init submodules/pass-cli
+          git submodule update --init submodules/proton-drive-cli
+          cd submodules/proton-drive-cli && git submodule update --init submodules/sdk
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "25"
+
+      - name: Enable Corepack + Yarn 4
+        shell: bash
+        run: |
+          # Remove pre-installed yarn 1.x on Windows so corepack shim takes priority
+          npm uninstall -g yarn 2>/dev/null || true
+          corepack enable
+          corepack prepare yarn@4.1.1 --activate
+          yarn --version
+
+      # ── Go adapter (CGO_ENABLED=0) ──────────────────────────
+      - name: Build adapter
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        shell: bash
+        run: |
+          mkdir -p build
+          EXT=""
+          if [ "${{ matrix.goos }}" = "windows" ]; then EXT=".exe"; fi
+          BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          go build \
+            -trimpath \
+            -ldflags "-s -w -X main.GitCommit=${{ github.sha }} -X main.BuildTime=${BUILD_TIME}" \
+            -o "build/git-lfs-proton-adapter${EXT}" \
+            ./cmd/adapter
+
+      # ── Go tray app (CGO_ENABLED=1, native runner) ──────────
+      - name: Build tray app
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "1"
+        shell: bash
+        run: |
+          EXT=""
+          EXTRA_LDFLAGS=""
+          if [ "${{ matrix.goos }}" = "windows" ]; then
+            EXT=".exe"
+            EXTRA_LDFLAGS="-H windowsgui"
+          fi
+          BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          go build \
+            -trimpath \
+            -ldflags "-s -w ${EXTRA_LDFLAGS} -X main.Version=${{ github.ref_name }}" \
+            -o "build/proton-git-lfs-tray${EXT}" \
+            ./cmd/tray
+
+      # ── proton-drive-cli SEA ─────────────────────────────────
+      - name: Install JS dependencies
+        shell: bash
+        run: yarn install --immutable
+
+      - name: Build SDK types
+        shell: bash
+        run: |
+          # SDK dist/ is not git-tracked; emit declarations for proton-drive-cli
+          # --noCheck: skip type checking (SDK has TS 5.9 compat issues)
+          node_modules/.bin/tsc -p submodules/proton-drive-cli/submodules/sdk/js/sdk --noCheck
+
+      - name: Build proton-drive-cli TypeScript
+        shell: bash
+        working-directory: submodules/proton-drive-cli
+        run: |
+          # tsc may be in workspace or hoisted to root node_modules
+          TSC="./node_modules/.bin/tsc"
+          [ -x "$TSC" ] || TSC="../../node_modules/.bin/tsc"
+          "$TSC"
+
+      - name: Build proton-drive-cli SEA
+        shell: bash
+        run: |
+          cd submodules/proton-drive-cli
+          node esbuild.config.mjs
+
+          EXT=""
+          if [ "${{ matrix.goos }}" = "windows" ]; then EXT=".exe"; fi
+          OUTPUT_NAME="proton-drive-cli${EXT}"
+          NODE_BIN="$(command -v node)"
+          # Windows: convert MSYS2 path (/c/...) to native path (C:/...)
+          if [ "${{ matrix.goos }}" = "windows" ]; then
+            NODE_BIN="$(cygpath -m "$NODE_BIN")"
+            # Ensure .exe extension (cygpath may or may not include it)
+            [[ "$NODE_BIN" != *.exe ]] && NODE_BIN="${NODE_BIN}.exe"
+          fi
+
+          # Generate build-time config with resolved paths
+          cat > sea-config-ci.json <<SEACFG
+          {
+            "main": "sea-bundle.cjs",
+            "output": "${OUTPUT_NAME}",
+            "executable": "${NODE_BIN}",
+            "disableExperimentalSEAWarning": true,
+            "useCodeCache": true
+          }
+          SEACFG
+
+          node --build-sea sea-config-ci.json
+
+          # macOS: ad-hoc re-sign
+          if [[ "$OSTYPE" == "darwin"* ]]; then
+            codesign --sign - "$OUTPUT_NAME"
+          fi
+
+          mv "$OUTPUT_NAME" "../../build/$OUTPUT_NAME"
+          rm -f sea-bundle.cjs sea-config-ci.json
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-${{ matrix.target }}
+          path: build/
+          retention-days: 7
+
+  package:
+    name: Package (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: build-all
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: darwin-arm64
+            goos: darwin
+          - target: linux-amd64
+            goos: linux
+          - target: windows-amd64
+            goos: windows
+
+    steps:
+      - name: Checkout (for packaging scripts)
+        uses: actions/checkout@v4
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: build-${{ matrix.target }}
+          path: build/
+
+      - name: Package bundle
+        shell: bash
+        run: bash scripts/package-bundle.sh "${{ matrix.target }}" "${{ matrix.goos }}"
+
+      - name: Upload package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: package-${{ matrix.target }}
+          path: dist/
+          retention-days: 14
+
+  release:
+    name: Publish GitHub Release
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: package
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download all packages
+        uses: actions/download-artifact@v4
+        with:
+          pattern: package-*
+          path: dist/
+          merge-multiple: true
+
+      - name: Generate checksums
+        run: |
+          cd dist
+          sha256sum * > SHA256SUMS.txt
+
+      - name: Generate changelog
+        id: changelog
+        uses: orhun/git-cliff-action@v4
+        with:
+          config: cliff.toml
+          args: --latest --strip header
+        env:
+          GITHUB_REPO: ${{ github.repository }}
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          body: ${{ steps.changelog.outputs.content }}
+          files: |
+            dist/*

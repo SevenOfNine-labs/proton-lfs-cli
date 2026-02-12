@@ -1,0 +1,53 @@
+name: Lint
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lint-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  go-lint:
+    name: Go formatting and lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      PROTON_PASS_REF_ROOT: pass://Personal/Proton Git LFS
+      PROTON_PASS_USERNAME_REF: pass://Personal/Proton Git LFS/username
+      PROTON_PASS_PASSWORD_REF: pass://Personal/Proton Git LFS/password
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Verify gofmt
+        run: |
+          output=$(gofmt -l ./cmd)
+          if [ -n "${output}" ]; then
+            echo "gofmt required for:"
+            echo "${output}"
+            exit 1
+          fi
+
+      - name: Go vet
+        run: go vet ./cmd/adapter/...
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v7
+        with:
+          version: v2.8.0
+          args: --timeout=5m
+          working-directory: .

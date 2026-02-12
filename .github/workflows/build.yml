@@ -1,0 +1,102 @@
+name: Build Artifacts
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-adapter:
+    name: Build adapter (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      PROTON_PASS_REF_ROOT: pass://Personal/Proton Git LFS
+      PROTON_PASS_USERNAME_REF: pass://Personal/Proton Git LFS/username
+      PROTON_PASS_PASSWORD_REF: pass://Personal/Proton Git LFS/password
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+            target: linux-amd64
+            binary_name: git-lfs-proton-adapter-linux-amd64
+          - goos: linux
+            goarch: arm64
+            target: linux-arm64
+            binary_name: git-lfs-proton-adapter-linux-arm64
+          - goos: darwin
+            goarch: amd64
+            target: darwin-amd64
+            binary_name: git-lfs-proton-adapter-darwin-amd64
+          - goos: darwin
+            goarch: arm64
+            target: darwin-arm64
+            binary_name: git-lfs-proton-adapter-darwin-arm64
+          - goos: windows
+            goarch: amd64
+            target: windows-amd64
+            binary_name: git-lfs-proton-adapter-windows-amd64.exe
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build adapter
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: 0
+        run: |
+          mkdir -p bin
+          BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          go build \
+            -trimpath \
+            -ldflags "-s -w -X main.GitCommit=${{ github.sha }} -X main.BuildTime=${BUILD_TIME}" \
+            -o "bin/${{ matrix.binary_name }}" \
+            ./cmd/adapter
+
+      - name: Upload adapter artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.binary_name }}
+          path: bin/${{ matrix.binary_name }}
+          retention-days: 14
+
+  release:
+    name: Publish GitHub Release
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs:
+      - build-adapter
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/**/*

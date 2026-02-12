@@ -1,0 +1,391 @@
+name: Test
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  go-test:
+    name: Go tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      PROTON_PASS_REF_ROOT: pass://Personal/Proton Git LFS
+      PROTON_PASS_USERNAME_REF: pass://Personal/Proton Git LFS/username
+      PROTON_PASS_PASSWORD_REF: pass://Personal/Proton Git LFS/password
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Run adapter tests with coverage
+        run: |
+          go test -race -coverprofile=coverage.out ./cmd/adapter/...
+          go tool cover -func=coverage.out | tail -n 1
+
+      - name: Upload Go coverage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: go-coverage
+          path: coverage.out
+          retention-days: 7
+
+  go-test-tray:
+    name: Tray tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Install Linux deps
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc libgtk-3-dev libayatana-appindicator3-dev
+
+      - name: Run tray tests
+        env:
+          CGO_ENABLED: "1"
+        run: |
+          go test -race -cover ./cmd/tray/...
+
+  integration-local:
+    name: Integration local backend (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Install git-lfs (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y git-lfs
+
+      - name: Install git-lfs (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install git-lfs
+
+      - name: Verify git-lfs
+        shell: bash
+        run: |
+          git lfs version
+
+      - name: Run local backend integration tests
+        shell: bash
+        run: |
+          go test -tags integration ./tests/integration/... \
+            -run '^TestGitLFSCustomTransfer(StandaloneUpload|DownloadRoundTrip|ConcurrentRoundTrip)$' -v
+
+  integration-timeout:
+    name: Integration timeout semantics (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+          - windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Install git-lfs (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y git-lfs
+
+      - name: Install git-lfs (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install git-lfs
+
+      - name: Install git-lfs (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          choco install git-lfs -y
+
+      - name: Verify git-lfs
+        shell: bash
+        run: |
+          git lfs version
+
+      - name: Run timeout semantics integration tests
+        shell: bash
+        run: |
+          go test -tags integration ./tests/integration/... -run '^TestGitLFSCustomTransferTimeout' -v
+
+  integration-stress:
+    name: Integration concurrency stress (ubuntu)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      PROTON_LFS_STRESS_FILE_COUNT: "16"
+      PROTON_LFS_STRESS_ROUNDS: "2"
+      PROTON_LFS_STRESS_CONCURRENCY: "8"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Install git-lfs
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y git-lfs
+
+      - name: Verify git-lfs
+        shell: bash
+        run: |
+          git lfs version
+
+      - name: Run concurrency stress/soak integration test
+        shell: bash
+        run: |
+          go test -tags integration ./tests/integration/... -run '^TestGitLFSCustomTransferConcurrentStressSoak$' -v
+
+  integration-failure-modes:
+    name: Integration failure modes
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Install git-lfs
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y git-lfs
+          git lfs version
+
+      - name: Run failure mode integration tests
+        run: |
+          go test -tags integration ./tests/integration/... \
+            -run '^TestGitLFSCustomTransfer(RejectsWrongOID|FailsWhenAdapter)' -v
+
+  integration-config-matrix:
+    name: Integration config matrix
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Install git-lfs
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y git-lfs
+          git lfs version
+
+      - name: Run direction config matrix tests
+        run: |
+          go test -tags integration ./tests/integration/... \
+            -run '^TestGitLFSCustomTransferDirection' -v
+
+  integration-credentials:
+    name: Integration credential security
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      PROTON_PASS_REF_ROOT: pass://Personal/Proton Git LFS
+      PROTON_PASS_USERNAME_REF: pass://Personal/Proton Git LFS/username
+      PROTON_PASS_PASSWORD_REF: pass://Personal/Proton Git LFS/password
+      PASS_MOCK_USERNAME: integration-user@proton.test
+      PASS_MOCK_PASSWORD: integration-password
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Run credential security tests (mocked pass-cli)
+        env:
+          PROTON_PASS_CLI_BIN: ${{ github.workspace }}/scripts/mock-pass-cli.sh
+        run: |
+          chmod +x scripts/mock-pass-cli.sh
+          go test -tags integration ./tests/integration/... -run '^TestCredential' -v
+
+  bridge-integration:
+    name: Bridge integration (mocked)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      PROTON_PASS_REF_ROOT: pass://Personal/Proton Git LFS
+      PROTON_PASS_USERNAME_REF: pass://Personal/Proton Git LFS/username
+      PROTON_PASS_PASSWORD_REF: pass://Personal/Proton Git LFS/password
+      PASS_MOCK_USERNAME: integration-user@proton.test
+      PASS_MOCK_PASSWORD: integration-password
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install git-lfs
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y git-lfs
+          git lfs version
+
+      - name: Run bridge integration test with mocked pass-cli and drive-cli
+        env:
+          PROTON_PASS_CLI_BIN: ${{ github.workspace }}/scripts/mock-pass-cli.sh
+          PROTON_DRIVE_CLI_BIN: ${{ github.workspace }}/tests/testdata/mock-proton-drive-cli.js
+        run: |
+          chmod +x scripts/mock-pass-cli.sh
+          go test -tags integration ./tests/integration/... -run SDK -v
+
+  drive-cli-tests:
+    name: Drive CLI tests (Jest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Init drive-cli submodules (non-recursive)
+        working-directory: submodules/proton-drive-cli
+        run: git submodule update --init --depth=1
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Enable Corepack
+        run: |
+          corepack enable
+          corepack prepare yarn@4.1.1 --activate
+
+      - name: Build vendored SDK
+        working-directory: submodules/proton-drive-cli/submodules/sdk/js/sdk
+        run: npm install && npm run build
+
+      - name: Install dependencies
+        working-directory: submodules/proton-drive-cli
+        run: YARN_ENABLE_IMMUTABLE_INSTALLS=false yarn install
+
+      - name: Build
+        working-directory: submodules/proton-drive-cli
+        run: yarn build
+
+      - name: Run proton-drive-cli tests
+        working-directory: submodules/proton-drive-cli
+        run: yarn test
+
+  e2e-mocked:
+    name: Mocked E2E pipeline
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      PROTON_PASS_REF_ROOT: pass://Personal/Proton Git LFS
+      PROTON_PASS_USERNAME_REF: pass://Personal/Proton Git LFS/username
+      PROTON_PASS_PASSWORD_REF: pass://Personal/Proton Git LFS/password
+      PASS_MOCK_USERNAME: integration-user@proton.test
+      PASS_MOCK_PASSWORD: integration-password
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install git-lfs
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y git-lfs
+          git lfs version
+
+      - name: Build adapter
+        run: make build
+
+      - name: Run mocked E2E pipeline tests
+        env:
+          PROTON_PASS_CLI_BIN: ${{ github.workspace }}/scripts/mock-pass-cli.sh
+          PROTON_DRIVE_CLI_BIN: ${{ github.workspace }}/tests/testdata/mock-proton-drive-cli.js
+        run: |
+          chmod +x scripts/mock-pass-cli.sh
+          go test -tags integration ./tests/integration/... -run E2EMocked -v

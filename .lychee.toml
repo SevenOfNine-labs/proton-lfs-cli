@@ -1,0 +1,13 @@
+verbose = "info"
+no_progress = true
+max_redirects = 5
+timeout = 20
+max_retries = 2
+retry_wait_time = 2
+accept = [200, 204, 206, 301, 302, 307, 308, 403, 429]
+
+exclude = [
+  "^http://localhost(:\\d+)?",
+  "^http://127\\.0\\.0\\.1(:\\d+)?",
+  "^http://0\\.0\\.0\\.0(:\\d+)?"
+]

@@ -1,0 +1,10 @@
+{
+  "title": "Proton Git LFS Backend",
+  "description": "Documentation for the Proton Git LFS custom transfer adapter",
+  "plugins": ["-sharing", "-search"],
+  "pluginsConfig": {},
+  "structure": {
+    "readme": "README.md",
+    "summary": "SUMMARY.md"
+  }
+}

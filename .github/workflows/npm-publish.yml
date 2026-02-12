@@ -1,0 +1,42 @@
+name: Publish to npm
+on:
+  push:
+    tags: ['drive-cli-v*']
+
+jobs:
+  publish-drive-cli:
+    if: startsWith(github.ref, 'refs/tags/drive-cli-v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - name: Init drive-cli submodules
+        working-directory: submodules/proton-drive-cli
+        run: git submodule update --init --depth=1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+      - name: Enable Corepack
+        run: |
+          corepack enable
+          corepack prepare yarn@4.1.1 --activate
+      - name: Build vendored SDK
+        working-directory: submodules/proton-drive-cli/submodules/sdk/js/sdk
+        run: npm install && npm run build
+      - name: Install dependencies
+        working-directory: submodules/proton-drive-cli
+        run: YARN_ENABLE_IMMUTABLE_INSTALLS=false yarn install
+      - name: Build
+        working-directory: submodules/proton-drive-cli
+        run: yarn build
+      - name: Test
+        working-directory: submodules/proton-drive-cli
+        run: yarn test
+      - name: Publish
+        working-directory: submodules/proton-drive-cli
+        run: npm publish --provenance --access public

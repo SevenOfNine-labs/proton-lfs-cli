@@ -1,0 +1,265 @@
+version: 1
+generated_on: "2026-02-09"
+
+requirements:
+  - id: CT-001
+    source: submodules/git-lfs/docs/custom-transfers.md
+    clause: stage1-init-ack
+    scope: adapter
+    status: covered
+    tests:
+      - cmd/adapter/main_test.go
+      - cmd/adapter/protocol_spec_test.go
+
+  - id: CT-002
+    source: submodules/git-lfs/docs/custom-transfers.md
+    clause: upload-transfer-message
+    scope: adapter
+    status: covered
+    tests:
+      - cmd/adapter/main_test.go
+      - cmd/adapter/protocol_spec_test.go
+
+  - id: CT-003
+    source: submodules/git-lfs/docs/custom-transfers.md
+    clause: download-transfer-message-and-path
+    scope: adapter
+    status: covered
+    tests:
+      - cmd/adapter/main_test.go
+      - cmd/adapter/protocol_spec_test.go
+
+  - id: CT-004
+    source: submodules/git-lfs/docs/custom-transfers.md
+    clause: per-transfer-errors-not-fatal
+    scope: adapter
+    status: covered
+    tests:
+      - cmd/adapter/protocol_spec_test.go
+
+  - id: CT-005
+    source: submodules/git-lfs/docs/custom-transfers.md
+    clause: terminate-no-response
+    scope: adapter
+    status: covered
+    tests:
+      - cmd/adapter/protocol_spec_test.go
+
+  - id: CT-006
+    source: submodules/git-lfs/docs/custom-transfers.md
+    clause: standalone-action-null
+    scope: adapter
+    status: covered
+    tests:
+      - cmd/adapter/protocol_spec_test.go
+      - tests/integration/git_lfs_custom_transfer_test.go
+      - tests/integration/git_lfs_sdk_backend_test.go
+
+  - id: CT-010
+    source: submodules/git-lfs/docs/custom-transfers.md
+    clause: progress-and-complete-ordering-and-bytes
+    scope: adapter
+    status: covered
+    tests:
+      - cmd/adapter/protocol_spec_test.go
+
+  - id: CT-011
+    source: submodules/git-lfs/tq/custom.go
+    clause: reject-unexpected-oid-in-progress-and-complete
+    scope: adapter-gitlfs-contract
+    status: covered
+    tests:
+      - tests/integration/git_lfs_custom_transfer_failure_modes_test.go
+
+  - id: CT-012
+    source: submodules/git-lfs/tq/custom.go
+    clause: subprocess-failure-propagation
+    scope: adapter-gitlfs-contract
+    status: covered
+    tests:
+      - tests/integration/git_lfs_custom_transfer_failure_modes_test.go
+      - cmd/adapter/protocol_spec_test.go
+
+  - id: CT-013
+    source: submodules/git-lfs/docs/custom-transfers.md
+    clause: progress-byte-semantics-monotonic
+    scope: adapter
+    status: covered
+    tests:
+      - cmd/adapter/protocol_spec_test.go
+      - tests/integration/git_lfs_custom_transfer_concurrency_stress_test.go
+
+  - id: CT-014
+    source: submodules/git-lfs/tq/custom.go
+    clause: concurrent-custom-adapter-processes
+    scope: adapter-gitlfs-contract
+    status: covered
+    tests:
+      - tests/integration/git_lfs_custom_transfer_concurrency_test.go
+
+  - id: CT-015
+    source: submodules/git-lfs/tq/manifest.go
+    clause: custom-adapter-direction-gating
+    scope: adapter-gitlfs-contract
+    status: covered
+    tests:
+      - tests/integration/git_lfs_custom_transfer_config_matrix_test.go
+
+  - id: CT-016
+    source: submodules/git-lfs/tq/custom.go
+    clause: activity-timeout-for-stalled-adapter-subprocess
+    scope: adapter-gitlfs-contract
+    status: covered
+    tests:
+      - tests/integration/git_lfs_custom_transfer_timeout_semantics_test.go
+
+  - id: CT-017
+    source: submodules/git-lfs/tq/custom.go
+    clause: high-volume-concurrent-transfer-stress-soak
+    scope: adapter-gitlfs-contract
+    status: covered
+    tests:
+      - tests/integration/git_lfs_custom_transfer_concurrency_stress_test.go
+
+  - id: CT-SDK-001
+    source: docs/testing/spec-gap-analysis.md
+    clause: sdk-runtime-backend-contract
+    scope: adapter-sdk-bridge
+    status: covered
+    tests:
+      - cmd/adapter/backend_test.go
+
+  - id: CT-SDK-002
+    source: docs/testing/spec-gap-analysis.md
+    clause: sdk-runtime-live-integration
+    scope: adapter-sdk-bridge
+    status: covered
+    tests:
+      - tests/integration/git_lfs_sdk_backend_test.go
+    gaps:
+      - real mode requires valid Proton credentials via pass-cli or git-credential
+
+  - id: CT-SDK-003
+    source: docs/architecture/proton-sdk-bridge.md
+    clause: sdk-bridge-subprocess-contract
+    scope: adapter-sdk-bridge
+    status: covered
+    tests:
+      - tests/integration/git_lfs_sdk_backend_test.go
+
+  - id: CT-SDK-004
+    source: docs/testing/spec-gap-analysis.md
+    clause: real-sdk-integration-test-lane
+    scope: adapter-sdk-bridge
+    status: covered
+    tests:
+      - tests/integration/git_lfs_sdk_backend_test.go
+    gaps:
+      - requires valid Proton credentials and built proton-drive-cli
+
+  - id: CT-SDK-005
+    source: docs/architecture/proton-sdk-bridge.md
+    clause: proton-drive-cli-subprocess-backend
+    scope: adapter-proton-drive-cli
+    status: covered
+    tests:
+      - tests/integration/git_lfs_sdk_backend_test.go
+      - tests/integration/git_lfs_sdk_backend_test.go
+    gaps:
+      - needs dedicated stress and failure-injection coverage
+
+  - id: CT-CLI-001
+    source: docs/architecture/subprocess-integration.md
+    clause: proton-drive-cli-subprocess-spawn-and-lifecycle
+    scope: adapter-bridge
+    status: covered
+    tests:
+      - cmd/adapter/bridge_test.go
+      - tests/integration/git_lfs_sdk_backend_test.go
+
+  - id: CT-CLI-002
+    source: docs/security/threat-model.md
+    clause: credential-injection-via-stdin
+    scope: adapter-bridge
+    status: covered
+    tests:
+      - tests/integration/credential_security_test.go
+
+  - id: CT-CLI-003
+    source: docs/architecture/subprocess-integration.md
+    clause: json-stdout-stderr-parsing
+    scope: adapter-bridge
+    status: covered
+    tests:
+      - cmd/adapter/bridge_test.go
+      - tests/integration/git_lfs_sdk_backend_test.go
+
+  - id: CT-CLI-004
+    source: docs/security/threat-model.md
+    clause: session-token-persistence
+    scope: adapter-bridge
+    status: covered
+    tests:
+      - tests/integration/credential_security_test.go
+      - tests/integration/git_lfs_sdk_backend_test.go
+
+  - id: CT-CLI-005
+    source: docs/architecture/subprocess-integration.md
+    clause: encryption-decryption-correctness
+    scope: proton-drive-cli
+    status: delegated
+    gaps:
+      - correctness delegated to proton-drive-cli submodule tests
+
+  - id: CT-CLI-006
+    source: docs/architecture/subprocess-integration.md
+    clause: process-isolation-and-crash-recovery
+    scope: adapter-bridge
+    status: covered
+    tests:
+      - cmd/adapter/bridge_test.go
+      - tests/integration/git_lfs_sdk_backend_test.go
+
+  - id: API-BATCH-001
+    source: submodules/git-lfs/docs/api/batch.md
+    clause: objects-batch-endpoint-contract
+    scope: server
+    status: not_implemented
+    gaps:
+      - no LFS API server component in this repository
+
+  - id: API-BASIC-001
+    source: submodules/git-lfs/docs/api/basic-transfers.md
+    clause: direct-upload-download-actions
+    scope: server
+    status: not_implemented
+    gaps:
+      - no LFS API server component in this repository
+
+  - id: API-LOCK-001
+    source: submodules/git-lfs/docs/api/locking.md
+    clause: lock-unlock-list
+    scope: server
+    status: not_implemented
+    gaps:
+      - no LFS API server component in this repository
+
+propagation:
+  - from: CT-002
+    to: proton-drive-cli
+    requirement: upload must preserve exact bytes from local path
+  - from: CT-003
+    to: proton-drive-cli
+    requirement: download must materialize content to local path and return it
+  - from: CT-004
+    to: proton-drive-cli
+    requirement: transfer failures must be object-scoped and typed, not process-fatal
+  - from: CT-006
+    to: proton-drive-cli
+    requirement: deterministic OID mapping required for standalone mode
+  - from: CT-CLI-001
+    to: proton-drive-cli
+    requirement: subprocess must accept JSON on stdin and return JSON envelope on stdout
+  - from: CT-CLI-002
+    to: proton-drive-cli
+    requirement: credentials must be received via stdin, never via command-line arguments
