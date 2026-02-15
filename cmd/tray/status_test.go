@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -85,6 +87,22 @@ func TestTruncateMultibyteInput(t *testing.T) {
 	t.Logf("truncate(%q, 4) = %q (len=%d)", input, got, len(got))
 }
 
+func TestSessionFilePath(t *testing.T) {
+	got := sessionFilePath()
+	if got == "" {
+		t.Fatal("expected non-empty session file path")
+	}
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatalf("cannot get home dir: %v", err)
+	}
+	expected := filepath.Join(home, ".proton-drive-cli", "session.json")
+	if got != expected {
+		t.Fatalf("sessionFilePath() = %q, expected %q", got, expected)
+	}
+}
+
 func TestTerminalCommandDarwin(t *testing.T) {
 	if runtime.GOOS != "darwin" {
 		t.Skip("darwin-only test")
@@ -102,7 +120,11 @@ func TestTerminalCommandDarwin(t *testing.T) {
 	if cmd.Args[1] != "-e" {
 		t.Fatalf("expected -e flag, got %q", cmd.Args[1])
 	}
-	if !strings.Contains(cmd.Args[2], "echo hello") {
-		t.Fatalf("expected script in AppleScript, got %q", cmd.Args[2])
+	// The AppleScript references a temp script file, not the inline script
+	if !strings.Contains(cmd.Args[2], "do script") {
+		t.Fatalf("expected 'do script' in AppleScript, got %q", cmd.Args[2])
+	}
+	if !strings.Contains(cmd.Args[2], "proton-lfs-") {
+		t.Fatalf("expected temp file reference in AppleScript, got %q", cmd.Args[2])
 	}
 }

@@ -5,12 +5,13 @@ Bridge implementation: the Go adapter (`cmd/adapter/bridge.go`) spawns `proton-d
 ## Architecture
 
 ```
-Go Adapter → proton-drive-cli subprocess (JSON stdin/stdout) → Proton API
-      ↓
-  pass-cli or git-credential (credentials)
+Go Adapter → proton-drive-cli subprocess (JSON stdin/stdout, credentialProvider field) → Proton API
+                    ↓
+        pass-cli or git-credential
+    (resolved internally by proton-drive-cli)
 ```
 
-The adapter's `BridgeClient` spawns `proton-drive-cli bridge <command>` as a subprocess, passing JSON via stdin and reading JSON from stdout. Credentials are never passed via command-line arguments.
+The adapter's `BridgeClient` spawns `proton-drive-cli bridge <command>` as a subprocess, passing JSON via stdin and reading JSON from stdout. The Go adapter sends only a `credentialProvider` name — proton-drive-cli resolves actual credentials internally. Credentials are never passed via command-line arguments.
 
 ## Subprocess Communication Protocol
 

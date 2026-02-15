@@ -552,24 +552,6 @@ func TestCleanupStaleTempFiles(t *testing.T) {
 
 // --- Untested Pure Function Tests ---
 
-func TestZeroBytes(t *testing.T) {
-	t.Run("nil slice", func(_ *testing.T) {
-		zeroBytes(nil) // must not panic
-	})
-	t.Run("empty slice", func(_ *testing.T) {
-		zeroBytes([]byte{}) // must not panic
-	})
-	t.Run("multi-byte", func(t *testing.T) {
-		b := []byte{0xAA, 0xBB, 0xCC, 0xDD}
-		zeroBytes(b)
-		for i, v := range b {
-			if v != 0 {
-				t.Fatalf("byte %d not zeroed: %x", i, v)
-			}
-		}
-	})
-}
-
 func TestCalculateFileSHA256(t *testing.T) {
 	t.Run("known content", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "test.bin")

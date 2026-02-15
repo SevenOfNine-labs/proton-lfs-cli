@@ -15,8 +15,9 @@ System Tray App (cmd/tray/)
      ↕  reads ~/.proton-git-lfs/status.json
      ↕  writes ~/.proton-git-lfs/config.json
 Go Adapter (cmd/adapter/) → proton-drive-cli (subprocess, stdin/stdout JSON) → Proton API
-     ↓
- pass-cli or git-credential (credentials)
+                                    ↓
+                        pass-cli or git-credential
+                    (credentials resolved internally)
 ```
 
 Shared configuration lives in `internal/config/` and is used by both the adapter and tray app.
@@ -27,13 +28,15 @@ The project has four main components:
    - `main.go`: Core adapter logic, message handling, protocol implementation, status reporting
    - `backend.go`: Storage backend abstraction (local and DriveCLI backends)
    - `bridge.go`: Direct subprocess client for proton-drive-cli (stdin/stdout JSON protocol)
-   - `passcli.go`: Credential resolution via pass-cli integration
    - `config_constants.go`: Thin wrapper delegating to `internal/config`
 
 2. **System Tray App** (`cmd/tray/`): Cross-platform menu bar application
-   - `main.go`: Entry point using `fyne.io/systray`
-   - `menu.go`: Menu structure, credential provider toggle, Git LFS registration
-   - `status.go`: Polls `~/.proton-git-lfs/status.json` every 5s, updates icon/text
+   - `main.go`: Entry point, `--version` flag, PATH augmentation for macOS
+   - `menu.go`: Menu structure, credential provider toggle, LFS registration, native notifications
+   - `connect.go`: "Connect to Proton" flow (unified for all credential providers)
+   - `credentials.go`: Credential verify helper (delegates to proton-drive-cli)
+   - `cli.go`: CLI subcommand handlers (login, logout, status, config, register)
+   - `status.go`: Polls status.json every 5s, updates icon/tooltip/checkmarks
    - `setup.go`: Binary discovery, autostart (macOS LaunchAgent / Linux .desktop)
    - `icons/`: Embedded 64x64 PNG icons (idle/ok/error/syncing)
 
@@ -58,6 +61,8 @@ make build-sea          # Build proton-drive-cli as standalone SEA binary (Node.
 make build-bundle       # Build all 3 components into dist/ for packaging
 make build-all          # Build adapter + tray + Git LFS submodule + proton-drive-cli
 make build-drive-cli    # Build proton-drive-cli TypeScript bridge only
+make install            # Build bundle + install (.app on macOS, ~/.local/bin on Linux)
+make uninstall          # Remove installed bundle
 ```
 
 ### Testing
@@ -101,50 +106,43 @@ The adapter supports two backends controlled by `PROTON_LFS_BACKEND`:
 
 ## Credential Resolution
 
-The adapter supports two credential providers controlled by `PROTON_CREDENTIAL_PROVIDER`:
+The adapter supports two credential providers controlled by `PROTON_CREDENTIAL_PROVIDER`. The Go adapter does **not** resolve credentials itself — it sends `{ "credentialProvider": "<name>" }` to proton-drive-cli, which handles all credential resolution internally.
 
 ### pass-cli (default)
 
-The Go adapter (`cmd/adapter/passcli.go`) resolves credentials via pass-cli:
+`proton-drive-cli` searches all Proton Pass vaults for a login item with a `proton.me` URL.
 
 ```bash
-# Environment variables
 PROTON_CREDENTIAL_PROVIDER=pass-cli    # Default
-PROTON_PASS_CLI_BIN=pass-cli           # Binary path
-PROTON_PASS_REF_ROOT=pass://Personal/Proton Git LFS
-PROTON_PASS_USERNAME_REF=pass://Personal/Proton Git LFS/username
-PROTON_PASS_PASSWORD_REF=pass://Personal/Proton Git LFS/password
+PROTON_PASS_CLI_BIN=pass-cli           # Binary path (respected by proton-drive-cli)
 ```
 
-Credentials are resolved via pass-cli. The adapter calls `pass-cli item view <reference>` and parses JSON or plaintext output.
+**Setup:**
+```bash
+pass-cli login                    # Authenticate with Proton Pass (browser OAuth)
+proton-drive credential store --provider pass-cli   # Or create entry manually
+proton-drive credential verify --provider pass-cli  # Verify entry exists
+```
 
 ### git-credential
 
 Uses Git Credential Manager (GCM) to resolve credentials from macOS Keychain, Windows Credential Manager, or Linux Secret Service:
 
 ```bash
-# Environment variable
 PROTON_CREDENTIAL_PROVIDER=git-credential
-
-# Or CLI flag
---credential-provider git-credential
+# Or CLI flag: --credential-provider git-credential
 ```
-
-In this mode, the Go adapter skips pass-cli entirely and sends `{ "credentialProvider": "git-credential" }` to proton-drive-cli via stdin. `proton-drive-cli` then resolves credentials locally via `git credential fill` — credentials never leave the local machine.
 
 **Setup:**
 ```bash
-# Store credentials in the system credential helper
 proton-drive credential store -u your.email@proton.me
-
-# Verify credentials are stored
 proton-drive credential verify
 ```
 
-**Standalone CLI commands** also accept `--credential-provider git`:
+**Standalone CLI commands** also accept `--credential-provider`:
 ```bash
 proton-drive ls / --credential-provider git
-proton-drive upload ./file.pdf /Documents --credential-provider git
+proton-drive upload ./file.pdf /Documents --credential-provider pass-cli
 ```
 
 ## proton-drive-cli Bridge
@@ -203,9 +201,8 @@ Workspace structure:
 ## Security Notes
 
 - Never commit credentials to `.env` (use `.env.example` patterns)
-- Credentials resolve via pass-cli (`pass://...` references) or git-credential (`git credential fill`)
-- Credentials flow (pass-cli): pass-cli → Go adapter → proton-drive-cli (via stdin)
-- Credentials flow (git-credential): git credential helper → proton-drive-cli (local, never over network)
+- Credentials resolve via pass-cli (vault search) or git-credential (`git credential fill`)
+- Credential flow: Go adapter sends `{ credentialProvider: "<name>" }` → proton-drive-cli resolves credentials internally (never through the Go adapter)
 - Credentials are passed via stdin to subprocesses (never command-line args)
 - Environment allowlist filters subprocess env (only PATH, HOME, NODE_*, MOCK_BRIDGE_*, etc.)
 - OID validation: `/^[a-f0-9]{64}$/i` before subprocess spawn

@@ -2,16 +2,6 @@
 
 Source of truth in code: `cmd/adapter/config_constants.go`.
 
-## Proton Pass Naming
-
-No fixed entry name is required. Any reference that resolves via `pass-cli` works.
-
-Canonical convention in this repository:
-
-- Root: `pass://Personal/Proton Git LFS`
-- Username: `${ROOT}/username`
-- Password: `${ROOT}/password`
-
 ## Environment Variables
 
 | Variable | Default | Purpose |
@@ -20,23 +10,18 @@ Canonical convention in this repository:
 | `ADAPTER_ALLOW_MOCK_TRANSFERS` | `false` | Enables mock transfer mode |
 | `PROTON_LFS_LOCAL_STORE_DIR` | empty | Local backend object root |
 | `PROTON_CREDENTIAL_PROVIDER` | `pass-cli` | Credential provider: `pass-cli` (default) or `git-credential` |
-| `PROTON_PASS_CLI_BIN` | `pass-cli` | Proton Pass CLI binary path |
-| `PROTON_PASS_REF_ROOT` | `pass://Personal/Proton Git LFS` | Pass ref root |
-| `PROTON_PASS_USERNAME_REF` | `${PROTON_PASS_REF_ROOT}/username` | Pass username ref |
-| `PROTON_PASS_PASSWORD_REF` | `${PROTON_PASS_REF_ROOT}/password` | Pass password ref |
+| `PROTON_PASS_CLI_BIN` | `pass-cli` | Proton Pass CLI binary path (passed through to proton-drive-cli) |
 | `PROTON_DRIVE_CLI_BIN` | `submodules/proton-drive-cli/dist/index.js` | Path to proton-drive-cli entry point |
 
-Credentials are resolved via the configured provider (`PROTON_CREDENTIAL_PROVIDER`). Direct environment variable fallback (`PROTON_USERNAME`/`PROTON_PASSWORD`) has been removed.
+The Go adapter does **not** resolve credentials itself. It sends `{ "credentialProvider": "<name>" }` to proton-drive-cli, which handles all credential resolution internally.
 
 ### pass-cli (default)
 
-1. `PROTON_PASS_USERNAME_REF` / `PROTON_PASS_PASSWORD_REF` via pass-cli.
-2. If only password ref is set, fallback to `pass-cli user info --output json` for username.
-3. If credentials cannot be resolved, the adapter exits with an error.
+`proton-drive-cli` searches all Proton Pass vaults for a login item with a `proton.me` URL. The `PROTON_PASS_CLI_BIN` env var is forwarded to the subprocess via the env allowlist.
 
 ### git-credential
 
-When `PROTON_CREDENTIAL_PROVIDER=git-credential`, the adapter skips pass-cli entirely and sends `{ "credentialProvider": "git-credential" }` to proton-drive-cli, which resolves credentials via `git credential fill`.
+When `PROTON_CREDENTIAL_PROVIDER=git-credential`, proton-drive-cli resolves credentials via `git credential fill`.
 
 ## Helper Script
 
@@ -45,7 +30,7 @@ pass-cli login
 eval "$(./scripts/export-pass-env.sh)"
 ```
 
-The script verifies that `pass-cli` is authenticated, validates both references, sets `PROTON_PASS_*`, and unsets plaintext credential vars.
+The script verifies that `pass-cli` is authenticated and sets `PROTON_PASS_CLI_BIN`.
 
 ## proton-drive-cli Constants
 

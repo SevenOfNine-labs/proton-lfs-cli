@@ -37,7 +37,7 @@
 **Mitigations**:
 
 - Credentials passed via stdin JSON to subprocess (not visible in `ps aux`)
-- Credential flow: pass-cli -> Go adapter -> stdin JSON -> proton-drive-cli (memory only)
+- Credential flow: Go adapter sends `credentialProvider` name → proton-drive-cli resolves pass-cli or git-credential internally (memory only)
 - **No HTTP layer** — credentials never traverse network connections, even localhost
 - **Passwords are never persisted to disk** — `saveSession()` strips `mailboxPassword` before writing
 - **Passwords are never accepted via CLI flags** — only resolved via pass-cli or git-credential
@@ -45,8 +45,7 @@
 - Session directory `0700`, session file `0600` (owner-only)
 - Error messages sanitized — no credential values in responses or logs
 - Usernames are not logged (prevents email leak to log files)
-- Pass-cli references used instead of plaintext env vars
-- Go adapter zeros credential buffers on terminate (`ZeroCredentials()`)
+- Credential resolution delegated entirely to proton-drive-cli — the Go adapter never sees raw credentials
 
 **Tests**: `tests/integration/credential_security_test.go`
 

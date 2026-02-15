@@ -60,13 +60,10 @@ func backendErrorDetails(err error) (int, string) {
 	return 500, "transfer backend error"
 }
 
-// OperationCredentials holds per-request credentials sent alongside bridge
-// commands. In pass-cli mode the adapter resolves them once and re-sends them
-// with every operation. In git-credential mode both fields are empty and
-// CredentialProvider is set.
+// OperationCredentials holds per-request credential provider info sent
+// alongside bridge commands. The provider name is passed to proton-drive-cli
+// which resolves credentials locally (git-credential, pass-cli, etc.).
 type OperationCredentials struct {
-	Username           string
-	Password           string
 	CredentialProvider string
 }
 
@@ -176,37 +173,26 @@ func (b *LocalStoreBackend) objectPath(oid string) string {
 }
 
 // DriveCLIBackend communicates directly with proton-drive-cli via subprocess.
+// Credential resolution is fully delegated to proton-drive-cli — the Go adapter
+// only passes the provider name (git-credential, pass-cli, etc.).
 type DriveCLIBackend struct {
 	bridge             *BridgeClient
-	username           []byte
-	password           []byte
 	credentialProvider string
 	authenticated      bool
 }
 
-func NewDriveCLIBackend(bridge *BridgeClient, username, password string) *DriveCLIBackend {
+// NewDriveCLIBackend creates a backend that delegates to proton-drive-cli.
+// The credentialProvider name is forwarded to proton-drive-cli which resolves
+// credentials locally.
+func NewDriveCLIBackend(bridge *BridgeClient, credentialProvider string) *DriveCLIBackend {
 	return &DriveCLIBackend{
-		bridge:   bridge,
-		username: []byte(strings.TrimSpace(username)),
-		password: []byte(strings.TrimSpace(password)),
-	}
-}
-
-// ZeroCredentials overwrites credential buffers with zeros.
-func (b *DriveCLIBackend) ZeroCredentials() {
-	for i := range b.password {
-		b.password[i] = 0
-	}
-	for i := range b.username {
-		b.username[i] = 0
+		bridge:             bridge,
+		credentialProvider: credentialProvider,
 	}
 }
 
 func (b *DriveCLIBackend) operationCredentials() OperationCredentials {
-	if b.credentialProvider == CredentialProviderGitCredential {
-		return OperationCredentials{CredentialProvider: b.credentialProvider}
-	}
-	return OperationCredentials{Username: string(b.username), Password: string(b.password)}
+	return OperationCredentials{CredentialProvider: b.credentialProvider}
 }
 
 func (b *DriveCLIBackend) Initialize(session *Session) error {
@@ -218,13 +204,6 @@ func (b *DriveCLIBackend) Initialize(session *Session) error {
 	}
 
 	creds := b.operationCredentials()
-
-	// In pass-cli mode, credentials must be present
-	if b.credentialProvider != CredentialProviderGitCredential {
-		if len(b.username) == 0 || len(b.password) == 0 {
-			return newBackendError(401, "proton credentials are required for sdk backend", nil)
-		}
-	}
 
 	if err := b.bridge.Authenticate(creds); err != nil {
 		return mapBridgeError(err, "failed to authenticate with proton drive")

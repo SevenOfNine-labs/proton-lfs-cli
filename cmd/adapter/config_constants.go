@@ -20,8 +20,6 @@ const (
 const (
 	DefaultDriveCLIBin        = config.DefaultDriveCLIBin
 	DefaultStorageBase        = config.DefaultStorageBase
-	DefaultPassCLIBinary      = config.DefaultPassCLIBinary
-	DefaultPassRefRoot        = config.DefaultPassRefRoot
 	DefaultCredentialProvider = config.DefaultCredentialProvider
 )
 
@@ -34,10 +32,6 @@ const (
 	EnvBackend            = config.EnvBackend
 	EnvAllowMockTransfers = config.EnvAllowMockTransfers
 	EnvLocalStoreDir      = config.EnvLocalStoreDir
-	EnvPassCLIBin         = config.EnvPassCLIBin
-	EnvPassRefRoot        = config.EnvPassRefRoot
-	EnvPassUsernameRef    = config.EnvPassUsernameRef
-	EnvPassPasswordRef    = config.EnvPassPasswordRef
 	EnvCredentialProvider = config.EnvCredentialProvider
 )
 
@@ -51,20 +45,4 @@ func envOrDefault(key, fallback string) string {
 
 func envBoolOrDefault(key string, fallback bool) bool {
 	return config.EnvBoolOrDefault(key, fallback)
-}
-
-func passRefRootFromEnv() string {
-	return config.PassRefRootFromEnv()
-}
-
-func normalizePassRefRoot(root string) string {
-	return config.NormalizePassRefRoot(root)
-}
-
-func defaultPassUsernameRef(root string) string {
-	return config.DefaultPassUsernameRef(root)
-}
-
-func defaultPassPasswordRef(root string) string {
-	return config.DefaultPassPasswordRef(root)
 }

@@ -15,6 +15,7 @@ GO_CACHE_DIR := .cache/go-build
 
 .PHONY: help setup setup-env install-deps \
 	build build-adapter build-tray build-lfs build-drive-cli build-sea build-all build-bundle \
+	install uninstall \
 	test test-adapter test-tray test-lfs test-integration test-integration-timeout test-integration-stress test-integration-sdk test-e2e-mock test-e2e-real test-all \
 	pass-env check-sdk-prereqs check-sdk-real-prereqs \
 	fmt lint lint-go \
@@ -84,6 +85,77 @@ build-bundle: build-adapter build-tray build-sea ## Build all components into di
 	@cp bin/proton-git-lfs-tray dist/ 2>/dev/null || true
 	@cp bin/proton-drive-cli dist/ 2>/dev/null || true
 	@echo "Bundle assembled in dist/"
+
+# ---------- install / uninstall ----------
+
+INSTALL_APP ?= /Applications/ProtonGitLFS.app
+INSTALL_BIN ?= $(HOME)/.local/bin
+
+ifeq ($(shell uname -s),Darwin)
+
+install: build-bundle ## Install bundle (macOS: .app to /Applications, or set INSTALL_APP)
+	@mkdir -p "$(INSTALL_APP)/Contents/MacOS" "$(INSTALL_APP)/Contents/Helpers" "$(INSTALL_APP)/Contents/Resources"
+	@cp dist/proton-git-lfs-tray      "$(INSTALL_APP)/Contents/MacOS/proton-git-lfs-tray"
+	@cp dist/git-lfs-proton-adapter   "$(INSTALL_APP)/Contents/Helpers/git-lfs-proton-adapter"
+	@cp dist/proton-drive-cli         "$(INSTALL_APP)/Contents/Helpers/proton-drive-cli"
+	@chmod +x "$(INSTALL_APP)/Contents/MacOS/proton-git-lfs-tray" \
+		"$(INSTALL_APP)/Contents/Helpers/git-lfs-proton-adapter" \
+		"$(INSTALL_APP)/Contents/Helpers/proton-drive-cli"
+	@bash scripts/ensure-info-plist.sh "$(INSTALL_APP)/Contents/Info.plist" "$(VERSION)"
+	@codesign --force --deep --sign - "$(INSTALL_APP)"
+	@xattr -dr com.apple.quarantine "$(INSTALL_APP)" 2>/dev/null || true
+	@mkdir -p "$(INSTALL_BIN)"
+	@ln -sf "$(INSTALL_APP)/Contents/MacOS/proton-git-lfs-tray" "$(INSTALL_BIN)/proton-git-lfs"
+	@ln -sf "$(INSTALL_APP)/Contents/Helpers/proton-drive-cli" "$(INSTALL_BIN)/proton-drive-cli"
+	@echo "Installed to $(INSTALL_APP)"
+	@echo "CLI: $(INSTALL_BIN)/proton-git-lfs"
+	@echo "CLI: $(INSTALL_BIN)/proton-drive-cli"
+
+uninstall: ## Remove installed .app bundle
+	rm -rf "$(INSTALL_APP)"
+	rm -f "$(INSTALL_BIN)/proton-git-lfs" "$(INSTALL_BIN)/proton-drive-cli"
+	@echo "Removed $(INSTALL_APP)"
+
+else
+
+install: build-bundle ## Install bundle (Linux: binaries to ~/.local/bin, or set INSTALL_BIN)
+	@if uname -s | grep -qiE 'mingw|msys|cygwin'; then \
+		echo ""; \
+		echo "Error: 'make install' is not yet supported on Windows."; \
+		echo ""; \
+		echo "The built binaries are in dist/:"; \
+		echo "  dist/git-lfs-proton-adapter.exe"; \
+		echo "  dist/proton-git-lfs-tray.exe"; \
+		echo "  dist/proton-drive-cli.exe"; \
+		echo ""; \
+		echo "Copy them to a directory on your PATH, or use the .zip from GitHub Releases."; \
+		echo ""; \
+		exit 1; \
+	fi
+	@mkdir -p "$(INSTALL_BIN)"
+	@cp dist/proton-git-lfs-tray    "$(INSTALL_BIN)/proton-git-lfs-tray"
+	@cp dist/git-lfs-proton-adapter "$(INSTALL_BIN)/git-lfs-proton-adapter"
+	@cp dist/proton-drive-cli       "$(INSTALL_BIN)/proton-drive-cli"
+	@chmod +x "$(INSTALL_BIN)/proton-git-lfs-tray" \
+		"$(INSTALL_BIN)/proton-drive-cli" \
+		"$(INSTALL_BIN)/git-lfs-proton-adapter"
+	@ln -sf "$(INSTALL_BIN)/proton-git-lfs-tray" "$(INSTALL_BIN)/proton-git-lfs"
+	@echo "Installed to $(INSTALL_BIN)"
+
+uninstall: ## Remove installed binaries
+	@if uname -s | grep -qiE 'mingw|msys|cygwin'; then \
+		echo "Error: 'make uninstall' is not yet supported on Windows."; \
+		exit 1; \
+	fi
+	rm -f "$(INSTALL_BIN)/proton-git-lfs-tray" \
+		"$(INSTALL_BIN)/git-lfs-proton-adapter" \
+		"$(INSTALL_BIN)/proton-drive-cli" \
+		"$(INSTALL_BIN)/proton-git-lfs"
+	@echo "Removed binaries from $(INSTALL_BIN)"
+
+endif
+
+# ---------- end install / uninstall ----------
 
 build-lfs: ## Build Git LFS submodule
 	@if [ ! -d $(GIT_LFS_DIR) ]; then \

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"strings"
 	"testing"
 	"time"
 )
@@ -36,12 +35,6 @@ func TestDriveCLIBackendGitCredentialModeOperationCredentials(t *testing.T) {
 	if creds.CredentialProvider != CredentialProviderGitCredential {
 		t.Errorf("expected credentialProvider=%q, got %q", CredentialProviderGitCredential, creds.CredentialProvider)
 	}
-	if creds.Username != "" {
-		t.Errorf("username should be empty in git-credential mode, got %q", creds.Username)
-	}
-	if creds.Password != "" {
-		t.Errorf("password should be empty in git-credential mode, got %q", creds.Password)
-	}
 }
 
 func TestCredentialProviderConstants(t *testing.T) {
@@ -56,8 +49,9 @@ func TestCredentialProviderConstants(t *testing.T) {
 	}
 }
 
-func TestDriveCLIBackendFallsBackToPassCLI(t *testing.T) {
-	// Without credentialProvider set, it should require username/password
+func TestDriveCLIBackendEmptyProvider(t *testing.T) {
+	// Without credentialProvider set, auth is delegated to proton-drive-cli
+	// which will attempt resolution itself (mock bridge returns ok)
 	bc := helperBridgeClient(t)
 	backend := &DriveCLIBackend{
 		bridge: bc,
@@ -65,24 +59,18 @@ func TestDriveCLIBackendFallsBackToPassCLI(t *testing.T) {
 
 	session := &Session{Initialized: true, CreatedAt: time.Now()}
 	err := backend.Initialize(session)
-	if err == nil {
-		t.Fatal("expected error when no credentials and no credential provider")
-	}
-	if !strings.Contains(err.Error(), "credentials are required") {
-		t.Errorf("unexpected error: %v", err)
+	if err != nil {
+		t.Fatalf("Initialize with empty provider should succeed (delegated): %v", err)
 	}
 }
 
 func TestBuildCredentialsGitCredentialMode(t *testing.T) {
-	creds := OperationCredentials{CredentialProvider: "git-credential"}
+	creds := OperationCredentials{CredentialProvider: CredentialProviderGitCredential}
 	m := buildCredentials(creds, "LFS", "v1")
-	if m["credentialProvider"] != "git-credential" {
+	if m["credentialProvider"] != CredentialProviderGitCredential {
 		t.Errorf("expected credentialProvider='git-credential', got %v", m)
 	}
-	if _, ok := m["username"]; ok {
-		t.Error("username should not be present in git-credential mode")
-	}
-	if _, ok := m["password"]; ok {
-		t.Error("password should not be present in git-credential mode")
+	if m["storageBase"] != "LFS" {
+		t.Errorf("expected storageBase=LFS, got %v", m["storageBase"])
 	}
 }

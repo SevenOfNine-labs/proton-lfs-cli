@@ -44,32 +44,6 @@ func TestEnvBoolOrDefault(t *testing.T) {
 	}
 }
 
-func TestNormalizePassRefRoot(t *testing.T) {
-	cases := []struct{ in, want string }{
-		{"pass://Personal/LFS", "pass://Personal/LFS"},
-		{"pass://Personal/LFS/", "pass://Personal/LFS"},
-		{"  pass://Personal/LFS/  ", "pass://Personal/LFS"},
-	}
-	for _, tc := range cases {
-		if got := NormalizePassRefRoot(tc.in); got != tc.want {
-			t.Fatalf("NormalizePassRefRoot(%q) = %q, want %q", tc.in, got, tc.want)
-		}
-	}
-}
-
-func TestDefaultPassRefs(t *testing.T) {
-	root := "pass://Personal/LFS"
-	if got := DefaultPassUsernameRef(root); got != root+"/username" {
-		t.Fatalf("got %q", got)
-	}
-	if got := DefaultPassPasswordRef(root); got != root+"/password" {
-		t.Fatalf("got %q", got)
-	}
-	if got := DefaultPassUsernameRef(""); got != "" {
-		t.Fatalf("empty root should return empty, got %q", got)
-	}
-}
-
 func TestAppDirPath(t *testing.T) {
 	p := AppDirPath()
 	if p == "" {

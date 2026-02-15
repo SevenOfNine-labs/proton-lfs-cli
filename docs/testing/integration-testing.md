@@ -28,7 +28,7 @@ Integration tests validate Git LFS client behavior against the adapter runtime a
 
 ## Credentials For SDK Tests
 
-Credentials are resolved exclusively via pass-cli. Direct environment variable fallback is not supported.
+Credentials are resolved by proton-drive-cli via the configured provider (`pass-cli` or `git-credential`).
 
 Preferred path:
 
@@ -56,11 +56,8 @@ Optional (accounts requiring explicit data password or 2FA):
 
 If you are testing with a personal Proton account:
 
-1. Store credentials in Proton Pass.
-1. Use the default references:
-   - `pass://Personal/Proton Git LFS/username`
-   - `pass://Personal/Proton Git LFS/password`
-1. Or export custom references before tests:
+1. Store credentials in Proton Pass (a login item with a `proton.me` URL in any vault).
+1. Or export custom pass-cli configuration before tests:
 
 ```bash
 eval "$(./scripts/export-pass-env.sh --ref-root 'pass://Personal/Your Entry')"

@@ -9,16 +9,17 @@ Date: 2026-02-10
 - SDK backend path is wired and covered with integration tests against `proton-drive-cli` (direct subprocess).
 - The Go adapter spawns `proton-drive-cli bridge <command>` directly via stdin/stdout JSON, replacing the former Node.js HTTP bridge layer.
 - SDK integration suite covers upload, download, list, and token refresh operations.
-- Proton Pass reference-based credential flow is implemented (`PROTON_PASS_*`).
+- Credential providers (`pass-cli`, `git-credential`) are handled by proton-drive-cli's `src/credentials/` module.
 - Security hardening: OID validation, path traversal prevention, subprocess pool (max 10), per-operation timeout (5 min).
 - Security tests: command injection, rate limiting, credential flow, session file permissions.
 
 ## Architecture
 
 ```
-Go Adapter → proton-drive-cli subprocess (stdin/stdout JSON) → Proton API
-      ↓
-  pass-cli (credentials)
+Go Adapter → proton-drive-cli subprocess (stdin/stdout JSON, credentialProvider field) → Proton API
+                    ↓
+        pass-cli or git-credential
+    (resolved internally by proton-drive-cli)
 ```
 
 - **No .NET SDK or Node.js HTTP bridge required.** The Go adapter spawns `proton-drive-cli bridge <command>` directly.

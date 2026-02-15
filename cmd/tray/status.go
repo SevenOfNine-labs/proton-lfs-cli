@@ -2,6 +2,9 @@ package main
 
 import (
 	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -11,10 +14,12 @@ import (
 )
 
 const pollInterval = 5 * time.Second
+const refreshInterval = 15 * time.Minute
 
 var (
-	stopCh   chan struct{}
-	stopOnce sync.Once
+	stopCh      chan struct{}
+	stopOnce    sync.Once
+	lastRefresh time.Time
 )
 
 func startStatusWatcher() {
@@ -32,57 +37,113 @@ func watchLoop() {
 
 	// Initial read
 	applyStatus()
+	applyLoginStatus()
+	applyLFSStatus()
 
 	for {
 		select {
 		case <-ticker.C:
 			applyStatus()
+			applyLoginStatus()
+			applyLFSStatus()
+			maybeRefreshSession()
 		case <-stopCh:
 			return
 		}
 	}
 }
 
+// sessionFilePath returns the path to the proton-drive-cli session file.
+func sessionFilePath() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".proton-drive-cli", "session.json")
+}
+
+// applyLoginStatus checks whether a session file exists and updates the
+// Connect menu item checkmark.
+func applyLoginStatus() {
+	applyConnectStatus(isSessionActive())
+}
+
+// applyLFSStatus checks whether the Proton LFS adapter is registered in
+// git global config and updates the Register menu item checkmark.
+func applyLFSStatus() {
+	applyRegisterStatus(isLFSEnabled())
+}
+
+// maybeRefreshSession proactively refreshes the Proton session token
+// every 15 minutes to keep the session alive. This calls POST /auth/v4/refresh
+// (NOT a login attempt) — it never triggers CAPTCHA or rate-limiting.
+func maybeRefreshSession() {
+	if time.Since(lastRefresh) < refreshInterval {
+		return
+	}
+
+	// Check if a session file exists (no point refreshing if not logged in)
+	sf := sessionFilePath()
+	if sf == "" {
+		return
+	}
+	if _, err := os.Stat(sf); os.IsNotExist(err) {
+		return
+	}
+
+	driveCLI := discoverDriveCLIBinary()
+	if driveCLI == "" {
+		return
+	}
+
+	lastRefresh = time.Now()
+
+	// Spawn in background — don't block the status poll loop
+	go func() {
+		cmd := exec.Command(driveCLI, "session", "refresh")
+		_ = cmd.Run()
+	}()
+}
+
 func applyStatus() {
 	report, err := config.ReadStatus()
 	if err != nil {
-		mStatus.SetTitle("Status: No adapter activity")
 		systray.SetIcon(iconIdle)
 		systray.SetTemplateIcon(iconIdle, iconIdle)
+		systray.SetTooltip("Proton Git LFS")
 		return
 	}
 
 	switch report.State {
-	case config.StateIdle:
-		mStatus.SetTitle("Status: Ready")
-		systray.SetIcon(iconIdle)
-		systray.SetTemplateIcon(iconIdle, iconIdle)
-	case config.StateOK:
-		mStatus.SetTitle("Status: OK")
+	case config.StateIdle, config.StateOK:
 		systray.SetIcon(iconOK)
 		systray.SetTemplateIcon(iconOK, iconOK)
 	case config.StateError:
-		msg := "Status: Error"
-		if report.Error != "" {
-			msg = fmt.Sprintf("Status: Error — %s", truncate(report.Error, 40))
-		}
-		mStatus.SetTitle(msg)
 		systray.SetIcon(iconError)
 		systray.SetTemplateIcon(iconError, iconError)
 	case config.StateTransferring:
-		mStatus.SetTitle("Status: Transferring…")
 		systray.SetIcon(iconSyncing)
 		systray.SetTemplateIcon(iconSyncing, iconSyncing)
 	}
 
-	if !report.Timestamp.IsZero() {
-		// Only show "Last Transfer" for actual data operations, not init/terminate
-		switch report.LastOp {
-		case "upload", "download":
-			mLastTransfer.SetTitle(fmt.Sprintf("Last Transfer: %s (%s)", relativeTime(report.Timestamp), report.LastOp))
-		default:
-			mLastTransfer.SetTitle(fmt.Sprintf("Last Activity: %s", relativeTime(report.Timestamp)))
+	// Update tooltip with transfer context
+	switch {
+	case report.State == config.StateTransferring && report.LastOp == "upload":
+		systray.SetTooltip("Proton Git LFS — Uploading…")
+	case report.State == config.StateTransferring && report.LastOp == "download":
+		systray.SetTooltip("Proton Git LFS — Downloading…")
+	case report.State == config.StateTransferring:
+		systray.SetTooltip("Proton Git LFS — Transferring…")
+	case report.State == config.StateError:
+		if report.Error != "" {
+			systray.SetTooltip(fmt.Sprintf("Proton Git LFS — Error: %s", truncate(report.Error, 60)))
+		} else {
+			systray.SetTooltip("Proton Git LFS — Error")
 		}
+	case report.State == config.StateOK && !report.Timestamp.IsZero():
+		systray.SetTooltip(fmt.Sprintf("Proton Git LFS — Last %s %s", report.LastOp, relativeTime(report.Timestamp)))
+	default:
+		systray.SetTooltip("Proton Git LFS")
 	}
 }
 

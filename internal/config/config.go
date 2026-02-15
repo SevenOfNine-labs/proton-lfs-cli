@@ -22,12 +22,14 @@ const (
 	CredentialProviderGitCredential = "git-credential"
 )
 
+// ProtonCredentialHost is the host used for git credential fill/approve and
+// Proton Pass URL matching. Must match PROTON_CREDENTIAL_HOST in proton-drive-cli.
+const ProtonCredentialHost = "proton.me"
+
 // Default values
 const (
 	DefaultDriveCLIBin        = "submodules/proton-drive-cli/dist/index.js"
 	DefaultStorageBase        = "LFS"
-	DefaultPassCLIBinary      = "pass-cli"
-	DefaultPassRefRoot        = "pass://Personal/Proton Git LFS"
 	DefaultCredentialProvider = CredentialProviderPassCLI
 )
 
@@ -40,10 +42,6 @@ const (
 	EnvBackend            = "PROTON_LFS_BACKEND"
 	EnvAllowMockTransfers = "ADAPTER_ALLOW_MOCK_TRANSFERS"
 	EnvLocalStoreDir      = "PROTON_LFS_LOCAL_STORE_DIR"
-	EnvPassCLIBin         = "PROTON_PASS_CLI_BIN"
-	EnvPassRefRoot        = "PROTON_PASS_REF_ROOT"
-	EnvPassUsernameRef    = "PROTON_PASS_USERNAME_REF"
-	EnvPassPasswordRef    = "PROTON_PASS_PASSWORD_REF"
 	EnvCredentialProvider = "PROTON_CREDENTIAL_PROVIDER"
 	EnvStatusFile         = "PROTON_LFS_STATUS_FILE"
 )
@@ -104,33 +102,4 @@ func EnvBoolOrDefault(key string, fallback bool) bool {
 		return fallback
 	}
 	return parsed
-}
-
-// PassRefRootFromEnv returns the normalized pass reference root.
-func PassRefRootFromEnv() string {
-	root := EnvOrDefault(EnvPassRefRoot, DefaultPassRefRoot)
-	return NormalizePassRefRoot(root)
-}
-
-// NormalizePassRefRoot trims whitespace and trailing slashes from a pass ref root.
-func NormalizePassRefRoot(root string) string {
-	root = strings.TrimSpace(root)
-	root = strings.TrimRight(root, "/")
-	return root
-}
-
-// DefaultPassUsernameRef returns the default username reference for a given root.
-func DefaultPassUsernameRef(root string) string {
-	if root == "" {
-		return ""
-	}
-	return root + "/username"
-}
-
-// DefaultPassPasswordRef returns the default password reference for a given root.
-func DefaultPassPasswordRef(root string) string {
-	if root == "" {
-		return ""
-	}
-	return root + "/password"
 }

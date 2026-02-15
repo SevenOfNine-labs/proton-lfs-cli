@@ -6,7 +6,7 @@ This guide is for development and CI environments. Production rollout is blocked
 
 - Go toolchain available.
 - `git-lfs` installed and on `PATH`.
-- Node.js 18+ for building `proton-drive-cli` and running SDK tests.
+- Node.js 25+ for building `proton-drive-cli` SEA binary and running SDK tests.
 - `pass-cli` for credential management.
 
 No .NET SDK required.

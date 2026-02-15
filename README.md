@@ -13,10 +13,10 @@ Pre-alpha Git LFS custom transfer backend for Proton Drive.
 ## Prerequisites
 
 - Go 1.25+
-- Node.js 18+
+- Node.js 25+ (for SEA binary build)
 - Yarn 4+ (via Corepack) or npm
 - git-lfs
-- pass-cli (for credential management)
+- pass-cli (for credential management, or use git-credential)
 
 No .NET SDK required.
 
@@ -29,9 +29,10 @@ See **[USAGE.md](USAGE.md)** for the complete user guide — installation, repos
 ```bash
 git submodule update --init --recursive
 make setup
-make build-all    # Builds Go adapter, Git LFS, and proton-drive-cli
+make build-all    # Builds Go adapter, tray app, Git LFS, and proton-drive-cli
 make test
 make test-integration
+make install      # Install .app bundle (macOS) or binaries (Linux)
 ```
 
 Root JS dependency install (Yarn 4 via Corepack):
@@ -113,6 +114,8 @@ Canonical reference root is `pass://Personal/Proton Git LFS`.
 ## Repository Layout
 
 - `cmd/adapter/`: Go custom transfer adapter (spawns proton-drive-cli directly for SDK backend).
+- `cmd/tray/`: System tray app (menu bar status, credential setup, Connect flow).
+- `internal/config/`: Shared constants and helpers (adapter + tray).
 - `tests/integration/`: black-box Git LFS integration tests.
 - `docs/`: project plan, architecture, testing, and operations docs.
 - `submodules/`: upstream references (`git-lfs`, `pass-cli`, `proton-drive-cli`).

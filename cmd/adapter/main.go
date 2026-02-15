@@ -61,11 +61,6 @@ type Adapter struct {
 	backendKind        string
 	backend            TransferBackend
 	credentialProvider string
-	protonUsername     []byte
-	protonPassword     []byte
-	protonPassCLIBin   string
-	protonPassUserRef  string
-	protonPassPassRef  string
 }
 
 // Message received from Git LFS
@@ -113,22 +108,12 @@ type Session struct {
 
 // NewAdapter creates a new adapter instance
 func NewAdapter() *Adapter {
-	passRefRoot := passRefRootFromEnv()
-	passUserRef := envOrDefault(EnvPassUsernameRef, defaultPassUsernameRef(passRefRoot))
-	passPassRef := envOrDefault(EnvPassPasswordRef, defaultPassPasswordRef(passRefRoot))
-
 	adapter := &Adapter{
 		logger:             log.New(os.Stderr, Name+": ", log.LstdFlags),
 		currentOperation:   "",
 		allowMockTransfers: false,
 		localStoreDir:      envTrim(EnvLocalStoreDir),
 		backendKind:        BackendLocal,
-		protonPassCLIBin:   envTrim(EnvPassCLIBin),
-		protonPassUserRef:  passUserRef,
-		protonPassPassRef:  passPassRef,
-	}
-	if adapter.protonPassCLIBin == "" {
-		adapter.protonPassCLIBin = DefaultPassCLIBinary
 	}
 	adapter.backend = NewLocalStoreBackend(adapter.localStoreDir)
 	return adapter
@@ -307,29 +292,12 @@ func (a *Adapter) handleDownload(msg *InboundMessage, enc *json.Encoder) error {
 	})
 }
 
-// handleTerminate closes the transfer session and zeros credentials
+// handleTerminate closes the transfer session
 func (a *Adapter) handleTerminate(_ *InboundMessage, _ *json.Encoder) error {
 	a.logger.Println("Terminating adapter")
 	a.session = nil
-	a.zeroCredentials()
 	_ = config.WriteStatus(config.StatusReport{State: config.StateIdle, LastOp: "terminate"})
 	return nil
-}
-
-// zeroCredentials overwrites in-memory credential buffers with zeros.
-func (a *Adapter) zeroCredentials() {
-	zeroBytes(a.protonUsername)
-	zeroBytes(a.protonPassword)
-	if cliBackend, ok := a.backend.(*DriveCLIBackend); ok {
-		cliBackend.ZeroCredentials()
-	}
-}
-
-// zeroBytes overwrites every element of a byte slice with zero.
-func zeroBytes(b []byte) {
-	for i := range b {
-		b[i] = 0
-	}
 }
 
 func (a *Adapter) validateTransferRequest(msg *InboundMessage, requirePath bool) error {
@@ -620,7 +588,8 @@ BACKENDS
 
 CREDENTIAL PROVIDERS (sdk backend only)
     pass-cli (default)
-            Credentials resolved from Proton Pass CLI at startup.
+            Credentials resolved by proton-drive-cli via Proton Pass CLI.
+            Setup: pass-cli login && proton-drive credential store --provider pass-cli
     git-credential
             Credentials resolved by proton-drive-cli via git credential fill.
             Setup: proton-drive credential store -u <email>
@@ -643,10 +612,6 @@ ENVIRONMENT VARIABLES
     PROTON_LFS_BACKEND             Backend: local or sdk (default: local)
     PROTON_LFS_LOCAL_STORE_DIR     Local store directory
     PROTON_CREDENTIAL_PROVIDER     Credential provider: pass-cli or git-credential
-    PROTON_PASS_CLI_BIN            pass-cli binary path (default: pass-cli)
-    PROTON_PASS_REF_ROOT           Pass reference root
-    PROTON_PASS_USERNAME_REF       Pass username reference
-    PROTON_PASS_PASSWORD_REF       Pass password reference
     PROTON_DRIVE_CLI_BIN           proton-drive-cli path
     NODE_BIN                       Node.js binary path
     LFS_STORAGE_BASE               Remote storage base folder (default: LFS)
@@ -681,16 +646,6 @@ func main() {
 	backend := flag.String("backend", defaultBackend, "Transfer backend to use: local or sdk")
 	allowMockTransfers := flag.Bool("allow-mock-transfers", envBoolOrDefault(EnvAllowMockTransfers, false), "Allow mock upload/download behavior (simulation only)")
 	localStoreDir := flag.String("local-store-dir", envTrim(EnvLocalStoreDir), "Local object store directory used for standalone transfers")
-	defaultPassCLIBin := envTrim(EnvPassCLIBin)
-	if defaultPassCLIBin == "" {
-		defaultPassCLIBin = DefaultPassCLIBinary
-	}
-	defaultPassRefRoot := passRefRootFromEnv()
-	defaultPassUserRef := envOrDefault(EnvPassUsernameRef, defaultPassUsernameRef(defaultPassRefRoot))
-	defaultPassPassRef := envOrDefault(EnvPassPasswordRef, defaultPassPasswordRef(defaultPassRefRoot))
-	protonPassCLIBin := flag.String("proton-pass-cli", defaultPassCLIBin, "Path to pass-cli binary used to resolve sdk credentials")
-	protonPassUserRef := flag.String("proton-pass-username-ref", defaultPassUserRef, "pass-cli secret reference for Proton username (e.g. pass://Vault/Item/username)")
-	protonPassPassRef := flag.String("proton-pass-password-ref", defaultPassPassRef, "pass-cli secret reference for Proton password (e.g. pass://Vault/Item/password)")
 	defaultCredProvider := envOrDefault(EnvCredentialProvider, DefaultCredentialProvider)
 	credentialProvider := flag.String("credential-provider", defaultCredProvider, "Credential provider: pass-cli (default) or git-credential")
 	debug := flag.Bool("debug", false, "Enable debug logging")
@@ -711,25 +666,9 @@ func main() {
 	if adapter.backendKind == "" {
 		adapter.backendKind = BackendLocal
 	}
-	adapter.protonPassCLIBin = strings.TrimSpace(*protonPassCLIBin)
-	if adapter.protonPassCLIBin == "" {
-		adapter.protonPassCLIBin = DefaultPassCLIBinary
-	}
-	adapter.protonPassUserRef = strings.TrimSpace(*protonPassUserRef)
-	adapter.protonPassPassRef = strings.TrimSpace(*protonPassPassRef)
 	adapter.credentialProvider = strings.ToLower(strings.TrimSpace(*credentialProvider))
 	if adapter.credentialProvider == "" {
 		adapter.credentialProvider = DefaultCredentialProvider
-	}
-
-	if adapter.backendKind == BackendSDK {
-		if adapter.credentialProvider != CredentialProviderGitCredential {
-			// pass-cli mode: resolve credentials at startup
-			if err := adapter.resolveSDKCredentials(); err != nil {
-				fmt.Fprintf(os.Stderr, "failed to resolve sdk credentials: %v\n", err)
-				os.Exit(2)
-			}
-		}
 	}
 
 	switch adapter.backendKind {
@@ -742,18 +681,7 @@ func main() {
 			AppVersion:  envTrim(EnvAppVersion),
 		}
 		bridge := NewBridgeClient(bridgeCfg)
-
-		if adapter.credentialProvider == CredentialProviderGitCredential {
-			b := NewDriveCLIBackend(bridge, "", "")
-			b.credentialProvider = CredentialProviderGitCredential
-			adapter.backend = b
-		} else {
-			adapter.backend = NewDriveCLIBackend(
-				bridge,
-				string(adapter.protonUsername),
-				string(adapter.protonPassword),
-			)
-		}
+		adapter.backend = NewDriveCLIBackend(bridge, adapter.credentialProvider)
 	default:
 		fmt.Fprintf(os.Stderr, "invalid backend %q (supported: local, sdk)\n", adapter.backendKind)
 		os.Exit(2)

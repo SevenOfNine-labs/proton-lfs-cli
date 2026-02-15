@@ -236,17 +236,11 @@ func parseBridgeOutput(stdout, _ []byte) (*BridgeResponse, error) {
 }
 
 // buildCredentials creates the credential portion of a bridge request.
+// Always sends credentialProvider — proton-drive-cli resolves credentials locally.
 func buildCredentials(creds OperationCredentials, storageBase, appVersion string) map[string]any {
 	m := map[string]any{}
 	if creds.CredentialProvider != "" {
 		m["credentialProvider"] = creds.CredentialProvider
-	} else {
-		if creds.Username != "" {
-			m["username"] = creds.Username
-		}
-		if creds.Password != "" {
-			m["password"] = creds.Password
-		}
 	}
 	if storageBase != "" {
 		m["storageBase"] = storageBase

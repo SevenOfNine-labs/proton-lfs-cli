@@ -158,7 +158,7 @@ func helperBridgeClient(t *testing.T, extraEnv ...string) *BridgeClient {
 
 func TestBridgeAuthenticate(t *testing.T) {
 	bc := helperBridgeClient(t)
-	creds := OperationCredentials{Username: "user@test.com", Password: "secret"}
+	creds := OperationCredentials{CredentialProvider: CredentialProviderPassCLI}
 	if err := bc.Authenticate(creds); err != nil {
 		t.Fatalf("Authenticate failed: %v", err)
 	}
@@ -166,7 +166,7 @@ func TestBridgeAuthenticate(t *testing.T) {
 
 func TestBridgeInitLFSStorage(t *testing.T) {
 	bc := helperBridgeClient(t)
-	creds := OperationCredentials{Username: "user@test.com", Password: "secret"}
+	creds := OperationCredentials{CredentialProvider: CredentialProviderPassCLI}
 	if err := bc.InitLFSStorage(creds); err != nil {
 		t.Fatalf("InitLFSStorage failed: %v", err)
 	}
@@ -174,7 +174,7 @@ func TestBridgeInitLFSStorage(t *testing.T) {
 
 func TestBridgeUpload(t *testing.T) {
 	bc := helperBridgeClient(t)
-	creds := OperationCredentials{Username: "user@test.com", Password: "secret"}
+	creds := OperationCredentials{CredentialProvider: CredentialProviderPassCLI}
 	if err := bc.Upload(creds, validOID, "/tmp/test.bin"); err != nil {
 		t.Fatalf("Upload failed: %v", err)
 	}
@@ -182,7 +182,7 @@ func TestBridgeUpload(t *testing.T) {
 
 func TestBridgeDownload(t *testing.T) {
 	bc := helperBridgeClient(t)
-	creds := OperationCredentials{Username: "user@test.com", Password: "secret"}
+	creds := OperationCredentials{CredentialProvider: CredentialProviderPassCLI}
 	tmpPath := t.TempDir() + "/download.bin"
 	if err := bc.Download(creds, validOID, tmpPath); err != nil {
 		t.Fatalf("Download failed: %v", err)
@@ -198,7 +198,7 @@ func TestBridgeDownload(t *testing.T) {
 
 func TestBridgeExists(t *testing.T) {
 	bc := helperBridgeClient(t)
-	creds := OperationCredentials{Username: "user@test.com", Password: "secret"}
+	creds := OperationCredentials{CredentialProvider: CredentialProviderPassCLI}
 	exists, err := bc.Exists(creds, validOID)
 	if err != nil {
 		t.Fatalf("Exists failed: %v", err)
@@ -210,7 +210,7 @@ func TestBridgeExists(t *testing.T) {
 
 func TestBridgeExistsNotFound(t *testing.T) {
 	bc := helperBridgeClient(t, "MOCK_BRIDGE_EXISTS_RESULT=false")
-	creds := OperationCredentials{Username: "user@test.com", Password: "secret"}
+	creds := OperationCredentials{CredentialProvider: CredentialProviderPassCLI}
 	exists, err := bc.Exists(creds, validOID)
 	if err != nil {
 		t.Fatalf("Exists should not error for 404: %v", err)
@@ -222,7 +222,7 @@ func TestBridgeExistsNotFound(t *testing.T) {
 
 func TestBridgeErrorMapping401(t *testing.T) {
 	bc := helperBridgeClient(t, "MOCK_BRIDGE_ERROR=unauthorized", "MOCK_BRIDGE_ERROR_CODE=401")
-	creds := OperationCredentials{Username: "user@test.com", Password: "secret"}
+	creds := OperationCredentials{CredentialProvider: CredentialProviderPassCLI}
 	err := bc.Authenticate(creds)
 	if err == nil {
 		t.Fatal("expected error")
@@ -234,7 +234,7 @@ func TestBridgeErrorMapping401(t *testing.T) {
 
 func TestBridgeErrorMapping404(t *testing.T) {
 	bc := helperBridgeClient(t, "MOCK_BRIDGE_ERROR=not found", "MOCK_BRIDGE_ERROR_CODE=404")
-	creds := OperationCredentials{Username: "user@test.com", Password: "secret"}
+	creds := OperationCredentials{CredentialProvider: CredentialProviderPassCLI}
 	err := bc.Upload(creds, validOID, "/tmp/test.bin")
 	if err == nil {
 		t.Fatal("expected error")
@@ -246,7 +246,7 @@ func TestBridgeErrorMapping404(t *testing.T) {
 
 func TestBridgeErrorMapping407(t *testing.T) {
 	bc := helperBridgeClient(t, "MOCK_BRIDGE_ERROR=captcha", "MOCK_BRIDGE_ERROR_CODE=407")
-	creds := OperationCredentials{Username: "user@test.com", Password: "secret"}
+	creds := OperationCredentials{CredentialProvider: CredentialProviderPassCLI}
 	err := bc.Authenticate(creds)
 	if err == nil {
 		t.Fatal("expected error")
@@ -258,7 +258,7 @@ func TestBridgeErrorMapping407(t *testing.T) {
 
 func TestBridgeErrorMapping429(t *testing.T) {
 	bc := helperBridgeClient(t, "MOCK_BRIDGE_ERROR=rate limited", "MOCK_BRIDGE_ERROR_CODE=429")
-	creds := OperationCredentials{Username: "user@test.com", Password: "secret"}
+	creds := OperationCredentials{CredentialProvider: CredentialProviderPassCLI}
 	err := bc.Authenticate(creds)
 	if err == nil {
 		t.Fatal("expected error")
@@ -270,7 +270,7 @@ func TestBridgeErrorMapping429(t *testing.T) {
 
 func TestBridgeStdoutNoiseTolerance(t *testing.T) {
 	bc := helperBridgeClient(t, "MOCK_BRIDGE_NOISE=DEBUG: some noisy log line")
-	creds := OperationCredentials{Username: "user@test.com", Password: "secret"}
+	creds := OperationCredentials{CredentialProvider: CredentialProviderPassCLI}
 	if err := bc.Authenticate(creds); err != nil {
 		t.Fatalf("Authenticate should succeed despite stdout noise: %v", err)
 	}
@@ -288,7 +288,7 @@ func TestBridgeSemaphoreExhaustion(t *testing.T) {
 	// Fill the semaphore
 	bc.semaphore <- struct{}{}
 
-	creds := OperationCredentials{Username: "user@test.com", Password: "secret"}
+	creds := OperationCredentials{CredentialProvider: CredentialProviderPassCLI}
 	err := bc.Authenticate(creds)
 	if err == nil {
 		t.Fatal("expected concurrency limit error")
@@ -306,7 +306,7 @@ func TestBridgeCredentialPassthroughPassCLI(t *testing.T) {
 	// The mock subprocess doesn't validate them, but the bridge client
 	// should include them in the JSON sent to stdin
 	bc := helperBridgeClient(t)
-	creds := OperationCredentials{Username: "test@proton.me", Password: "hunter2"}
+	creds := OperationCredentials{CredentialProvider: CredentialProviderPassCLI}
 	if err := bc.Authenticate(creds); err != nil {
 		t.Fatalf("Auth with pass-cli creds failed: %v", err)
 	}
@@ -322,7 +322,7 @@ func TestBridgeCredentialPassthroughGitCredential(t *testing.T) {
 
 func TestBridgeBatchExists(t *testing.T) {
 	bc := helperBridgeClient(t)
-	creds := OperationCredentials{Username: "user@test.com", Password: "secret"}
+	creds := OperationCredentials{CredentialProvider: CredentialProviderPassCLI}
 	oids := []string{validOID, "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"}
 	result, err := bc.BatchExists(creds, oids)
 	if err != nil {
@@ -337,7 +337,7 @@ func TestBridgeBatchExists(t *testing.T) {
 
 func TestBridgeBatchDelete(t *testing.T) {
 	bc := helperBridgeClient(t)
-	creds := OperationCredentials{Username: "user@test.com", Password: "secret"}
+	creds := OperationCredentials{CredentialProvider: CredentialProviderPassCLI}
 	oids := []string{validOID}
 	result, err := bc.BatchDelete(creds, oids)
 	if err != nil {
@@ -386,25 +386,39 @@ func TestParseBridgeOutput(t *testing.T) {
 }
 
 func TestBuildCredentials(t *testing.T) {
-	t.Run("pass-cli mode", func(t *testing.T) {
-		creds := OperationCredentials{Username: "u", Password: "p"}
+	t.Run("pass-cli provider", func(t *testing.T) {
+		creds := OperationCredentials{CredentialProvider: CredentialProviderPassCLI}
 		m := buildCredentials(creds, "LFS", "v1")
-		if m["username"] != "u" || m["password"] != "p" {
-			t.Fatalf("unexpected credentials: %v", m)
+		if m["credentialProvider"] != CredentialProviderPassCLI {
+			t.Fatalf("expected credentialProvider=pass-cli, got %v", m["credentialProvider"])
 		}
 		if m["storageBase"] != "LFS" {
 			t.Fatalf("expected storageBase=LFS, got %v", m["storageBase"])
 		}
+		if m["appVersion"] != "v1" {
+			t.Fatalf("expected appVersion=v1, got %v", m["appVersion"])
+		}
 	})
 
-	t.Run("git-credential mode", func(t *testing.T) {
-		creds := OperationCredentials{CredentialProvider: "git-credential"}
+	t.Run("git-credential provider", func(t *testing.T) {
+		creds := OperationCredentials{CredentialProvider: CredentialProviderGitCredential}
 		m := buildCredentials(creds, "LFS", "")
-		if m["credentialProvider"] != "git-credential" {
-			t.Fatalf("expected credentialProvider, got %v", m)
+		if m["credentialProvider"] != CredentialProviderGitCredential {
+			t.Fatalf("expected credentialProvider=git-credential, got %v", m)
 		}
-		if _, ok := m["username"]; ok {
-			t.Fatal("username should not be set in git-credential mode")
+		if _, ok := m["appVersion"]; ok {
+			t.Fatal("appVersion should not be set when empty")
+		}
+	})
+
+	t.Run("empty provider", func(t *testing.T) {
+		creds := OperationCredentials{}
+		m := buildCredentials(creds, "LFS", "")
+		if _, ok := m["credentialProvider"]; ok {
+			t.Fatal("credentialProvider should not be set when empty")
+		}
+		if m["storageBase"] != "LFS" {
+			t.Fatalf("expected storageBase=LFS, got %v", m["storageBase"])
 		}
 	})
 }
@@ -543,20 +557,20 @@ func TestParseBridgeOutputMultipleLines(t *testing.T) {
 }
 
 func TestBuildCredentialsEmptyStorageBase(t *testing.T) {
-	creds := OperationCredentials{Username: "u", Password: "p"}
+	creds := OperationCredentials{CredentialProvider: CredentialProviderPassCLI}
 	m := buildCredentials(creds, "", "v1")
 	if _, ok := m["storageBase"]; ok {
 		t.Fatal("storageBase should be absent when empty")
 	}
 }
 
-func TestBuildCredentialsEmptyUsername(t *testing.T) {
-	creds := OperationCredentials{Username: "", Password: "p"}
+func TestBuildCredentialsEmptyProvider(t *testing.T) {
+	creds := OperationCredentials{CredentialProvider: ""}
 	m := buildCredentials(creds, "LFS", "v1")
-	if _, ok := m["username"]; ok {
-		t.Fatal("username should be absent when empty")
+	if _, ok := m["credentialProvider"]; ok {
+		t.Fatal("credentialProvider should be absent when empty")
 	}
-	if m["password"] != "p" {
-		t.Fatal("password should still be present")
+	if m["storageBase"] != "LFS" {
+		t.Fatal("storageBase should still be present")
 	}
 }

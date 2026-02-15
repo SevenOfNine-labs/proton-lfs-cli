@@ -23,7 +23,7 @@ func TestDriveCLIBackendRoundTrip(t *testing.T) {
 
 	// Use exists=false so upload doesn't skip via dedup
 	bc := helperBridgeClient(t, "MOCK_BRIDGE_EXISTS_RESULT=false", "MOCK_BRIDGE_DOWNLOAD_CONTENT="+string(payload))
-	backend := NewDriveCLIBackend(bc, "user@proton.test", "password")
+	backend := NewDriveCLIBackend(bc, CredentialProviderPassCLI)
 	session := &Session{Initialized: true, CreatedAt: time.Now()}
 
 	// Initialize (auth + init)
@@ -65,18 +65,16 @@ func TestDriveCLIBackendRoundTrip(t *testing.T) {
 	}
 }
 
-func TestDriveCLIBackendInitializeRequiresCredentials(t *testing.T) {
+func TestDriveCLIBackendInitializeWithEmptyProvider(t *testing.T) {
 	bc := helperBridgeClient(t)
-	backend := NewDriveCLIBackend(bc, "", "")
+	backend := NewDriveCLIBackend(bc, "")
 	session := &Session{Initialized: true, CreatedAt: time.Now()}
 
+	// With empty provider, auth is delegated to proton-drive-cli
+	// which will attempt resolution and succeed (mock bridge returns ok)
 	err := backend.Initialize(session)
-	code, message := backendErrorDetails(err)
-	if code != 401 {
-		t.Fatalf("expected credential error code 401, got %d (%v)", code, err)
-	}
-	if message != "proton credentials are required for sdk backend" {
-		t.Fatalf("unexpected message: %q", message)
+	if err != nil {
+		t.Fatalf("Initialize with empty provider should succeed (delegated): %v", err)
 	}
 }
 
@@ -86,7 +84,7 @@ func TestDriveCLIBackendUploadMapsNotFoundError(t *testing.T) {
 		"MOCK_BRIDGE_ERROR=not found",
 		"MOCK_BRIDGE_ERROR_CODE=404",
 	)
-	backend := NewDriveCLIBackend(bc, "unused", "unused")
+	backend := NewDriveCLIBackend(bc, CredentialProviderPassCLI)
 	backend.authenticated = true
 
 	session := &Session{Initialized: true, Token: "direct-bridge"}
@@ -103,7 +101,7 @@ func TestDriveCLIBackendDownloadMapsAuthErrorAndCleansOutput(t *testing.T) {
 		"MOCK_BRIDGE_ERROR=unauthorized",
 		"MOCK_BRIDGE_ERROR_CODE=401",
 	)
-	backend := NewDriveCLIBackend(bc, "unused", "unused")
+	backend := NewDriveCLIBackend(bc, CredentialProviderPassCLI)
 	backend.authenticated = true
 
 	session := &Session{Initialized: true, Token: "direct-bridge"}
@@ -127,7 +125,7 @@ func TestDriveCLIBackendUploadDedup(t *testing.T) {
 
 	// Mock bridge says exists=true, so upload should be skipped
 	bc := helperBridgeClient(t)
-	backend := NewDriveCLIBackend(bc, "user", "pass")
+	backend := NewDriveCLIBackend(bc, CredentialProviderPassCLI)
 	backend.authenticated = true
 
 	session := &Session{Initialized: true, Token: "direct-bridge"}
@@ -196,7 +194,7 @@ func TestMapBridgeErrorNil(t *testing.T) {
 
 func TestDriveCLIBackendUploadNotAuthenticated(t *testing.T) {
 	bc := helperBridgeClient(t)
-	backend := NewDriveCLIBackend(bc, "user", "pass")
+	backend := NewDriveCLIBackend(bc, CredentialProviderPassCLI)
 	// NOT authenticated
 
 	session := &Session{Initialized: true, Token: "direct-bridge"}
@@ -209,7 +207,7 @@ func TestDriveCLIBackendUploadNotAuthenticated(t *testing.T) {
 
 func TestDriveCLIBackendDownloadNotAuthenticated(t *testing.T) {
 	bc := helperBridgeClient(t)
-	backend := NewDriveCLIBackend(bc, "user", "pass")
+	backend := NewDriveCLIBackend(bc, CredentialProviderPassCLI)
 	// NOT authenticated
 
 	session := &Session{Initialized: true, Token: "direct-bridge"}
@@ -225,7 +223,7 @@ func TestDriveCLIBackendInitializeCaptchaError(t *testing.T) {
 		"MOCK_BRIDGE_ERROR=captcha verification required",
 		"MOCK_BRIDGE_ERROR_CODE=407",
 	)
-	backend := NewDriveCLIBackend(bc, "user@proton.test", "password")
+	backend := NewDriveCLIBackend(bc, CredentialProviderPassCLI)
 	session := &Session{Initialized: true, CreatedAt: time.Now()}
 	err := backend.Initialize(session)
 	code, _ := backendErrorDetails(err)
@@ -239,29 +237,12 @@ func TestDriveCLIBackendInitializeRateLimitError(t *testing.T) {
 		"MOCK_BRIDGE_ERROR=rate limited by proton api",
 		"MOCK_BRIDGE_ERROR_CODE=429",
 	)
-	backend := NewDriveCLIBackend(bc, "user@proton.test", "password")
+	backend := NewDriveCLIBackend(bc, CredentialProviderPassCLI)
 	session := &Session{Initialized: true, CreatedAt: time.Now()}
 	err := backend.Initialize(session)
 	code, _ := backendErrorDetails(err)
 	if code != 429 {
 		t.Fatalf("expected 429, got %d (%v)", code, err)
-	}
-}
-
-func TestDriveCLIBackendZeroCredentials(t *testing.T) {
-	backend := NewDriveCLIBackend(nil, "secret-user", "secret-pass")
-	backend.ZeroCredentials()
-
-	// All bytes should be zero
-	for _, b := range backend.username {
-		if b != 0 {
-			t.Fatal("username byte not zeroed")
-		}
-	}
-	for _, b := range backend.password {
-		if b != 0 {
-			t.Fatal("password byte not zeroed")
-		}
 	}
 }
 
