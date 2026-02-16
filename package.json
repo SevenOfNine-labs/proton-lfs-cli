@@ -1,5 +1,5 @@
 {
-  "name": "proton-git-lfs",
+  "name": "proton-lfs-cli",
   "private": true,
   "description": "Encrypted Git LFS custom transfer adapter for Proton Drive",
   "packageManager": "yarn@4.1.1",

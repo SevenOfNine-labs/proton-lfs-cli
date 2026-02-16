@@ -1,7 +1,7 @@
 package main
 
 import (
-	"proton-git-lfs/internal/config"
+	"proton-lfs-cli/internal/config"
 )
 
 // Backend modes — re-exported from internal/config for package main usage.

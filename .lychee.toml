@@ -9,5 +9,9 @@ accept = [200, 204, 206, 301, 302, 307, 308, 403, 429]
 exclude = [
   "^http://localhost(:\\d+)?",
   "^http://127\\.0\\.0\\.1(:\\d+)?",
-  "^http://0\\.0\\.0\\.0(:\\d+)?"
+  "^http://0\\.0\\.0\\.0(:\\d+)?",
+  # Exclude until GitHub Pages is deployed
+  "^https://sevenofnine-ai\\.github\\.io/proton-lfs-cli/guides/",
+  # Exclude until pkg.go.dev indexes the repo
+  "^https://pkg\\.go\\.dev/github\\.com/SevenOfNine-ai/proton-lfs-cli"
 ]

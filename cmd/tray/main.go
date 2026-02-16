@@ -18,35 +18,35 @@ func main() {
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
 		case "--version", "-v":
-			fmt.Printf("proton-git-lfs %s\n", Version)
+			fmt.Printf("proton-lfs-cli %s\n", Version)
 			return
 		case "--help", "-h":
 			fmt.Print(usage)
 			return
 		case "login":
 			if hasHelpFlag(os.Args[2:]) {
-				fmt.Println("Usage: proton-git-lfs login\n\nAuthenticate with Proton using the configured credential provider.")
+				fmt.Println("Usage: proton-lfs-cli login\n\nAuthenticate with Proton using the configured credential provider.")
 				return
 			}
 			augmentPath()
 			os.Exit(cliLogin(os.Stdout))
 		case "logout":
 			if hasHelpFlag(os.Args[2:]) {
-				fmt.Println("Usage: proton-git-lfs logout\n\nLog out and clear the current Proton session.")
+				fmt.Println("Usage: proton-lfs-cli logout\n\nLog out and clear the current Proton session.")
 				return
 			}
 			augmentPath()
 			os.Exit(cliLogout(os.Stdout))
 		case "register":
 			if hasHelpFlag(os.Args[2:]) {
-				fmt.Println("Usage: proton-git-lfs register\n\nEnable the Proton LFS backend in git global config.")
+				fmt.Println("Usage: proton-lfs-cli register\n\nEnable the Proton LFS backend in git global config.")
 				return
 			}
 			augmentPath()
 			os.Exit(cliRegister(os.Stdout))
 		case "status":
 			if hasHelpFlag(os.Args[2:]) {
-				fmt.Println("Usage: proton-git-lfs status\n\nShow session, LFS registration, credential provider, and transfer status.")
+				fmt.Println("Usage: proton-lfs-cli status\n\nShow session, LFS registration, credential provider, and transfer status.")
 				return
 			}
 			augmentPath()
@@ -60,7 +60,7 @@ func main() {
 		}
 	}
 	if !acquireLock() {
-		fmt.Fprintln(os.Stderr, "proton-git-lfs is already running")
+		fmt.Fprintln(os.Stderr, "proton-lfs-cli is already running")
 		os.Exit(0)
 	}
 	augmentPath()
@@ -70,14 +70,14 @@ func main() {
 const usage = `Proton Git LFS — system tray app and CLI
 
 Usage:
-  proton-git-lfs                   Launch the system tray app
-  proton-git-lfs login             Authenticate with Proton
-  proton-git-lfs logout            Log out and clear session
-  proton-git-lfs register          Enable LFS backend (git config --global)
-  proton-git-lfs status            Show session, LFS, and transfer status
-  proton-git-lfs config [provider] Show or set credential provider
-  proton-git-lfs --version         Print version and exit
-  proton-git-lfs --help            Show this help
+  proton-lfs-cli                   Launch the system tray app
+  proton-lfs-cli login             Authenticate with Proton
+  proton-lfs-cli logout            Log out and clear session
+  proton-lfs-cli register          Enable LFS backend (git config --global)
+  proton-lfs-cli status            Show session, LFS, and transfer status
+  proton-lfs-cli config [provider] Show or set credential provider
+  proton-lfs-cli --version         Print version and exit
+  proton-lfs-cli --help            Show this help
 
 Credential providers: git-credential, pass-cli
 `
@@ -114,7 +114,7 @@ func acquireLock() bool {
 	if err != nil {
 		return true // can't determine home dir, allow launch
 	}
-	dir := home + "/.proton-git-lfs"
+	dir := home + "/.proton-lfs-cli"
 	_ = os.MkdirAll(dir, 0o700)
 	lockPath := dir + "/tray.lock"
 

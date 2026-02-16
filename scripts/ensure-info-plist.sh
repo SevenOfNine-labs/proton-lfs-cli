@@ -17,13 +17,13 @@ cat > "$PLIST_PATH" <<PLIST
   <key>CFBundleName</key>
   <string>Proton Git LFS</string>
   <key>CFBundleIdentifier</key>
-  <string>com.proton.git-lfs-tray</string>
+  <string>com.proton.lfs-tray</string>
   <key>CFBundleVersion</key>
   <string>${VERSION}</string>
   <key>CFBundleShortVersionString</key>
   <string>${VERSION}</string>
   <key>CFBundleExecutable</key>
-  <string>proton-git-lfs-tray</string>
+  <string>proton-lfs-cli-tray</string>
   <key>LSUIElement</key>
   <true/>
   <key>NSHighResolutionCapable</key>

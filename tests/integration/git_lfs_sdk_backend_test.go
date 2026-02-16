@@ -230,7 +230,7 @@ func TestGitLFSCustomTransferSDKBackendRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to read pulled artifact: %v", err)
 	}
-	if string(contents) != "proton-git-lfs-integration" {
+	if string(contents) != "proton-lfs-cli-integration" {
 		t.Fatalf("unexpected pulled artifact bytes: %q", string(contents))
 	}
 }

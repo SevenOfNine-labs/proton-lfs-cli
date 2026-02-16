@@ -17,11 +17,29 @@ type TransferBackend interface {
 	Download(session *Session, oid string) (string, int64, error)
 }
 
+// ErrorCode is a machine-readable error classification for structured error handling.
+type ErrorCode string
+
+const (
+	ErrCodeNetworkFailure   ErrorCode = "network_failure"
+	ErrCodeAuthRequired     ErrorCode = "auth_required"
+	ErrCodeRateLimited      ErrorCode = "rate_limited"
+	ErrCodeCaptchaRequired  ErrorCode = "captcha_required"
+	ErrCodeNotFound         ErrorCode = "not_found"
+	ErrCodePermissionDenied ErrorCode = "permission_denied"
+	ErrCodeServerError      ErrorCode = "server_error"
+	ErrCodeInvalidRequest   ErrorCode = "invalid_request"
+	ErrCodeUnknown          ErrorCode = "unknown"
+)
+
 // BackendError maps backend-specific failures to protocol-safe transfer errors.
 type BackendError struct {
-	Code    int
-	Message string
-	Err     error
+	Code      int       // HTTP-style status code
+	Message   string    // User-friendly message
+	Err       error     // Underlying error
+	ErrorCode ErrorCode // Machine-readable error code
+	Retryable bool      // Whether operation can be retried
+	Temporary bool      // Whether error is transient
 }
 
 func (e *BackendError) Error() string {
@@ -43,10 +61,49 @@ func (e *BackendError) Unwrap() error {
 
 func newBackendError(code int, message string, err error) error {
 	return &BackendError{
-		Code:    code,
-		Message: message,
-		Err:     err,
+		Code:      code,
+		Message:   message,
+		Err:       err,
+		ErrorCode: classifyErrorCode(code),
+		Retryable: isRetryableCode(code),
+		Temporary: isTemporaryCode(code),
 	}
+}
+
+// classifyErrorCode maps HTTP status codes to structured error codes
+func classifyErrorCode(httpCode int) ErrorCode {
+	switch httpCode {
+	case 401:
+		return ErrCodeAuthRequired
+	case 404:
+		return ErrCodeNotFound
+	case 407:
+		return ErrCodeCaptchaRequired
+	case 429:
+		return ErrCodeRateLimited
+	case 503:
+		return ErrCodeServerError
+	default:
+		if httpCode >= 500 {
+			return ErrCodeServerError
+		}
+		if httpCode >= 400 {
+			return ErrCodeInvalidRequest
+		}
+		return ErrCodeUnknown
+	}
+}
+
+// isRetryableCode determines if an HTTP status code indicates a retryable error
+func isRetryableCode(code int) bool {
+	// 5xx server errors are retryable, except when rate-limited (429)
+	return code >= 500 && code < 600
+}
+
+// isTemporaryCode determines if an HTTP status code indicates a temporary error
+func isTemporaryCode(code int) bool {
+	// 503 (Service Unavailable) and 5xx are typically temporary
+	return code == 503 || (code >= 500 && code < 600)
 }
 
 func backendErrorDetails(err error) (int, string) {

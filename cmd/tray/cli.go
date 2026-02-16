@@ -8,7 +8,7 @@ import (
 	"os/exec"
 	"strings"
 
-	"proton-git-lfs/internal/config"
+	"proton-lfs-cli/internal/config"
 )
 
 // Function vars for testability — tests swap these to inject mocks.
@@ -26,6 +26,15 @@ func cliDriveLogin(driveCLI string, args ...string) error {
 	var stderr bytes.Buffer
 	cmd := exec.Command(driveCLI, cmdArgs...)
 	cmd.Stderr = &stderr
+	// For pass-cli provider, set PROTON_PASS_CLI_BIN so proton-drive-cli can
+	// find pass-cli even when running from a macOS .app bundle with minimal PATH
+	// Extract provider from args (looks for "--credential-provider" or "--provider")
+	provider := extractProviderFromArgs(args)
+	if provider == "pass-cli" {
+		if passCLI := discoverPassCLIBinary(); passCLI != "" {
+			cmd.Env = append(cmd.Environ(), "PROTON_PASS_CLI_BIN="+passCLI)
+		}
+	}
 	if err := cmd.Run(); err != nil {
 		if stderr.Len() > 0 {
 			return fmt.Errorf("%w: %s", err, strings.TrimSpace(stderr.String()))
@@ -33,6 +42,17 @@ func cliDriveLogin(driveCLI string, args ...string) error {
 		return err
 	}
 	return nil
+}
+
+// extractProviderFromArgs scans args for --credential-provider or --provider
+// and returns the value, or empty string if not found.
+func extractProviderFromArgs(args []string) string {
+	for i, arg := range args {
+		if (arg == "--credential-provider" || arg == "--provider") && i+1 < len(args) {
+			return args[i+1]
+		}
+	}
+	return ""
 }
 
 // cliStatus prints session, LFS, provider, and transfer status.
@@ -196,6 +216,12 @@ func cliLogin(w io.Writer) int {
 		cmd.Stdin = os.Stdin
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
+		// For pass-cli provider, set PROTON_PASS_CLI_BIN
+		if provider == "pass-cli" {
+			if passCLI := discoverPassCLIBinary(); passCLI != "" {
+				cmd.Env = append(cmd.Environ(), "PROTON_PASS_CLI_BIN="+passCLI)
+			}
+		}
 		if err := cmd.Run(); err != nil {
 			_, _ = fmt.Fprintf(w, "error: credential store failed: %v\n", err)
 			return 1

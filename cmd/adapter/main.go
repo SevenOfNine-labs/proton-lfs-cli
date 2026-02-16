@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"proton-git-lfs/internal/config"
+	"proton-lfs-cli/internal/config"
 )
 
 const (
@@ -335,9 +335,73 @@ func validateFilePath(p string) error {
 	return nil
 }
 
+// classifyError analyzes an error message and code to determine appropriate status state and error metadata.
+func classifyError(code int, message string) (state string, errorCode string, errorDetail string) {
+	state = config.StateError // default
+	errorCode = "unknown_error"
+	errorDetail = ""
+
+	// Check for CAPTCHA (code 407)
+	if code == 407 || strings.Contains(message, "CAPTCHA") {
+		state = config.StateCaptcha
+		errorCode = "captcha_required"
+		errorDetail = "Run: proton-drive login to complete CAPTCHA verification"
+		return
+	}
+
+	// Check for rate-limiting (code 429)
+	if code == 429 || strings.Contains(message, "Rate limit") || strings.Contains(message, "rate limit") {
+		state = config.StateRateLimited
+		errorCode = "rate_limited"
+		errorDetail = "Wait before retrying operations. The Proton API has rate-limited requests."
+		return
+	}
+
+	// Check for auth errors (codes 401, 403)
+	if code == 401 || code == 403 || strings.Contains(message, "Authentication") || strings.Contains(message, "session") {
+		state = config.StateAuthRequired
+		errorCode = "auth_required"
+		errorDetail = "Run: proton-drive login to re-authenticate"
+		return
+	}
+
+	// Generic errors
+	switch code {
+	case 404:
+		errorCode = "not_found"
+		errorDetail = "The requested resource was not found"
+	case 409:
+		errorCode = "conflict"
+		errorDetail = "Resource conflict (e.g., hash or size mismatch)"
+	case 500:
+		errorCode = "server_error"
+		errorDetail = "Internal server error - the operation may be retried"
+	default:
+		if code >= 500 && code < 600 {
+			errorCode = "server_error"
+			errorDetail = "Server error - the operation may be retried"
+		} else if code >= 400 && code < 500 {
+			errorCode = "client_error"
+			errorDetail = "Client error - check request parameters"
+		}
+	}
+	return
+}
+
 func (a *Adapter) sendTransferError(enc *json.Encoder, oid string, code int, message string) error {
 	a.logger.Printf("Error [%d]: %s", code, message)
-	_ = config.WriteStatus(config.StatusReport{State: config.StateError, Error: message})
+
+	// Classify error to determine appropriate status state and metadata
+	state, errorCode, errorDetail := classifyError(code, message)
+
+	_ = config.WriteStatus(config.StatusReport{
+		State:       state,
+		LastOID:     oid,
+		Error:       message,
+		ErrorCode:   errorCode,
+		ErrorDetail: errorDetail,
+	})
+
 	return enc.Encode(OutboundMessage{
 		Event: EventComplete,
 		OID:   oid,

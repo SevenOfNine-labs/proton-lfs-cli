@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"proton-git-lfs/internal/config"
+	"proton-lfs-cli/internal/config"
 )
 
 // saveFuncVars saves and restores function vars for test isolation.
@@ -52,7 +52,7 @@ func setupFakeHome(t *testing.T, opts fakeHomeOpts) string {
 		}
 	}
 	if opts.configJSON != "" {
-		dir := filepath.Join(home, ".proton-git-lfs")
+		dir := filepath.Join(home, ".proton-lfs")
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			t.Fatal(err)
 		}
@@ -62,7 +62,7 @@ func setupFakeHome(t *testing.T, opts fakeHomeOpts) string {
 		}
 	}
 	if opts.statusJSON != "" {
-		dir := filepath.Join(home, ".proton-git-lfs")
+		dir := filepath.Join(home, ".proton-lfs")
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			t.Fatal(err)
 		}

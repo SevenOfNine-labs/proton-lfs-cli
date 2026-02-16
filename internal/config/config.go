@@ -1,5 +1,5 @@
 // Package config provides shared constants, environment helpers, status
-// reporting, and user preference persistence for the Proton Git LFS adapter
+// reporting, and user preference persistence for the Proton LFS adapter
 // and tray application.
 package config
 
@@ -46,8 +46,8 @@ const (
 	EnvStatusFile         = "PROTON_LFS_STATUS_FILE"
 )
 
-// AppDir is the base directory for Proton Git LFS runtime files.
-const AppDir = ".proton-git-lfs"
+// AppDir is the base directory for Proton LFS runtime files.
+const AppDir = ".proton-lfs"
 
 // StatusFileName is the filename for status reporting inside AppDir.
 const StatusFileName = "status.json"
@@ -55,7 +55,7 @@ const StatusFileName = "status.json"
 // ConfigFileName is the filename for user preferences inside AppDir.
 const ConfigFileName = "config.json"
 
-// AppDirPath returns the absolute path to ~/.proton-git-lfs.
+// AppDirPath returns the absolute path to ~/.proton-lfs.
 func AppDirPath() string {
 	home, err := os.UserHomeDir()
 	if err != nil {

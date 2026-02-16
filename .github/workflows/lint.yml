@@ -20,9 +20,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
-      PROTON_PASS_REF_ROOT: pass://Personal/Proton Git LFS
-      PROTON_PASS_USERNAME_REF: pass://Personal/Proton Git LFS/username
-      PROTON_PASS_PASSWORD_REF: pass://Personal/Proton Git LFS/password
+      PROTON_PASS_REF_ROOT: pass://Personal/Proton LFS
+      PROTON_PASS_USERNAME_REF: pass://Personal/Proton LFS/username
+      PROTON_PASS_PASSWORD_REF: pass://Personal/Proton LFS/password
 
     steps:
       - name: Checkout

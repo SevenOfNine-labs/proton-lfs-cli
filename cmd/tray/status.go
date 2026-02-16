@@ -10,7 +10,7 @@ import (
 
 	"fyne.io/systray"
 
-	"proton-git-lfs/internal/config"
+	"proton-lfs-cli/internal/config"
 )
 
 const pollInterval = 5 * time.Second
@@ -114,6 +114,7 @@ func applyStatus() {
 		return
 	}
 
+	// Set icon based on state
 	switch report.State {
 	case config.StateIdle, config.StateOK:
 		systray.SetIcon(iconOK)
@@ -124,9 +125,24 @@ func applyStatus() {
 	case config.StateTransferring:
 		systray.SetIcon(iconSyncing)
 		systray.SetTemplateIcon(iconSyncing, iconSyncing)
+	case config.StateRateLimited:
+		// Orange/warning icon for rate-limiting (use error icon as fallback)
+		systray.SetIcon(iconError)
+		systray.SetTemplateIcon(iconError, iconError)
+	case config.StateAuthRequired:
+		// Yellow/alert icon for auth required (use error icon as fallback)
+		systray.SetIcon(iconError)
+		systray.SetTemplateIcon(iconError, iconError)
+	case config.StateCaptcha:
+		// Alert icon for CAPTCHA required (use error icon as fallback)
+		systray.SetIcon(iconError)
+		systray.SetTemplateIcon(iconError, iconError)
+	default:
+		systray.SetIcon(iconIdle)
+		systray.SetTemplateIcon(iconIdle, iconIdle)
 	}
 
-	// Update tooltip with transfer context
+	// Update tooltip with detailed context
 	switch {
 	case report.State == config.StateTransferring && report.LastOp == "upload":
 		systray.SetTooltip("Proton Git LFS — Uploading…")
@@ -134,8 +150,20 @@ func applyStatus() {
 		systray.SetTooltip("Proton Git LFS — Downloading…")
 	case report.State == config.StateTransferring:
 		systray.SetTooltip("Proton Git LFS — Transferring…")
+	case report.State == config.StateRateLimited:
+		if report.ErrorDetail != "" {
+			systray.SetTooltip(fmt.Sprintf("Proton Git LFS — Rate Limited: %s", truncate(report.ErrorDetail, 60)))
+		} else {
+			systray.SetTooltip("Proton Git LFS — Rate Limit Active")
+		}
+	case report.State == config.StateAuthRequired:
+		systray.SetTooltip("Proton Git LFS — Authentication Required")
+	case report.State == config.StateCaptcha:
+		systray.SetTooltip("Proton Git LFS — CAPTCHA Verification Required")
 	case report.State == config.StateError:
-		if report.Error != "" {
+		if report.ErrorCode != "" && report.ErrorDetail != "" {
+			systray.SetTooltip(fmt.Sprintf("Proton Git LFS — %s: %s", report.ErrorCode, truncate(report.ErrorDetail, 50)))
+		} else if report.Error != "" {
 			systray.SetTooltip(fmt.Sprintf("Proton Git LFS — Error: %s", truncate(report.Error, 60)))
 		} else {
 			systray.SetTooltip("Proton Git LFS — Error")

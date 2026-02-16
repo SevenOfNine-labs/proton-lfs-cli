@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Proton Git LFS Backend - A pre-alpha Git LFS custom transfer adapter for Proton Drive that provides encrypted storage for Git LFS objects.
+Proton LFS CLI - A pre-alpha Git LFS custom transfer adapter for Proton Drive that provides encrypted storage for Git LFS objects.
 
 **Current State:** The Go adapter communicates directly with `proton-drive-cli` via subprocess stdin/stdout. A system tray app provides GUI status and configuration. The release pipeline bundles all three components (adapter + tray + proton-drive-cli SEA) into a single distributable per platform.
 
@@ -12,8 +12,8 @@ Proton Git LFS Backend - A pre-alpha Git LFS custom transfer adapter for Proton 
 
 ```
 System Tray App (cmd/tray/)
-     ↕  reads ~/.proton-git-lfs/status.json
-     ↕  writes ~/.proton-git-lfs/config.json
+     ↕  reads ~/.proton-lfs/status.json
+     ↕  writes ~/.proton-lfs/config.json
 Go Adapter (cmd/adapter/) → proton-drive-cli (subprocess, stdin/stdout JSON) → Proton API
                                     ↓
                         pass-cli or git-credential
@@ -213,7 +213,7 @@ Workspace structure:
 
 ## Status File Protocol
 
-The adapter writes status to `~/.proton-git-lfs/status.json` (override with `PROTON_LFS_STATUS_FILE`). The tray app polls this file every 5 seconds.
+The adapter writes status to `~/.proton-lfs/status.json` (override with `PROTON_LFS_STATUS_FILE`). The tray app polls this file every 5 seconds.
 
 ```json
 { "state": "ok", "lastOid": "abc123...", "lastOp": "upload", "timestamp": "..." }

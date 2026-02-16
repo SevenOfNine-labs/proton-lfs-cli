@@ -392,3 +392,134 @@ func TestLocalStoreBackendDownloadNotFound(t *testing.T) {
 		t.Fatalf("expected 404, got %d", code)
 	}
 }
+
+func TestClassifyErrorCode(t *testing.T) {
+	tests := []struct {
+		name     string
+		httpCode int
+		want     ErrorCode
+	}{
+		{"401 -> auth_required", 401, ErrCodeAuthRequired},
+		{"404 -> not_found", 404, ErrCodeNotFound},
+		{"407 -> captcha_required", 407, ErrCodeCaptchaRequired},
+		{"429 -> rate_limited", 429, ErrCodeRateLimited},
+		{"503 -> server_error", 503, ErrCodeServerError},
+		{"500 -> server_error", 500, ErrCodeServerError},
+		{"502 -> server_error", 502, ErrCodeServerError},
+		{"400 -> invalid_request", 400, ErrCodeInvalidRequest},
+		{"403 -> invalid_request", 403, ErrCodeInvalidRequest},
+		{"200 -> unknown", 200, ErrCodeUnknown},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := classifyErrorCode(tt.httpCode)
+			if got != tt.want {
+				t.Errorf("classifyErrorCode(%d) = %v, want %v", tt.httpCode, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestIsRetryableCode(t *testing.T) {
+	tests := []struct {
+		code int
+		want bool
+	}{
+		{500, true},
+		{502, true},
+		{503, true},
+		{504, true},
+		{429, false}, // Rate-limit is not retryable
+		{404, false},
+		{401, false},
+		{200, false},
+	}
+
+	for _, tt := range tests {
+		got := isRetryableCode(tt.code)
+		if got != tt.want {
+			t.Errorf("isRetryableCode(%d) = %v, want %v", tt.code, got, tt.want)
+		}
+	}
+}
+
+func TestIsTemporaryCode(t *testing.T) {
+	tests := []struct {
+		code int
+		want bool
+	}{
+		{503, true},
+		{500, true},
+		{502, true},
+		{504, true},
+		{429, false},
+		{404, false},
+		{401, false},
+		{200, false},
+	}
+
+	for _, tt := range tests {
+		got := isTemporaryCode(tt.code)
+		if got != tt.want {
+			t.Errorf("isTemporaryCode(%d) = %v, want %v", tt.code, got, tt.want)
+		}
+	}
+}
+
+func TestNewBackendErrorSetsStructuredFields(t *testing.T) {
+	err := newBackendError(503, "service unavailable", errors.New("underlying error"))
+
+	var backendErr *BackendError
+	if !errors.As(err, &backendErr) {
+		t.Fatal("expected BackendError")
+	}
+
+	if backendErr.Code != 503 {
+		t.Errorf("Code = %d, want 503", backendErr.Code)
+	}
+	if backendErr.ErrorCode != ErrCodeServerError {
+		t.Errorf("ErrorCode = %v, want %v", backendErr.ErrorCode, ErrCodeServerError)
+	}
+	if !backendErr.Retryable {
+		t.Error("expected Retryable = true for 503")
+	}
+	if !backendErr.Temporary {
+		t.Error("expected Temporary = true for 503")
+	}
+}
+
+func TestNewBackendErrorAuthRequired(t *testing.T) {
+	err := newBackendError(401, "authentication required", nil)
+
+	var backendErr *BackendError
+	if !errors.As(err, &backendErr) {
+		t.Fatal("expected BackendError")
+	}
+
+	if backendErr.ErrorCode != ErrCodeAuthRequired {
+		t.Errorf("ErrorCode = %v, want %v", backendErr.ErrorCode, ErrCodeAuthRequired)
+	}
+	if backendErr.Retryable {
+		t.Error("expected Retryable = false for 401")
+	}
+	if backendErr.Temporary {
+		t.Error("expected Temporary = false for 401")
+	}
+}
+
+func TestNewBackendErrorRateLimited(t *testing.T) {
+	err := newBackendError(429, "rate limited", nil)
+
+	var backendErr *BackendError
+	if !errors.As(err, &backendErr) {
+		t.Fatal("expected BackendError")
+	}
+
+	if backendErr.ErrorCode != ErrCodeRateLimited {
+		t.Errorf("ErrorCode = %v, want %v", backendErr.ErrorCode, ErrCodeRateLimited)
+	}
+	if backendErr.Retryable {
+		t.Error("expected Retryable = false for 429")
+	}
+}

@@ -173,6 +173,9 @@ func (bc *BridgeClient) runBridgeCommand(command string, request map[string]any)
 		if errMsg == "" {
 			errMsg = "unknown bridge error"
 		}
+
+		// Handle specific error codes with specialized messages
+		// Use consistent [code] format for all errors
 		if resp.Code > 0 {
 			return resp, fmt.Errorf("[%d] %s", resp.Code, errMsg)
 		}

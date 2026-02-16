@@ -4,13 +4,13 @@ set -euo pipefail
 # Install git-lfs-proton-adapter from GitHub Releases.
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/SevenOfNine-ai/proton-git-lfs/main/scripts/install-adapter.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/SevenOfNine-ai/proton-lfs-cli/main/scripts/install-adapter.sh | bash
 #
 # Environment variables:
 #   INSTALL_DIR   — target directory (default: /usr/local/bin)
 #   VERSION       — release tag to install (default: latest)
 
-REPO="SevenOfNine-ai/proton-git-lfs"
+REPO="SevenOfNine-ai/proton-lfs-cli"
 BINARY_NAME="git-lfs-proton-adapter"
 INSTALL_DIR="${INSTALL_DIR:-/usr/local/bin}"
 

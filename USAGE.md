@@ -1,6 +1,6 @@
 # Usage Guide
 
-Proton Git LFS Backend stores Git LFS objects on Proton Drive with end-to-end encryption, using a custom Git LFS transfer adapter.
+Proton LFS Backend stores Git LFS objects on Proton Drive with end-to-end encryption, using a custom Git LFS transfer adapter.
 
 > **Status:** Pre-alpha. The local backend is stable for testing. The SDK (Proton Drive) backend works but depends on proton-drive-cli, which is under active development.
 
@@ -23,14 +23,14 @@ Pre-built adapter binaries are available from GitHub Releases and do not require
 If you only need the transfer adapter (no system tray app):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/SevenOfNine-ai/proton-git-lfs/main/scripts/install-adapter.sh | bash
+curl -fsSL https://raw.githubusercontent.com/SevenOfNine-ai/proton-lfs-cli/main/scripts/install-adapter.sh | bash
 ```
 
 Override the install directory or version:
 
 ```bash
 INSTALL_DIR=~/.local/bin VERSION=v0.1.0 curl -fsSL \
-  https://raw.githubusercontent.com/SevenOfNine-ai/proton-git-lfs/main/scripts/install-adapter.sh | bash
+  https://raw.githubusercontent.com/SevenOfNine-ai/proton-lfs-cli/main/scripts/install-adapter.sh | bash
 ```
 
 > **Note:** The one-line install only installs the Go adapter binary. The local backend works with just this binary. For the SDK backend (Proton Drive) or the system tray app, use the full bundle install below.
@@ -40,14 +40,14 @@ INSTALL_DIR=~/.local/bin VERSION=v0.1.0 curl -fsSL \
 The full bundle includes all three components needed for a complete Proton Drive LFS setup:
 
 - **git-lfs-proton-adapter** — the Git LFS custom transfer adapter
-- **proton-git-lfs-tray** — system tray app for status, credential setup, and login
+- **proton-lfs-cli-tray** — system tray app for status, credential setup, and login
 - **proton-drive-cli** — Proton Drive client (handles auth, encryption, file transfer)
 
 #### Build and install
 
 ```bash
-git clone --recurse-submodules https://github.com/<owner>/proton-git-lfs.git
-cd proton-git-lfs
+git clone --recurse-submodules https://github.com/<owner>/proton-lfs-cli.git
+cd proton-lfs-cli
 
 make setup            # Install Go + JS dependencies, create .env
 make install          # Build all components and install
@@ -60,10 +60,10 @@ make install          # Build all components and install
 | macOS | `/Applications/ProtonGitLFS.app` | `INSTALL_APP=/path/to/App.app make install` |
 | Linux | `~/.local/bin/` | `INSTALL_BIN=/usr/local/bin make install` |
 
-On both platforms, `make install` also places a `proton-git-lfs` CLI entry point on your PATH (`~/.local/bin/proton-git-lfs`):
+On both platforms, `make install` also places a `proton-lfs-cli` CLI entry point on your PATH (`~/.local/bin/proton-lfs-cli`):
 
 ```bash
-proton-git-lfs --version
+proton-lfs-cli --version
 ```
 
 To uninstall:
@@ -79,7 +79,7 @@ On macOS, `make install` creates a standard `.app` bundle:
 ```
 ProtonGitLFS.app/
   Contents/
-    MacOS/proton-git-lfs-tray       ← system tray executable
+    MacOS/proton-lfs-cli-tray       ← system tray executable
     Helpers/git-lfs-proton-adapter  ← transfer adapter
     Helpers/proton-drive-cli        ← Proton Drive client (SEA binary)
     Info.plist
@@ -132,12 +132,12 @@ ln -s "$(pwd)/bin/git-lfs-proton-adapter" ~/.local/bin/git-lfs-proton-adapter
 
 ## System Tray App
 
-The system tray app provides a menu bar interface for managing Proton Git LFS. It monitors transfer status, handles credential setup, and manages Proton login sessions.
+The system tray app provides a menu bar interface for managing Proton LFS. It monitors transfer status, handles credential setup, and manages Proton login sessions.
 
 ### Menu overview
 
 ```
-Proton Git LFS v...
+Proton LFS v...
 ─────────────────────────────
 Credential Store              >
   ✓ Git Credential Manager
@@ -172,7 +172,7 @@ After connecting and enabling LFS, the checkmarks update automatically:
 
 **Menu checkmarks** next to "Connect to Proton" and "Enable LFS Backend" update every 5 seconds based on session file and git config state. Transfer direction (uploading/downloading) is shown in the tray tooltip.
 
-Status is read from `~/.proton-git-lfs/status.json`, polled every 5 seconds.
+Status is read from `~/.proton-lfs-cli/status.json`, polled every 5 seconds.
 
 ### Credential Store
 
@@ -292,7 +292,7 @@ The SDK backend uploads and downloads LFS objects through Proton Drive with end-
 ### 1. Build proton-drive-cli (if not done already)
 
 ```bash
-cd /path/to/proton-git-lfs
+cd /path/to/proton-lfs-cli
 make build-all    # or: make build-adapter && make build-drive-cli
 ```
 
@@ -413,7 +413,7 @@ Debug output is written to stderr, which Git LFS displays during transfers.
 | `proton-drive-cli` returns auth error | Session expired or credentials invalid | Re-run `pass-cli login` or click "Connect to Proton..." in the tray app |
 | CAPTCHA required | New Proton accounts may trigger CAPTCHA | Log in via the Proton web app first to clear the CAPTCHA |
 | `node not found` in Make targets | Node.js is managed by nvm/fnm and not visible to Make's shell | Pass it explicitly: `make test-integration-sdk NODE="$(command -v node)"` |
-| Tray icon stays grey | No status file yet (no transfers have run) | Push or pull an LFS object to generate `~/.proton-git-lfs/status.json` |
+| Tray icon stays grey | No status file yet (no transfers have run) | Push or pull an LFS object to generate `~/.proton-lfs-cli/status.json` |
 | "Error: CLI not found" in tray | proton-drive-cli not found relative to tray binary | Reinstall with `make install` or verify the `.app` bundle structure |
 
 ## Adapter CLI Reference

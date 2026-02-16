@@ -1,4 +1,4 @@
-module proton-git-lfs
+module proton-lfs-cli
 
 go 1.25
 

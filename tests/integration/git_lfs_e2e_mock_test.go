@@ -97,8 +97,8 @@ func TestE2EMockedPipeline(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to read pulled artifact: %v", err)
 	}
-	if string(contents) != "proton-git-lfs-integration" {
-		t.Fatalf("content mismatch: expected %q, got %q (len=%d)", "proton-git-lfs-integration", string(contents), len(contents))
+	if string(contents) != "proton-lfs-cli-integration" {
+		t.Fatalf("content mismatch: expected %q, got %q (len=%d)", "proton-lfs-cli-integration", string(contents), len(contents))
 	}
 
 	t.Logf("E2E mocked pipeline: upload OID=%s, download verified, content matches", oid)

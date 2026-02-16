@@ -10,7 +10,7 @@ import (
 
 	"fyne.io/systray"
 
-	"proton-git-lfs/internal/config"
+	"proton-lfs-cli/internal/config"
 )
 
 //go:embed icons/*.png
@@ -41,9 +41,9 @@ func init() {
 func setupMenu() {
 	systray.SetIcon(iconIdle)
 	systray.SetTemplateIcon(iconIdle, iconIdle)
-	systray.SetTooltip("Proton Git LFS")
+	systray.SetTooltip("Proton LFS")
 
-	mVersion := systray.AddMenuItem(fmt.Sprintf("Proton Git LFS %s", Version), "")
+	mVersion := systray.AddMenuItem(fmt.Sprintf("Proton LFS %s", Version), "")
 	mVersion.Disable()
 
 	systray.AddSeparator()
@@ -66,7 +66,7 @@ func setupMenu() {
 
 	systray.AddSeparator()
 
-	mQuit := systray.AddMenuItem("Quit", "Quit Proton Git LFS tray")
+	mQuit := systray.AddMenuItem("Quit", "Quit Proton LFS tray")
 
 	// Event loop
 	go func() {

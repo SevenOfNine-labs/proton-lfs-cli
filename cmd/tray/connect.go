@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os/exec"
 
-	"proton-git-lfs/internal/config"
+	"proton-lfs-cli/internal/config"
 )
 
 // connectToProton runs the unified tray Connect flow for any credential provider:
@@ -40,7 +40,7 @@ func connectToProton() {
 	trayLog.Print("connect: credentials verified, starting login")
 	sendNotification("Connecting…")
 	go func() {
-		if err := protonDriveLogin(driveCLI, "--credential-provider", provider); err != nil {
+		if err := protonDriveLogin(driveCLI, provider, "--credential-provider", provider); err != nil {
 			trayLog.Printf("connect: login failed: %v", err)
 			sendNotification("Login failed")
 			return
@@ -52,11 +52,22 @@ func connectToProton() {
 }
 
 // protonDriveLogin runs proton-drive-cli login with the given extra args.
-func protonDriveLogin(driveCLI string, args ...string) error {
+// provider is used to set PROTON_PASS_CLI_BIN when needed.
+func protonDriveLogin(driveCLI string, provider string, args ...string) error {
 	cmdArgs := append([]string{"login"}, args...)
 	cmdArgs = append(cmdArgs, "-q")
 	trayLog.Printf("connect: exec %s %v", driveCLI, cmdArgs)
 	cmd := exec.Command(driveCLI, cmdArgs...)
+	// For pass-cli provider, set PROTON_PASS_CLI_BIN so proton-drive-cli can
+	// find pass-cli even when running from a macOS .app bundle with minimal PATH
+	if provider == "pass-cli" {
+		if passCLI := discoverPassCLIBinary(); passCLI != "" {
+			cmd.Env = append(cmd.Environ(), "PROTON_PASS_CLI_BIN="+passCLI)
+			trayLog.Printf("connect: set PROTON_PASS_CLI_BIN=%s", passCLI)
+		} else {
+			trayLog.Print("connect: warning: pass-cli not found in PATH")
+		}
+	}
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		trayLog.Printf("connect: exec failed: %v\n  output: %s", err, out)

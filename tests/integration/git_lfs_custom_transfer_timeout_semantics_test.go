@@ -112,7 +112,7 @@ func TestGitLFSCustomTransferTimeoutDownloadFailsFastOnStall(t *testing.T) {
 	if readErr != nil {
 		return
 	}
-	if strings.TrimSpace(string(contents)) == "proton-git-lfs-integration" {
+	if strings.TrimSpace(string(contents)) == "proton-lfs-cli-integration" {
 		t.Fatalf("did not expect full artifact content after stalled download")
 	}
 }

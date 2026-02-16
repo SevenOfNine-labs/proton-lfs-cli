@@ -4,10 +4,10 @@
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>com.proton.git-lfs-tray</string>
+  <string>com.proton.lfs-tray</string>
   <key>ProgramArguments</key>
   <array>
-    <string>/Applications/ProtonGitLFS.app/Contents/MacOS/proton-git-lfs-tray</string>
+    <string>/Applications/ProtonGitLFS.app/Contents/MacOS/proton-lfs-cli-tray</string>
   </array>
   <key>RunAtLoad</key>
   <true/>

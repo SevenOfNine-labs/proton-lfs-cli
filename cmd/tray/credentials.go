@@ -17,10 +17,21 @@ func credentialVerify(provider string) bool {
 	args := []string{"credential", "verify", "--provider", provider, "-q"}
 	trayLog.Printf("credential-verify: exec %s %v", driveCLI, args)
 	cmd := exec.Command(driveCLI, args...)
-	cmd.Env = append(cmd.Environ(),
+	env := []string{
 		"GIT_TERMINAL_PROMPT=0",
 		"GCM_INTERACTIVE=never",
-	)
+	}
+	// For pass-cli provider, set PROTON_PASS_CLI_BIN so proton-drive-cli can
+	// find pass-cli even when running from a macOS .app bundle with minimal PATH
+	if provider == "pass-cli" {
+		if passCLI := discoverPassCLIBinary(); passCLI != "" {
+			env = append(env, "PROTON_PASS_CLI_BIN="+passCLI)
+			trayLog.Printf("credential-verify: set PROTON_PASS_CLI_BIN=%s", passCLI)
+		} else {
+			trayLog.Print("credential-verify: warning: pass-cli not found in PATH")
+		}
+	}
+	cmd.Env = append(cmd.Environ(), env...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		trayLog.Printf("credential-verify: failed: %v\n  output: %s", err, out)

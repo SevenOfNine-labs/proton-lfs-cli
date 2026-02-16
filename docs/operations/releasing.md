@@ -35,7 +35,7 @@ gh release view v0.2.0
 Users install via the install script:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/SevenOfNine-ai/proton-git-lfs/main/scripts/install-adapter.sh | bash
+curl -fsSL https://raw.githubusercontent.com/SevenOfNine-ai/proton-lfs-cli/main/scripts/install-adapter.sh | bash
 ```
 
 Or pin a version:
@@ -58,7 +58,7 @@ Trusted Publishing must be configured on npmjs.com:
 1. Go to npmjs.com → `@sevenofnine-ai/proton-drive-cli` → **Settings** → **Publishing access**
 2. Add trusted publisher:
    - **Repository owner**: `SevenOfNine-ai`
-   - **Repository name**: `proton-git-lfs`
+   - **Repository name**: `proton-lfs-cli`
    - **Workflow filename**: `npm-publish.yml`
    - **Environment name**: *(blank)*
 

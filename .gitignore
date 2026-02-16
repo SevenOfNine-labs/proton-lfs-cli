@@ -68,3 +68,7 @@ testdata-lfs/*.bin
 
 # Changeset working files (agent-maintained, never committed)
 .changeset/
+
+# Generated documentation
+docs-preview/
+docs-build/
