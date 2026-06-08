@@ -110,7 +110,7 @@ func applyStatus() {
 	if err != nil {
 		systray.SetIcon(iconIdle)
 		systray.SetTemplateIcon(iconIdle, iconIdle)
-		systray.SetTooltip("Proton Git LFS")
+		systray.SetTooltip("Proton LFS")
 		return
 	}
 
@@ -145,33 +145,33 @@ func applyStatus() {
 	// Update tooltip with detailed context
 	switch {
 	case report.State == config.StateTransferring && report.LastOp == "upload":
-		systray.SetTooltip("Proton Git LFS — Uploading…")
+		systray.SetTooltip("Proton LFS — Uploading…")
 	case report.State == config.StateTransferring && report.LastOp == "download":
-		systray.SetTooltip("Proton Git LFS — Downloading…")
+		systray.SetTooltip("Proton LFS — Downloading…")
 	case report.State == config.StateTransferring:
-		systray.SetTooltip("Proton Git LFS — Transferring…")
+		systray.SetTooltip("Proton LFS — Transferring…")
 	case report.State == config.StateRateLimited:
 		if report.ErrorDetail != "" {
-			systray.SetTooltip(fmt.Sprintf("Proton Git LFS — Rate Limited: %s", truncate(report.ErrorDetail, 60)))
+			systray.SetTooltip(fmt.Sprintf("Proton LFS — Rate Limited: %s", truncate(report.ErrorDetail, 60)))
 		} else {
-			systray.SetTooltip("Proton Git LFS — Rate Limit Active")
+			systray.SetTooltip("Proton LFS — Rate Limit Active")
 		}
 	case report.State == config.StateAuthRequired:
-		systray.SetTooltip("Proton Git LFS — Authentication Required")
+		systray.SetTooltip("Proton LFS — Authentication Required")
 	case report.State == config.StateCaptcha:
-		systray.SetTooltip("Proton Git LFS — CAPTCHA Verification Required")
+		systray.SetTooltip("Proton LFS — CAPTCHA Verification Required")
 	case report.State == config.StateError:
 		if report.ErrorCode != "" && report.ErrorDetail != "" {
-			systray.SetTooltip(fmt.Sprintf("Proton Git LFS — %s: %s", report.ErrorCode, truncate(report.ErrorDetail, 50)))
+			systray.SetTooltip(fmt.Sprintf("Proton LFS — %s: %s", report.ErrorCode, truncate(report.ErrorDetail, 50)))
 		} else if report.Error != "" {
-			systray.SetTooltip(fmt.Sprintf("Proton Git LFS — Error: %s", truncate(report.Error, 60)))
+			systray.SetTooltip(fmt.Sprintf("Proton LFS — Error: %s", truncate(report.Error, 60)))
 		} else {
-			systray.SetTooltip("Proton Git LFS — Error")
+			systray.SetTooltip("Proton LFS — Error")
 		}
 	case report.State == config.StateOK && !report.Timestamp.IsZero():
-		systray.SetTooltip(fmt.Sprintf("Proton Git LFS — Last %s %s", report.LastOp, relativeTime(report.Timestamp)))
+		systray.SetTooltip(fmt.Sprintf("Proton LFS — Last %s %s", report.LastOp, relativeTime(report.Timestamp)))
 	default:
-		systray.SetTooltip("Proton Git LFS")
+		systray.SetTooltip("Proton LFS")
 	}
 }
 

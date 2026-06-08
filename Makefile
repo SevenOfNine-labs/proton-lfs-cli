@@ -89,12 +89,15 @@ build-bundle: build-adapter build-tray build-sea ## Build all components into di
 
 # ---------- install / uninstall ----------
 
-INSTALL_APP ?= /Applications/ProtonGitLFS.app
+INSTALL_APP ?= /Applications/ProtonLFS.app
 INSTALL_BIN ?= $(HOME)/.local/bin
 
 ifeq ($(shell uname -s),Darwin)
 
 install: build-bundle ## Install bundle (macOS: .app to /Applications, or set INSTALL_APP)
+	@# Clean up old installation artifacts
+	@rm -rf /Applications/ProtonGitLFS.app 2>/dev/null || true
+	@rm -f "$(HOME)/Library/LaunchAgents/com.proton.git-lfs-tray.plist" 2>/dev/null || true
 	@mkdir -p "$(INSTALL_APP)/Contents/MacOS" "$(INSTALL_APP)/Contents/Helpers" "$(INSTALL_APP)/Contents/Resources"
 	@cp dist/proton-lfs-tray      "$(INSTALL_APP)/Contents/MacOS/proton-lfs-tray"
 	@cp dist/git-lfs-proton-adapter   "$(INSTALL_APP)/Contents/Helpers/git-lfs-proton-adapter"
@@ -102,6 +105,9 @@ install: build-bundle ## Install bundle (macOS: .app to /Applications, or set IN
 	@chmod +x "$(INSTALL_APP)/Contents/MacOS/proton-lfs-tray" \
 		"$(INSTALL_APP)/Contents/Helpers/git-lfs-proton-adapter" \
 		"$(INSTALL_APP)/Contents/Helpers/proton-drive-cli"
+	@if [ -f cmd/tray/AppIcon.icns ]; then \
+		cp cmd/tray/AppIcon.icns "$(INSTALL_APP)/Contents/Resources/AppIcon.icns"; \
+	fi
 	@bash scripts/ensure-info-plist.sh "$(INSTALL_APP)/Contents/Info.plist" "$(VERSION)"
 	@codesign --force --deep --sign - "$(INSTALL_APP)"
 	@xattr -dr com.apple.quarantine "$(INSTALL_APP)" 2>/dev/null || true

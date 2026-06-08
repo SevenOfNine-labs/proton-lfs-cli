@@ -5,13 +5,13 @@ Bridge implementation: the Go adapter (`cmd/adapter/bridge.go`) spawns `proton-d
 ## Architecture
 
 ```
-Go Adapter → proton-drive-cli subprocess (JSON stdin/stdout, credentialProvider field) → Proton API
+Go Adapter → proton-drive-cli subprocess (JSON stdin/stdout, provider selector fields) → Proton API
                     ↓
         pass-cli or git-credential
     (resolved internally by proton-drive-cli)
 ```
 
-The adapter's `BridgeClient` spawns `proton-drive-cli bridge <command>` as a subprocess, passing JSON via stdin and reading JSON from stdout. The Go adapter sends only a `credentialProvider` name — proton-drive-cli resolves actual credentials internally. Credentials are never passed via command-line arguments.
+The adapter's `BridgeClient` spawns `proton-drive-cli bridge <command>` as a subprocess, passing JSON via stdin and reading JSON from stdout. The Go adapter sends only provider selector fields, such as `credentialProvider` and optional `dataCredentialProvider`/`dataCredentialHost` for two-password accounts. proton-drive-cli resolves actual credentials internally. Credentials are never passed via command-line arguments.
 
 ## Subprocess Communication Protocol
 
@@ -48,13 +48,12 @@ The adapter (`cmd/adapter/bridge.go`) communicates with `proton-drive-cli` using
 
 ## Known Issues
 
-1. proton-drive-cli session refresh not fully reliable (workaround: re-authenticate on 401).
-2. CAPTCHA may require manual intervention for new accounts.
+1. CAPTCHA may require manual intervention for new accounts.
+2. FIDO2-only 2FA is surfaced as an auth-required state and must be completed outside the transfer path.
 3. No streaming for large files (>2GB may timeout -- increase `PROTON_DRIVE_CLI_TIMEOUT_MS`).
 
 ## Next Hardening Targets
 
-1. Improve session reuse to avoid re-authentication on every operation.
-2. Add strict response schema validation between adapter and subprocess.
-3. Add fault-injection tests (timeouts, partial writes, session expiry).
-4. Address upstream session refresh issue in proton-drive-cli.
+1. Add strict response schema validation between adapter and subprocess.
+2. Add fault-injection tests (timeouts, partial writes, session expiry).
+3. Add a real-account canary only after the mocked auth gates stay green.

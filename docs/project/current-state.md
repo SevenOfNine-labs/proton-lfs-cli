@@ -16,7 +16,7 @@ Date: 2026-02-10
 ## Architecture
 
 ```
-Go Adapter → proton-drive-cli subprocess (stdin/stdout JSON, credentialProvider field) → Proton API
+Go Adapter → proton-drive-cli subprocess (stdin/stdout JSON, provider selector fields) → Proton API
                     ↓
         pass-cli or git-credential
     (resolved internally by proton-drive-cli)
@@ -27,7 +27,7 @@ Go Adapter → proton-drive-cli subprocess (stdin/stdout JSON, credentialProvide
 
 ## Not Implemented Yet
 
-- Production-grade session lifecycle (session refresh has known issues in proton-drive-cli).
+- Real-account canary validation after mocked auth/session gates stay green.
 - Production observability baseline (metrics, SLOs, alerts, runbooks).
 - Streaming support for very large files (>2GB may timeout).
 

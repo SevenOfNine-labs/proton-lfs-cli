@@ -187,9 +187,9 @@ func sendNotification(msg string) {
 	switch runtime.GOOS {
 	case "darwin":
 		_ = exec.Command("osascript", "-e",
-			fmt.Sprintf(`display notification "%s" with title "Proton Git LFS"`, msg)).Start()
+			fmt.Sprintf(`display notification "%s" with title "Proton LFS"`, msg)).Start()
 	case "linux":
-		_ = exec.Command("notify-send", "Proton Git LFS", msg).Start()
+		_ = exec.Command("notify-send", "Proton LFS", msg).Start()
 	}
 }
 

@@ -103,7 +103,7 @@ jobs:
           go build \
             -trimpath \
             -ldflags "-s -w ${EXTRA_LDFLAGS} -X main.Version=${{ github.ref_name }}" \
-            -o "build/proton-lfs-cli-tray${EXT}" \
+            -o "build/proton-lfs-tray${EXT}" \
             ./cmd/tray
 
       # ── proton-drive-cli SEA ─────────────────────────────────

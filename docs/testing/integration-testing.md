@@ -47,10 +47,13 @@ make test-integration-sdk NODE="$(command -v node)"
 
 See `docs/architecture/sdk-capability-matrix.md` for the full environment matrix.
 
-Optional (accounts requiring explicit data password or 2FA):
+Accounts requiring 2FA should complete interactive `proton-drive login` before
+real SDK tests. Two-password accounts should use a separate mailbox/data
+password provider entry:
 
-- `PROTON_DATA_PASSWORD`
-- `PROTON_SECOND_FACTOR_CODE`
+```bash
+git config lfs.customtransfer.proton.args "--backend=sdk --credential-provider git-credential --data-credential-provider git-credential"
+```
 
 ## Personal Account Practical Steps
 

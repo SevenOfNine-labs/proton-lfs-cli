@@ -136,7 +136,7 @@ func isAutoStartEnabled() bool {
 		if err != nil {
 			return false
 		}
-		_, err = os.Stat(filepath.Join(home, ".config", "autostart", "proton-git-lfs.desktop"))
+		_, err = os.Stat(filepath.Join(home, ".config", "autostart", "proton-lfs.desktop"))
 		return err == nil
 	default:
 		return false
@@ -199,7 +199,7 @@ func setAutoStartLinux(enable bool) error {
 	if err != nil {
 		return err
 	}
-	p := filepath.Join(home, ".config", "autostart", "proton-git-lfs.desktop")
+	p := filepath.Join(home, ".config", "autostart", "proton-lfs.desktop")
 	if !enable {
 		return os.Remove(p)
 	}
@@ -210,9 +210,9 @@ func setAutoStartLinux(enable bool) error {
 	exe, _ = filepath.EvalSymlinks(exe)
 	entry := fmt.Sprintf(`[Desktop Entry]
 Type=Application
-Name=Proton Git LFS
+Name=Proton LFS
 Exec=%s
-Comment=System tray for Proton Git LFS
+Comment=System tray for Proton LFS
 Categories=Development;
 StartupNotify=false
 `, exe)

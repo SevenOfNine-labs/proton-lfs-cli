@@ -84,11 +84,14 @@ pass-cli login
 make test-integration-sdk
 ```
 
-If your account requires dedicated data password or 2FA code, set:
+If your account requires two-factor authentication, complete an interactive
+`proton-drive login` before SDK transfers. If your account requires a separate
+mailbox/data password, store it in a distinct credential entry and opt into the
+data credential provider:
 
 ```bash
-export PROTON_DATA_PASSWORD='...'
-export PROTON_SECOND_FACTOR_CODE='...'
+git config lfs.customtransfer.proton.args \
+  "--backend=sdk --credential-provider git-credential --data-credential-provider git-credential"
 ```
 
 If your Node binary is managed in shell startup (for example `nvm` in `~/.zshrc`), pass it explicitly:

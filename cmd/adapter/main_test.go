@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"proton-lfs-cli/internal/config"
 )
 
 const validOID = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
@@ -405,6 +407,46 @@ func TestDownloadSucceedsInMockMode(t *testing.T) {
 		t.Fatalf("expected temp file size 16, got %d", info.Size())
 	}
 	_ = os.Remove(complete.Path)
+}
+
+func TestClassifyErrorAuthChallengeStates(t *testing.T) {
+	cases := []struct {
+		name           string
+		code           int
+		message        string
+		wantErrorCode  string
+		wantDetailPart string
+	}{
+		{
+			name:           "totp",
+			code:           401,
+			message:        "two-factor authentication required",
+			wantErrorCode:  "two_factor_required",
+			wantDetailPart: "two-factor",
+		},
+		{
+			name:           "data password",
+			code:           401,
+			message:        "mailbox/data password required for this Proton account",
+			wantErrorCode:  "data_password_required",
+			wantDetailPart: "mailbox/data password",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			state, errorCode, detail := classifyError(tc.code, tc.message)
+			if state != config.StateAuthRequired {
+				t.Fatalf("expected auth-required state, got %q", state)
+			}
+			if errorCode != tc.wantErrorCode {
+				t.Fatalf("expected errorCode %q, got %q", tc.wantErrorCode, errorCode)
+			}
+			if !strings.Contains(strings.ToLower(detail), tc.wantDetailPart) {
+				t.Fatalf("expected detail to mention %q, got %q", tc.wantDetailPart, detail)
+			}
+		})
+	}
 }
 
 func TestUploadRejectsPathTraversal(t *testing.T) {

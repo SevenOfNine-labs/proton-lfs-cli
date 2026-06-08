@@ -72,3 +72,7 @@ testdata-lfs/*.bin
 # Generated documentation
 docs-preview/
 docs-build/
+
+# Icon generator artifacts (keep .icns, ignore preview and iconset)
+cmd/tray/AppIcon_preview.png
+cmd/tray/AppIcon.iconset/

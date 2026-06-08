@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -38,6 +39,33 @@ func TestHelperProcess(_ *testing.T) {
 	if err := json.NewDecoder(os.Stdin).Decode(&req); err != nil {
 		writeErrorResponse(os.Stdout, 500, "failed to read stdin: "+err.Error())
 		os.Exit(1)
+	}
+
+	if expectedJSON := os.Getenv("MOCK_BRIDGE_EXPECT_REQUEST"); expectedJSON != "" {
+		var expected map[string]any
+		if err := json.Unmarshal([]byte(expectedJSON), &expected); err != nil {
+			writeErrorResponse(os.Stdout, 500, "failed to parse expected request: "+err.Error())
+			os.Exit(1)
+		}
+		for key, want := range expected {
+			if got, ok := req[key]; !ok || got != want {
+				writeErrorResponse(os.Stdout, 500, fmt.Sprintf("request field %s = %v, want %v", key, got, want))
+				os.Exit(1)
+			}
+		}
+	}
+
+	if forbiddenFields := os.Getenv("MOCK_BRIDGE_FORBID_FIELDS"); forbiddenFields != "" {
+		for _, field := range strings.Split(forbiddenFields, ",") {
+			field = strings.TrimSpace(field)
+			if field == "" {
+				continue
+			}
+			if _, ok := req[field]; ok {
+				writeErrorResponse(os.Stdout, 500, fmt.Sprintf("forbidden request field present: %s", field))
+				os.Exit(1)
+			}
+		}
 	}
 
 	// Check for mock error injection via env
@@ -136,6 +164,9 @@ func writeErrorResponse(f *os.File, code int, message string) {
 		"ok":    false,
 		"error": message,
 		"code":  code,
+	}
+	if details := os.Getenv("MOCK_BRIDGE_ERROR_DETAILS"); details != "" {
+		resp["details"] = details
 	}
 	json.NewEncoder(f).Encode(resp)
 }
@@ -268,6 +299,31 @@ func TestBridgeErrorMapping429(t *testing.T) {
 	}
 }
 
+func TestBridgeErrorPreservesStructuredDetails(t *testing.T) {
+	details := `{"errorCode":"TWO_FACTOR_REQUIRED","twoFactorType":"totp","totpAllowed":true}`
+	bc := helperBridgeClient(t,
+		"MOCK_BRIDGE_ERROR=Two-factor authentication code required",
+		"MOCK_BRIDGE_ERROR_CODE=401",
+		"MOCK_BRIDGE_ERROR_DETAILS="+details,
+	)
+	creds := OperationCredentials{CredentialProvider: CredentialProviderPassCLI}
+	err := bc.Authenticate(creds)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+
+	var bridgeErr *BridgeError
+	if !strings.Contains(err.Error(), "[401]") {
+		t.Fatalf("expected legacy [401] error string, got %v", err)
+	}
+	if !errors.As(err, &bridgeErr) {
+		t.Fatalf("expected BridgeError, got %T", err)
+	}
+	if bridgeErr.Details != details {
+		t.Fatalf("expected details %q, got %q", details, bridgeErr.Details)
+	}
+}
+
 func TestBridgeStdoutNoiseTolerance(t *testing.T) {
 	bc := helperBridgeClient(t, "MOCK_BRIDGE_NOISE=DEBUG: some noisy log line")
 	creds := OperationCredentials{CredentialProvider: CredentialProviderPassCLI}
@@ -317,6 +373,22 @@ func TestBridgeCredentialPassthroughGitCredential(t *testing.T) {
 	creds := OperationCredentials{CredentialProvider: CredentialProviderGitCredential}
 	if err := bc.Authenticate(creds); err != nil {
 		t.Fatalf("Auth with git-credential provider failed: %v", err)
+	}
+}
+
+func TestBridgeDataCredentialSelectorPassthrough(t *testing.T) {
+	expected := `{"credentialProvider":"git-credential","dataCredentialProvider":"git-credential","dataCredentialHost":"proton-data.proton-lfs-cli.local"}`
+	bc := helperBridgeClient(t,
+		"MOCK_BRIDGE_EXPECT_REQUEST="+expected,
+		"MOCK_BRIDGE_FORBID_FIELDS=password,dataPassword",
+	)
+	creds := OperationCredentials{
+		CredentialProvider:     CredentialProviderGitCredential,
+		DataCredentialProvider: CredentialProviderGitCredential,
+		DataCredentialHost:     DefaultDataCredentialHost,
+	}
+	if err := bc.Authenticate(creds); err != nil {
+		t.Fatalf("Auth with data credential selectors failed: %v", err)
 	}
 }
 
@@ -408,6 +480,27 @@ func TestBuildCredentials(t *testing.T) {
 		}
 		if _, ok := m["appVersion"]; ok {
 			t.Fatal("appVersion should not be set when empty")
+		}
+	})
+
+	t.Run("data credential provider", func(t *testing.T) {
+		creds := OperationCredentials{
+			CredentialProvider:     CredentialProviderGitCredential,
+			DataCredentialProvider: CredentialProviderGitCredential,
+			DataCredentialHost:     DefaultDataCredentialHost,
+		}
+		m := buildCredentials(creds, "LFS", "")
+		if m["credentialProvider"] != CredentialProviderGitCredential {
+			t.Fatalf("expected login credential provider, got %v", m)
+		}
+		if m["dataCredentialProvider"] != CredentialProviderGitCredential {
+			t.Fatalf("expected data credential provider, got %v", m)
+		}
+		if m["dataCredentialHost"] != DefaultDataCredentialHost {
+			t.Fatalf("expected data credential host, got %v", m)
+		}
+		if _, ok := m["dataPassword"]; ok {
+			t.Fatal("dataPassword must never be placed in bridge credential selectors")
 		}
 	})
 

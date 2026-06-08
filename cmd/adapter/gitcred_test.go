@@ -28,12 +28,20 @@ func TestDriveCLIBackendGitCredentialModeInitialize(t *testing.T) {
 
 func TestDriveCLIBackendGitCredentialModeOperationCredentials(t *testing.T) {
 	backend := &DriveCLIBackend{
-		credentialProvider: CredentialProviderGitCredential,
+		credentialProvider:     CredentialProviderGitCredential,
+		dataCredentialProvider: CredentialProviderGitCredential,
+		dataCredentialHost:     DefaultDataCredentialHost,
 	}
 
 	creds := backend.operationCredentials()
 	if creds.CredentialProvider != CredentialProviderGitCredential {
 		t.Errorf("expected credentialProvider=%q, got %q", CredentialProviderGitCredential, creds.CredentialProvider)
+	}
+	if creds.DataCredentialProvider != CredentialProviderGitCredential {
+		t.Errorf("expected dataCredentialProvider=%q, got %q", CredentialProviderGitCredential, creds.DataCredentialProvider)
+	}
+	if creds.DataCredentialHost != DefaultDataCredentialHost {
+		t.Errorf("expected dataCredentialHost=%q, got %q", DefaultDataCredentialHost, creds.DataCredentialHost)
 	}
 }
 
@@ -46,6 +54,9 @@ func TestCredentialProviderConstants(t *testing.T) {
 	}
 	if DefaultCredentialProvider != CredentialProviderPassCLI {
 		t.Errorf("expected default provider to be pass-cli, got %q", DefaultCredentialProvider)
+	}
+	if DefaultDataCredentialHost == "" {
+		t.Error("expected non-empty default data credential host")
 	}
 }
 

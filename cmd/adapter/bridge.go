@@ -20,6 +20,29 @@ type BridgeResponse struct {
 	Details string          `json:"details,omitempty"`
 }
 
+// BridgeError preserves the structured error envelope returned by
+// proton-drive-cli while keeping the legacy "[code] message" string shape.
+type BridgeError struct {
+	Command string
+	Code    int
+	Message string
+	Details string
+}
+
+func (e *BridgeError) Error() string {
+	if e == nil {
+		return ""
+	}
+	msg := strings.TrimSpace(e.Message)
+	if msg == "" {
+		msg = "unknown bridge error"
+	}
+	if e.Code > 0 {
+		return fmt.Sprintf("[%d] %s", e.Code, msg)
+	}
+	return msg
+}
+
 // BridgeClientConfig holds the configuration for creating a new BridgeClient.
 type BridgeClientConfig struct {
 	NodeBin       string
@@ -174,12 +197,12 @@ func (bc *BridgeClient) runBridgeCommand(command string, request map[string]any)
 			errMsg = "unknown bridge error"
 		}
 
-		// Handle specific error codes with specialized messages
-		// Use consistent [code] format for all errors
-		if resp.Code > 0 {
-			return resp, fmt.Errorf("[%d] %s", resp.Code, errMsg)
+		return resp, &BridgeError{
+			Command: command,
+			Code:    resp.Code,
+			Message: errMsg,
+			Details: resp.Details,
 		}
-		return resp, fmt.Errorf("%s", errMsg)
 	}
 
 	return resp, nil
@@ -244,6 +267,12 @@ func buildCredentials(creds OperationCredentials, storageBase, appVersion string
 	m := map[string]any{}
 	if creds.CredentialProvider != "" {
 		m["credentialProvider"] = creds.CredentialProvider
+	}
+	if creds.DataCredentialProvider != "" {
+		m["dataCredentialProvider"] = creds.DataCredentialProvider
+		if creds.DataCredentialHost != "" {
+			m["dataCredentialHost"] = creds.DataCredentialHost
+		}
 	}
 	if storageBase != "" {
 		m["storageBase"] = storageBase

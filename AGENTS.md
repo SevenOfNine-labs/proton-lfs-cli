@@ -1,5 +1,11 @@
 # Repository Guidelines
 
+## Repository Identity
+
+- Canonical repository name: `proton-lfs-cli` (renamed from `proton-git-lfs`).
+- Keep instruction files aligned with `submodules/proton-drive-cli/AGENTS.md` and `submodules/proton-drive-cli/CLAUDE.md`.
+
+
 ## Project Structure & Module Organization
 
 - `cmd/adapter/`: Go Git LFS custom transfer adapter (`main.go`, backend/client/pass-cli helpers).

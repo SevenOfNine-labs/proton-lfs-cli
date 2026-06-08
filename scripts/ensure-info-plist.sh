@@ -1,12 +1,10 @@
 #!/usr/bin/env bash
-# ensure-info-plist.sh — Create Info.plist if it doesn't already exist.
+# ensure-info-plist.sh — Write Info.plist (always regenerated to stay current).
 # Usage: ensure-info-plist.sh <plist-path> <version>
 set -euo pipefail
 
 PLIST_PATH="${1:?Usage: ensure-info-plist.sh <plist-path> <version>}"
 VERSION="${2:-1.0.0}"
-
-[ -f "$PLIST_PATH" ] && exit 0
 
 cat > "$PLIST_PATH" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -15,7 +13,7 @@ cat > "$PLIST_PATH" <<PLIST
 <plist version="1.0">
 <dict>
   <key>CFBundleName</key>
-  <string>Proton Git LFS</string>
+  <string>Proton LFS</string>
   <key>CFBundleIdentifier</key>
   <string>com.proton.lfs-tray</string>
   <key>CFBundleVersion</key>
@@ -23,7 +21,9 @@ cat > "$PLIST_PATH" <<PLIST
   <key>CFBundleShortVersionString</key>
   <string>${VERSION}</string>
   <key>CFBundleExecutable</key>
-  <string>proton-lfs-cli-tray</string>
+  <string>proton-lfs-tray</string>
+  <key>CFBundleIconFile</key>
+  <string>AppIcon</string>
   <key>LSUIElement</key>
   <true/>
   <key>NSHighResolutionCapable</key>

@@ -3,6 +3,7 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -21,15 +22,18 @@ type TransferBackend interface {
 type ErrorCode string
 
 const (
-	ErrCodeNetworkFailure   ErrorCode = "network_failure"
-	ErrCodeAuthRequired     ErrorCode = "auth_required"
-	ErrCodeRateLimited      ErrorCode = "rate_limited"
-	ErrCodeCaptchaRequired  ErrorCode = "captcha_required"
-	ErrCodeNotFound         ErrorCode = "not_found"
-	ErrCodePermissionDenied ErrorCode = "permission_denied"
-	ErrCodeServerError      ErrorCode = "server_error"
-	ErrCodeInvalidRequest   ErrorCode = "invalid_request"
-	ErrCodeUnknown          ErrorCode = "unknown"
+	ErrCodeNetworkFailure       ErrorCode = "network_failure"
+	ErrCodeAuthRequired         ErrorCode = "auth_required"
+	ErrCodeRateLimited          ErrorCode = "rate_limited"
+	ErrCodeCaptchaRequired      ErrorCode = "captcha_required"
+	ErrCodeTwoFactorRequired    ErrorCode = "two_factor_required"
+	ErrCodeDataPasswordRequired ErrorCode = "data_password_required"
+	ErrCodeKeyUnlockFailed      ErrorCode = "key_unlock_failed"
+	ErrCodeNotFound             ErrorCode = "not_found"
+	ErrCodePermissionDenied     ErrorCode = "permission_denied"
+	ErrCodeServerError          ErrorCode = "server_error"
+	ErrCodeInvalidRequest       ErrorCode = "invalid_request"
+	ErrCodeUnknown              ErrorCode = "unknown"
 )
 
 // BackendError maps backend-specific failures to protocol-safe transfer errors.
@@ -60,11 +64,15 @@ func (e *BackendError) Unwrap() error {
 }
 
 func newBackendError(code int, message string, err error) error {
+	return newBackendErrorWithCode(code, message, err, classifyErrorCode(code))
+}
+
+func newBackendErrorWithCode(code int, message string, err error, errorCode ErrorCode) error {
 	return &BackendError{
 		Code:      code,
 		Message:   message,
 		Err:       err,
-		ErrorCode: classifyErrorCode(code),
+		ErrorCode: errorCode,
 		Retryable: isRetryableCode(code),
 		Temporary: isTemporaryCode(code),
 	}
@@ -121,7 +129,9 @@ func backendErrorDetails(err error) (int, string) {
 // alongside bridge commands. The provider name is passed to proton-drive-cli
 // which resolves credentials locally (git-credential, pass-cli, etc.).
 type OperationCredentials struct {
-	CredentialProvider string
+	CredentialProvider     string
+	DataCredentialProvider string
+	DataCredentialHost     string
 }
 
 type LocalStoreBackend struct {
@@ -233,23 +243,40 @@ func (b *LocalStoreBackend) objectPath(oid string) string {
 // Credential resolution is fully delegated to proton-drive-cli — the Go adapter
 // only passes the provider name (git-credential, pass-cli, etc.).
 type DriveCLIBackend struct {
-	bridge             *BridgeClient
-	credentialProvider string
-	authenticated      bool
+	bridge                 *BridgeClient
+	credentialProvider     string
+	dataCredentialProvider string
+	dataCredentialHost     string
+	authenticated          bool
+}
+
+type DriveCLIBackendOptions struct {
+	DataCredentialProvider string
+	DataCredentialHost     string
 }
 
 // NewDriveCLIBackend creates a backend that delegates to proton-drive-cli.
 // The credentialProvider name is forwarded to proton-drive-cli which resolves
 // credentials locally.
-func NewDriveCLIBackend(bridge *BridgeClient, credentialProvider string) *DriveCLIBackend {
+func NewDriveCLIBackend(bridge *BridgeClient, credentialProvider string, opts ...DriveCLIBackendOptions) *DriveCLIBackend {
+	var options DriveCLIBackendOptions
+	if len(opts) > 0 {
+		options = opts[0]
+	}
 	return &DriveCLIBackend{
-		bridge:             bridge,
-		credentialProvider: credentialProvider,
+		bridge:                 bridge,
+		credentialProvider:     credentialProvider,
+		dataCredentialProvider: options.DataCredentialProvider,
+		dataCredentialHost:     options.DataCredentialHost,
 	}
 }
 
 func (b *DriveCLIBackend) operationCredentials() OperationCredentials {
-	return OperationCredentials{CredentialProvider: b.credentialProvider}
+	return OperationCredentials{
+		CredentialProvider:     b.credentialProvider,
+		DataCredentialProvider: b.dataCredentialProvider,
+		DataCredentialHost:     b.dataCredentialHost,
+	}
 }
 
 func (b *DriveCLIBackend) Initialize(session *Session) error {
@@ -362,6 +389,11 @@ func mapBridgeError(err error, fallbackMessage string) error {
 		return nil
 	}
 
+	var bridgeErr *BridgeError
+	if errors.As(err, &bridgeErr) {
+		return mapStructuredBridgeError(bridgeErr, fallbackMessage, err)
+	}
+
 	msg := strings.ToLower(strings.TrimSpace(err.Error()))
 
 	// Parse [code] prefix from bridge error format
@@ -389,6 +421,17 @@ func mapBridgeError(err error, fallbackMessage string) error {
 	}
 
 	switch {
+	case strings.Contains(msg, "two-factor"),
+		strings.Contains(msg, "2fa"),
+		strings.Contains(msg, "fido2"):
+		return newBackendErrorWithCode(401, "two-factor authentication required", err, ErrCodeTwoFactorRequired)
+	case strings.Contains(msg, "mailbox/data password"),
+		strings.Contains(msg, "data password"),
+		strings.Contains(msg, "key decryption"):
+		return newBackendErrorWithCode(401, "mailbox/data password required for this Proton account", err, ErrCodeDataPasswordRequired)
+	case strings.Contains(msg, "failed to decrypt"),
+		strings.Contains(msg, "decrypt any keys"):
+		return newBackendErrorWithCode(401, "mailbox/data password could not unlock Proton keys", err, ErrCodeKeyUnlockFailed)
 	case strings.Contains(msg, "invalid or expired session"),
 		strings.Contains(msg, "unauthorized"),
 		strings.Contains(msg, "401"):
@@ -410,5 +453,64 @@ func mapBridgeError(err error, fallbackMessage string) error {
 		return newBackendError(503, "bridge concurrency limit reached", err)
 	default:
 		return newBackendError(502, fallbackMessage, err)
+	}
+}
+
+type bridgeErrorDetails struct {
+	ErrorCode      string `json:"errorCode"`
+	TwoFactorType  string `json:"twoFactorType"`
+	TOTPAllowed    bool   `json:"totpAllowed"`
+	FIDO2Available bool   `json:"fido2Available"`
+}
+
+func mapStructuredBridgeError(bridgeErr *BridgeError, fallbackMessage string, original error) error {
+	if bridgeErr == nil {
+		return newBackendError(502, fallbackMessage, original)
+	}
+
+	msg := strings.TrimSpace(bridgeErr.Message)
+	if msg == "" {
+		msg = fallbackMessage
+	}
+	lowerMsg := strings.ToLower(msg)
+
+	var details bridgeErrorDetails
+	if bridgeErr.Details != "" {
+		_ = json.Unmarshal([]byte(bridgeErr.Details), &details)
+	}
+	errorCode := strings.ToUpper(strings.TrimSpace(details.ErrorCode))
+
+	switch {
+	case errorCode == "TWO_FACTOR_REQUIRED" || strings.Contains(lowerMsg, "two-factor") || strings.Contains(lowerMsg, "2fa") || strings.Contains(lowerMsg, "fido2"):
+		message := "two-factor authentication required"
+		if details.TwoFactorType == "fido2" {
+			message = "FIDO2 two-factor authentication required"
+		}
+		return newBackendErrorWithCode(401, message, original, ErrCodeTwoFactorRequired)
+	case errorCode == "DATA_PASSWORD_REQUIRED" || strings.Contains(lowerMsg, "mailbox/data password") || strings.Contains(lowerMsg, "data password") || strings.Contains(lowerMsg, "key decryption"):
+		return newBackendErrorWithCode(401, "mailbox/data password required for this Proton account", original, ErrCodeDataPasswordRequired)
+	case strings.Contains(lowerMsg, "failed to decrypt") || strings.Contains(lowerMsg, "decrypt any keys"):
+		return newBackendErrorWithCode(401, "mailbox/data password could not unlock Proton keys", original, ErrCodeKeyUnlockFailed)
+	}
+
+	switch bridgeErr.Code {
+	case 401:
+		return newBackendError(401, "session is invalid or expired", original)
+	case 404:
+		return newBackendError(404, "object not found in drive backend", original)
+	case 407:
+		return newBackendError(407, "captcha verification required — run: proton-drive login", original)
+	case 429:
+		return newBackendError(429, "rate limited by proton api — wait and retry", original)
+	case 503:
+		return newBackendError(503, "drive service is unavailable", original)
+	default:
+		if bridgeErr.Code >= 500 {
+			return newBackendError(bridgeErr.Code, fallbackMessage, original)
+		}
+		if bridgeErr.Code >= 400 {
+			return newBackendError(bridgeErr.Code, msg, original)
+		}
+		return newBackendError(502, fallbackMessage, original)
 	}
 }

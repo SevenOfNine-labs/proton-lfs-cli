@@ -37,10 +37,11 @@
 **Mitigations**:
 
 - Credentials passed via stdin JSON to subprocess (not visible in `ps aux`)
-- Credential flow: Go adapter sends `credentialProvider` name → proton-drive-cli resolves pass-cli or git-credential internally (memory only)
+- Credential flow: Go adapter sends non-secret provider selectors (`credentialProvider`, optional `dataCredentialProvider`, optional `dataCredentialHost`) → proton-drive-cli resolves pass-cli or git-credential internally (memory only)
 - **No HTTP layer** — credentials never traverse network connections, even localhost
 - **Passwords are never persisted to disk** — `saveSession()` strips `mailboxPassword` before writing
 - **Passwords are never accepted via CLI flags** — only resolved via pass-cli or git-credential
+- Two-password accounts use a distinct mailbox/data password credential entry; the login password is not reused as a fallback
 - Session file (`~/.proton-drive-cli/session.json`) contains only revocable tokens (sessionId, accessToken, refreshToken)
 - Session directory `0700`, session file `0600` (owner-only)
 - Error messages sanitized — no credential values in responses or logs
@@ -123,6 +124,7 @@
 - Credentials flow: git credential helper -> proton-drive-cli (memory only) -> Proton API
 - `git credential approve/reject` used for proper credential lifecycle management
 - When `credentialProvider=git-credential` is used, credentials are resolved entirely within proton-drive-cli — they never pass through the Go adapter
+- When `dataCredentialProvider=git-credential` is used, the mailbox/data password is resolved from a separate host/key (`proton-data.proton-lfs-cli.local` by default)
 - The Go adapter skips pass-cli resolution entirely in git-credential mode, eliminating that attack surface
 
 **Note**: The security of stored credentials depends on the underlying credential helper (macOS Keychain, Windows Credential Manager, etc.). The git credential protocol itself does not encrypt data in transit between git and the helper.

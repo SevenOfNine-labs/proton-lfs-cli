@@ -202,6 +202,8 @@ graph LR
 ```json
 {
   "credentialProvider": "pass-cli",
+  "dataCredentialProvider": "",
+  "dataCredentialHost": "proton-data.proton-lfs-cli.local",
   "autostart": true,
   "enableNotifications": true
 }
@@ -400,7 +402,9 @@ stateDiagram-v2
   "oid": "abc123...",
   "localPath": "/tmp/lfs-abc123",
   "remotePath": "/LFS/ab/c1/abc123...",
-  "credentialProvider": "pass-cli"
+  "credentialProvider": "pass-cli",
+  "dataCredentialProvider": "pass-cli",
+  "dataCredentialHost": "proton-data.proton-lfs-cli.local"
 }
 
 // Bridge → Adapter (stdout)
@@ -603,7 +607,7 @@ flowchart LR
     User -.store via pass-cli.-> PassVault
     User -.store via git credential.-> Keychain
 
-    Adapter --> | {credentialProvider} | Bridge
+    Adapter --> | {credentialProvider, dataCredentialProvider} | Bridge
     Bridge -.pass-cli mode.-> PassVault
     Bridge -.git-credential mode.-> Keychain
 
@@ -664,13 +668,13 @@ flowchart LR
 
     subgraph "Artifacts"
         AdapterBin[git-lfs-proton-adapter]
-        TrayBin[proton-lfs-cli-tray]
+        TrayBin[proton-lfs-tray]
         CLIBin[proton-drive-cli<br/>SEA executable]
     end
 
     subgraph "Distribution"
         Bundle[Bundle Script<br/>scripts/package-bundle.sh]
-        macOSApp[ProtonGitLFS.app]
+        macOSApp[ProtonLFS.app]
         LinuxTar[proton-lfs-cli.tar.gz]
     end
 
@@ -711,10 +715,10 @@ make install        # Install bundle to system
 
 ```
 
-ProtonGitLFS.app/
+ProtonLFS.app/
 └── Contents/
     ├── MacOS/
-    │   ├── proton-lfs-cli-tray  # Tray app binary
+    │   ├── proton-lfs-tray  # Tray app binary
     │   ├── git-lfs-proton-adapter
     │   └── proton-drive-cli     # SEA executable
     └── Info.plist
@@ -727,7 +731,7 @@ ProtonGitLFS.app/
 
 proton-lfs-cli/
 ├── bin/
-│   ├── proton-lfs-cli-tray
+│   ├── proton-lfs-tray
 │   ├── git-lfs-proton-adapter
 │   └── proton-drive-cli
 └── share/
@@ -762,7 +766,7 @@ flowchart TB
 
     Checksums --> Release[GitHub Release<br/>Attach artifacts]
 
-    Release --> Artifacts[Artifacts:<br/>- ProtonGitLFS-{os}-{arch}.{ext}<br/>- checksums.txt]
+    Release --> Artifacts[Artifacts:<br/>- ProtonLFS-{os}-{arch}.{ext}<br/>- checksums.txt]
 
 ```
 

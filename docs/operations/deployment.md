@@ -34,10 +34,14 @@ pass-cli login
 make test-integration-sdk
 ```
 
-Optional environment variables for accounts that need explicit data password or 2FA:
+For accounts that need two-factor authentication, complete interactive
+`proton-drive login` before SDK transfers. For two-password accounts, configure
+a separate mailbox/data password credential provider instead of using secret
+environment variables:
 
-- `PROTON_DATA_PASSWORD`
-- `PROTON_SECOND_FACTOR_CODE`
+```bash
+git config lfs.customtransfer.proton.args "--backend=sdk --credential-provider git-credential --data-credential-provider git-credential"
+```
 
 If `node` is not visible to non-interactive shells, pass an explicit binary path:
 

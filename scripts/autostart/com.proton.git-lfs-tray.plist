@@ -7,7 +7,7 @@
   <string>com.proton.lfs-tray</string>
   <key>ProgramArguments</key>
   <array>
-    <string>/Applications/ProtonGitLFS.app/Contents/MacOS/proton-lfs-cli-tray</string>
+    <string>/Applications/ProtonLFS.app/Contents/MacOS/proton-lfs-tray</string>
   </array>
   <key>RunAtLoad</key>
   <true/>

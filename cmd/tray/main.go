@@ -1,4 +1,4 @@
-// Proton Git LFS system tray application.
+// Proton LFS system tray application.
 package main
 
 import (
@@ -67,7 +67,7 @@ func main() {
 	systray.Run(onReady, onExit)
 }
 
-const usage = `Proton Git LFS — system tray app and CLI
+const usage = `Proton LFS — system tray app and CLI
 
 Usage:
   proton-lfs-cli                   Launch the system tray app

@@ -52,15 +52,17 @@ const (
 
 // Adapter manages the transfer session with Git LFS
 type Adapter struct {
-	driveCLIBin        string
-	logger             *log.Logger
-	session            *Session
-	currentOperation   Direction
-	allowMockTransfers bool
-	localStoreDir      string
-	backendKind        string
-	backend            TransferBackend
-	credentialProvider string
+	driveCLIBin            string
+	logger                 *log.Logger
+	session                *Session
+	currentOperation       Direction
+	allowMockTransfers     bool
+	localStoreDir          string
+	backendKind            string
+	backend                TransferBackend
+	credentialProvider     string
+	dataCredentialProvider string
+	dataCredentialHost     string
 }
 
 // Message received from Git LFS
@@ -340,6 +342,7 @@ func classifyError(code int, message string) (state string, errorCode string, er
 	state = config.StateError // default
 	errorCode = "unknown_error"
 	errorDetail = ""
+	lowerMessage := strings.ToLower(message)
 
 	// Check for CAPTCHA (code 407)
 	if code == 407 || strings.Contains(message, "CAPTCHA") {
@@ -354,6 +357,25 @@ func classifyError(code int, message string) (state string, errorCode string, er
 		state = config.StateRateLimited
 		errorCode = "rate_limited"
 		errorDetail = "Wait before retrying operations. The Proton API has rate-limited requests."
+		return
+	}
+
+	if strings.Contains(lowerMessage, "two-factor") ||
+		strings.Contains(lowerMessage, "2fa") ||
+		strings.Contains(lowerMessage, "fido2") {
+		state = config.StateAuthRequired
+		errorCode = "two_factor_required"
+		errorDetail = "Complete Proton two-factor authentication with proton-drive login"
+		return
+	}
+
+	if strings.Contains(lowerMessage, "mailbox/data password") ||
+		strings.Contains(lowerMessage, "data password") ||
+		strings.Contains(lowerMessage, "key decryption") ||
+		strings.Contains(lowerMessage, "unlock proton keys") {
+		state = config.StateAuthRequired
+		errorCode = "data_password_required"
+		errorDetail = "Provide the Proton mailbox/data password; do not retry account login"
 		return
 	}
 
@@ -657,6 +679,11 @@ CREDENTIAL PROVIDERS (sdk backend only)
     git-credential
             Credentials resolved by proton-drive-cli via git credential fill.
             Setup: proton-drive credential store -u <email>
+    mailbox/data password
+            Optional separate provider for two-password Proton accounts.
+            Configure --data-credential-provider and store the mailbox
+            password in a distinct secure credential entry. It is never
+            passed as a command-line argument.
 
 SECURITY
     - SHA-256 verification on upload and download
@@ -676,6 +703,8 @@ ENVIRONMENT VARIABLES
     PROTON_LFS_BACKEND             Backend: local or sdk (default: local)
     PROTON_LFS_LOCAL_STORE_DIR     Local store directory
     PROTON_CREDENTIAL_PROVIDER     Credential provider: pass-cli or git-credential
+    PROTON_DATA_CREDENTIAL_PROVIDER Optional mailbox/data password provider
+    PROTON_DATA_CREDENTIAL_HOST    Host/key for data password entry
     PROTON_DRIVE_CLI_BIN           proton-drive-cli path
     NODE_BIN                       Node.js binary path
     LFS_STORAGE_BASE               Remote storage base folder (default: LFS)
@@ -697,6 +726,10 @@ EXAMPLES
     git config lfs.customtransfer.proton.path  ./bin/git-lfs-proton-adapter
     git config lfs.customtransfer.proton.args  "--backend sdk --credential-provider git-credential"
     git config lfs.standalonetransferagent     proton
+
+    # Two-password Proton account with separate mailbox password entry
+    git config lfs.customtransfer.proton.args \
+      "--backend sdk --credential-provider git-credential --data-credential-provider git-credential"
 `)
 }
 
@@ -712,6 +745,8 @@ func main() {
 	localStoreDir := flag.String("local-store-dir", envTrim(EnvLocalStoreDir), "Local object store directory used for standalone transfers")
 	defaultCredProvider := envOrDefault(EnvCredentialProvider, DefaultCredentialProvider)
 	credentialProvider := flag.String("credential-provider", defaultCredProvider, "Credential provider: pass-cli (default) or git-credential")
+	dataCredentialProvider := flag.String("data-credential-provider", envTrim(EnvDataCredentialProvider), "Optional mailbox/data password credential provider: pass-cli or git-credential")
+	dataCredentialHost := flag.String("data-credential-host", envOrDefault(EnvDataCredentialHost, DefaultDataCredentialHost), "Credential host/key for mailbox/data password provider")
 	debug := flag.Bool("debug", false, "Enable debug logging")
 	showVersion := flag.Bool("version", false, "Print version information")
 	flag.Usage = func() { printUsage(os.Stderr) }
@@ -734,6 +769,8 @@ func main() {
 	if adapter.credentialProvider == "" {
 		adapter.credentialProvider = DefaultCredentialProvider
 	}
+	adapter.dataCredentialProvider = strings.ToLower(strings.TrimSpace(*dataCredentialProvider))
+	adapter.dataCredentialHost = strings.TrimSpace(*dataCredentialHost)
 
 	switch adapter.backendKind {
 	case BackendLocal:
@@ -745,7 +782,10 @@ func main() {
 			AppVersion:  envTrim(EnvAppVersion),
 		}
 		bridge := NewBridgeClient(bridgeCfg)
-		adapter.backend = NewDriveCLIBackend(bridge, adapter.credentialProvider)
+		adapter.backend = NewDriveCLIBackend(bridge, adapter.credentialProvider, DriveCLIBackendOptions{
+			DataCredentialProvider: adapter.dataCredentialProvider,
+			DataCredentialHost:     adapter.dataCredentialHost,
+		})
 	default:
 		fmt.Fprintf(os.Stderr, "invalid backend %q (supported: local, sdk)\n", adapter.backendKind)
 		os.Exit(2)

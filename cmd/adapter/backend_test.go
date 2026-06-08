@@ -172,6 +172,9 @@ func TestMapBridgeError(t *testing.T) {
 		{"429 prefix", "[429] rate limited", 429},
 		{"text captcha", "captcha verification required", 407},
 		{"text rate limit", "rate limit exceeded", 429},
+		{"text two factor", "Two-factor authentication code required", 401},
+		{"text data password", "Mailbox/data password required for this two-password Proton account", 401},
+		{"text key unlock", "Failed to decrypt any keys", 401},
 		{"concurrency limit", "bridge concurrency limit reached (10)", 503},
 		{"unknown error", "something unexpected", 502},
 	}
@@ -181,6 +184,74 @@ func TestMapBridgeError(t *testing.T) {
 			code, _ := backendErrorDetails(err)
 			if code != tc.wantCode {
 				t.Fatalf("expected code %d, got %d for input %q", tc.wantCode, code, tc.input)
+			}
+		})
+	}
+}
+
+func TestMapStructuredBridgeErrorAuthStates(t *testing.T) {
+	cases := []struct {
+		name      string
+		err       *BridgeError
+		wantCode  int
+		wantClass ErrorCode
+	}{
+		{
+			name: "totp required",
+			err: &BridgeError{
+				Code:    401,
+				Message: "Two-factor authentication code required",
+				Details: `{"errorCode":"TWO_FACTOR_REQUIRED","twoFactorType":"totp","totpAllowed":true}`,
+			},
+			wantCode:  401,
+			wantClass: ErrCodeTwoFactorRequired,
+		},
+		{
+			name: "fido2 required",
+			err: &BridgeError{
+				Code:    401,
+				Message: "FIDO2 two-factor authentication is required",
+				Details: `{"errorCode":"TWO_FACTOR_REQUIRED","twoFactorType":"fido2","fido2Available":true}`,
+			},
+			wantCode:  401,
+			wantClass: ErrCodeTwoFactorRequired,
+		},
+		{
+			name: "data password required",
+			err: &BridgeError{
+				Code:    401,
+				Message: "Mailbox/data password required for this two-password Proton account",
+				Details: `{"errorCode":"DATA_PASSWORD_REQUIRED","passwordMode":2}`,
+			},
+			wantCode:  401,
+			wantClass: ErrCodeDataPasswordRequired,
+		},
+		{
+			name: "key unlock failed",
+			err: &BridgeError{
+				Code:    500,
+				Message: "Failed to decrypt any keys",
+			},
+			wantCode:  401,
+			wantClass: ErrCodeKeyUnlockFailed,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := mapBridgeError(tc.err, "fallback")
+			var backendErr *BackendError
+			if !errors.As(err, &backendErr) {
+				t.Fatalf("expected BackendError, got %T", err)
+			}
+			if backendErr.Code != tc.wantCode {
+				t.Fatalf("expected code %d, got %d (%v)", tc.wantCode, backendErr.Code, err)
+			}
+			if backendErr.ErrorCode != tc.wantClass {
+				t.Fatalf("expected class %s, got %s", tc.wantClass, backendErr.ErrorCode)
+			}
+			if backendErr.Retryable || backendErr.Temporary {
+				t.Fatalf("auth state should not be retryable/temporary: %+v", backendErr)
 			}
 		})
 	}

@@ -31,19 +31,22 @@ const (
 	DefaultDriveCLIBin        = "submodules/proton-drive-cli/dist/index.js"
 	DefaultStorageBase        = "LFS"
 	DefaultCredentialProvider = CredentialProviderPassCLI
+	DefaultDataCredentialHost = "proton-data.proton-lfs-cli.local"
 )
 
 // Environment variable names
 const (
-	EnvDriveCLIBin        = "PROTON_DRIVE_CLI_BIN"
-	EnvNodeBin            = "NODE_BIN"
-	EnvStorageBase        = "LFS_STORAGE_BASE"
-	EnvAppVersion         = "PROTON_APP_VERSION"
-	EnvBackend            = "PROTON_LFS_BACKEND"
-	EnvAllowMockTransfers = "ADAPTER_ALLOW_MOCK_TRANSFERS"
-	EnvLocalStoreDir      = "PROTON_LFS_LOCAL_STORE_DIR"
-	EnvCredentialProvider = "PROTON_CREDENTIAL_PROVIDER"
-	EnvStatusFile         = "PROTON_LFS_STATUS_FILE"
+	EnvDriveCLIBin            = "PROTON_DRIVE_CLI_BIN"
+	EnvNodeBin                = "NODE_BIN"
+	EnvStorageBase            = "LFS_STORAGE_BASE"
+	EnvAppVersion             = "PROTON_APP_VERSION"
+	EnvBackend                = "PROTON_LFS_BACKEND"
+	EnvAllowMockTransfers     = "ADAPTER_ALLOW_MOCK_TRANSFERS"
+	EnvLocalStoreDir          = "PROTON_LFS_LOCAL_STORE_DIR"
+	EnvCredentialProvider     = "PROTON_CREDENTIAL_PROVIDER"
+	EnvDataCredentialProvider = "PROTON_DATA_CREDENTIAL_PROVIDER"
+	EnvDataCredentialHost     = "PROTON_DATA_CREDENTIAL_HOST"
+	EnvStatusFile             = "PROTON_LFS_STATUS_FILE"
 )
 
 // AppDir is the base directory for Proton LFS runtime files.
