@@ -9,7 +9,8 @@ Project-owned docs live here. Upstream/vendor docs remain under `submodules/` an
 3. `docs/project/project-plan.md`
 4. `docs/architecture/sdk-capability-matrix.md`
 5. `docs/architecture/proton-auth-hardening-plan.md`
-6. `docs/testing/spec-gap-analysis.md`
+6. `docs/operations/live-canary-runbook.md`
+7. `docs/testing/spec-gap-analysis.md`
 
 ## Structure
 

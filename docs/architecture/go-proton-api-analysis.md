@@ -1,7 +1,7 @@
 # go-proton-api Analysis for proton-lfs-cli
 
 **Date**: 2026-02-16
-**Repository**: https://github.com/ProtonMail/go-proton-api
+**Repository**: <https://github.com/ProtonMail/go-proton-api>
 **Status**: Official Proton AG library, actively maintained
 
 ## Executive Summary
@@ -13,48 +13,58 @@ The `go-proton-api` library provides **limited Proton Drive support** focused on
 ### ✅ Supported Operations
 
 **Volume Management:**
+
 - `ListVolumes()` - Get all available Drive volumes
 - `GetVolume(volumeID)` - Get specific volume details
 
 **Link Management:**
+
 - `GetLink(shareID, linkID)` - Get link metadata
 - `CreateFile(shareID, req)` - Create file metadata entry
 - `CreateFolder(shareID, req)` - Create folder metadata entry
 
 **File Operations:**
+
 - `ListRevisions(shareID, linkID)` - List file revisions
 - `GetRevision(shareID, linkID, revisionID, ...)` - Get revision details
 - `UpdateRevision(shareID, linkID, revisionID, req)` - Update revision metadata
 
 **Folder Operations:**
+
 - `ListChildren(shareID, linkID, showAll)` - List folder contents
 - `TrashChildren(shareID, linkID, childIDs)` - Move children to trash
 - `DeleteChildren(shareID, linkID, childIDs)` - Permanently delete children
 
 **Event System:**
+
 - Drive event handling for synchronization (`event_drive.go`)
 
 **Generic Download:**
+
 - `DownloadAndVerify(kr, url, sig)` - Download and verify signed files (not Drive-specific)
 
 ### ❌ Missing Critical Features
 
 **No File Content Upload:**
+
 - `CreateFile()` only creates metadata, doesn't upload binary content
 - No streaming upload support
 - No chunked upload for large files
 
 **No File Content Download:**
+
 - No Drive-specific download methods
 - Generic `DownloadAndVerify()` requires URL, not Drive link/revision ID
 - Would need to extract download URL from Drive API first
 
 **No End-to-End Encryption:**
+
 - No file content encryption before upload
 - No file content decryption after download
 - Uses `gopenpgp` for signatures but not for file encryption
 
 **No Complete Workflow:**
+
 - No helper methods for the full upload/download cycle
 - No integration between metadata operations and content transfer
 - No automatic key management for file encryption
@@ -62,7 +72,7 @@ The `go-proton-api` library provides **limited Proton Drive support** focused on
 ## Comparison with proton-drive-cli
 
 | Feature | go-proton-api | proton-drive-cli | Winner |
-|---------|---------------|------------------|--------|
+| --- | --- | --- | --- |
 | **Authentication** | ✅ SRP auth | ✅ SRP auth | Tie |
 | **Session Management** | ✅ Token refresh | ✅ Token refresh | Tie |
 | **Volume Operations** | ✅ List/Get | ✅ Full CRUD | proton-drive-cli |
@@ -79,6 +89,7 @@ The `go-proton-api` library provides **limited Proton Drive support** focused on
 ### 1. Incomplete Drive API Coverage
 
 The library only implements metadata operations. For Git LFS, we need:
+
 ```
 Upload Flow (Required):
 1. Generate encryption keys ❌ Not provided
@@ -103,6 +114,7 @@ Download Flow (Required):
 ### 3. Missing E2E Encryption Layer
 
 The library has no file encryption implementation. We would need to:
+
 - Implement AES-256 file encryption (complex)
 - Implement OpenPGP key management (complex)
 - Implement block-based chunking (complex)
@@ -129,6 +141,7 @@ The SRP authentication implementation could be useful as a reference, but our cu
 **Files**: `link.go`, `volume.go`, `link_file.go`, `link_folder.go`
 
 Shows the actual Proton Drive API endpoints:
+
 ```go
 GET /drive/volumes
 GET /drive/volumes/{volumeID}
@@ -146,6 +159,7 @@ GET /drive/shares/{shareID}/links/{linkID}/revisions
 **Files**: `*_types.go` files
 
 Provides Go struct definitions for API responses:
+
 ```go
 type Volume struct { ... }
 type Link struct { ... }
@@ -168,6 +182,7 @@ Shows how Proton API errors are handled in Go.
 ### ❌ Do Not Replace proton-drive-cli Bridge
 
 **Reasons:**
+
 1. go-proton-api lacks file content upload/download
 2. Missing E2E encryption implementation
 3. Not based on official Drive SDK
@@ -177,11 +192,13 @@ Shows how Proton API errors are handled in Go.
 ### ✅ Keep Current Architecture
 
 **Our current approach is better:**
+
 ```
 Go Adapter → proton-drive-cli (Node.js subprocess) → @protontech/drive-sdk
 ```
 
 **Advantages:**
+
 - Uses official Drive SDK (guaranteed compatibility)
 - Complete E2E encryption implementation
 - Full file upload/download support
@@ -195,6 +212,7 @@ Go Adapter → proton-drive-cli (Node.js subprocess) → @protontech/drive-sdk
 ### 📚 Reference Use Only
 
 Use go-proton-api as a **reference** for:
+
 - Understanding Proton Drive API endpoints
 - Learning the REST API structure
 - Cross-referencing authentication flows

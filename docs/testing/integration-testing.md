@@ -18,7 +18,8 @@ Integration tests validate Git LFS client behavior against the adapter runtime a
 | `make test-integration-config-matrix` | Direction config matrix tests |
 | `make test-integration-credentials` | Credential flow security tests |
 | `make test-e2e-mock` | Mocked E2E pipeline (no real credentials) |
-| `make test-e2e-real` | Real Proton Drive E2E (requires pass-cli login + build-drive-cli) |
+| `make live-canary-preflight` | Offline gate before any real Proton canary |
+| `make test-e2e-real` | Guarded real Proton Drive E2E; requires the live canary acknowledgement |
 
 ## Prerequisites
 
@@ -101,9 +102,23 @@ This uses `mock-pass-cli.sh` and `mock-proton-drive-cli.js` to exercise the full
 - High-volume concurrent stress/soak coverage (`PROTON_LFS_STRESS_*`).
 - Mocked E2E pipeline coverage (full Git LFS push/pull through mock proton-drive-cli).
 
+## Real Proton Canary
+
+Do not run real-account tests directly. First follow
+`docs/operations/live-canary-runbook.md`.
+
+`make test-e2e-real` refuses to run unless this acknowledgement is set for the
+same command:
+
+```bash
+PROTON_LFS_LIVE_CANARY=I_UNDERSTAND_THIS_TOUCHES_A_REAL_PROTON_ACCOUNT \
+  make test-e2e-real
+```
+
 ## High-Value Missing Tests
 
-- Real Proton API integration tests are runnable via `make test-integration-sdk-real` (requires pass-cli login and built proton-drive-cli).
+- Real Proton API integration tests remain gated behind the live canary
+  runbook and should never run in CI.
 
 ## Stress Tuning
 

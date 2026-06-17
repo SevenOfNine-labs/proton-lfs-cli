@@ -27,30 +27,30 @@ behavior that can trigger Proton anti-abuse systems.
 Primary sources reviewed:
 
 - Proton `go-proton-api` auth flow:
-  https://github.com/ProtonMail/go-proton-api/blob/master/manager_auth.go
+  <https://github.com/ProtonMail/go-proton-api/blob/master/manager_auth.go>
 - Proton `go-proton-api` auth/session types:
-  https://github.com/ProtonMail/go-proton-api/blob/master/manager_auth_types.go
+  <https://github.com/ProtonMail/go-proton-api/blob/master/manager_auth_types.go>
 - Proton `go-proton-api` refresh-on-401 client handling:
-  https://github.com/ProtonMail/go-proton-api/blob/master/client.go
+  <https://github.com/ProtonMail/go-proton-api/blob/master/client.go>
 - Proton Bridge staged login and key unlock:
-  https://github.com/ProtonMail/proton-bridge/blob/master/internal/bridge/user.go
+  <https://github.com/ProtonMail/proton-bridge/blob/master/internal/bridge/user.go>
 - Proton Bridge CLI 2FA and mailbox-password flow:
-  https://github.com/ProtonMail/proton-bridge/blob/master/internal/frontend/cli/accounts.go
+  <https://github.com/ProtonMail/proton-bridge/blob/master/internal/frontend/cli/accounts.go>
 - Proton Bridge human verification helper:
-  https://github.com/ProtonMail/proton-bridge/blob/master/internal/hv/hv.go
+  <https://github.com/ProtonMail/proton-bridge/blob/master/internal/hv/hv.go>
 - rclone Proton Drive backend docs:
-  https://rclone.org/protondrive/
+  <https://rclone.org/protondrive/>
 - rclone Proton Drive backend source:
-  https://github.com/rclone/rclone/blob/master/backend/protondrive/protondrive.go
+  <https://github.com/rclone/rclone/blob/master/backend/protondrive/protondrive.go>
 - Proton two-password mode support article:
-  https://proton.me/support/what-is-the-mailbox-password/
+  <https://proton.me/support/what-is-the-mailbox-password/>
 
 Useful community precedent:
 
 - `Proton-API-Bridge`, used by rclone's Proton Drive backend, wraps
   `go-proton-api` and models reusable login credentials, 2FA, mailbox
   password, and salted key pass as separate concerns:
-  https://github.com/henrybear327/Proton-API-Bridge
+  <https://github.com/henrybear327/Proton-API-Bridge>
 
 ## Research Findings
 
@@ -340,6 +340,8 @@ Only after all offline tests pass:
 4. Do not run upload/download load tests in the same session.
 5. If any rate-limit, human-verification, or auth anomaly appears, stop and
    return to offline fixtures.
+
+Operational procedure: `docs/operations/live-canary-runbook.md`.
 
 ## Acceptance Criteria
 

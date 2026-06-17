@@ -110,6 +110,7 @@ func TestTerminalCommandDarwin(t *testing.T) {
 	cmd := terminalCommand("echo hello")
 	if cmd == nil {
 		t.Fatal("expected non-nil command on darwin")
+		return
 	}
 	if len(cmd.Args) < 3 {
 		t.Fatalf("expected at least 3 args, got %v", cmd.Args)

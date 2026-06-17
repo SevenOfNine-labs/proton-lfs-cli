@@ -12,12 +12,13 @@ LDFLAGS_VERSION := -X main.Version=$(VERSION)
 GIT_LFS_DIR := submodules/git-lfs
 DRIVE_CLI_DIR := submodules/proton-drive-cli
 GO_CACHE_DIR := .cache/go-build
+LIVE_CANARY_ACK_VALUE := I_UNDERSTAND_THIS_TOUCHES_A_REAL_PROTON_ACCOUNT
 
 .PHONY: help setup setup-env install-deps \
 	build build-adapter build-tray build-lfs build-drive-cli build-sea build-all build-bundle \
 	install uninstall \
 	test test-adapter test-tray test-lfs test-integration test-integration-timeout test-integration-stress test-integration-sdk test-e2e-mock test-e2e-real test-all \
-	pass-env check-sdk-prereqs check-sdk-real-prereqs \
+	live-canary-preflight pass-env check-live-canary-ack check-sdk-prereqs check-sdk-real-prereqs \
 	fmt lint lint-go \
 	docs docs-lint \
 	clean status install-hooks
@@ -239,7 +240,36 @@ test-e2e-mock: build-adapter ## Mocked E2E pipeline (no real credentials)
 		PASS_MOCK_PASSWORD=integration-password \
 		GOCACHE=$(PWD)/$(GO_CACHE_DIR) $(GO) test -tags integration ./tests/integration/... -run E2EMocked -v
 
-test-e2e-real: build-adapter build-drive-cli ## Real Proton Drive E2E (requires pass-cli login + build-drive-cli)
+live-canary-preflight: build-adapter build-drive-cli ## Offline gate before any real Proton canary
+	@echo "Running offline live-canary preflight (no Proton login)..."
+	@mkdir -p $(GO_CACHE_DIR)
+	GOCACHE=$(PWD)/$(GO_CACHE_DIR) $(GO) test ./...
+	@if [ "$(JS_PM)" = "yarn" ]; then \
+		cd $(DRIVE_CLI_DIR) && COREPACK_HOME=$(COREPACK_HOME_DIR) $(JS_PM) lint && \
+			COREPACK_HOME=$(COREPACK_HOME_DIR) $(JS_PM) jest src/auth/flow-safety.test.ts src/cli/doctor.test.ts --runInBand; \
+	else \
+		cd $(DRIVE_CLI_DIR) && $(JS_PM) run lint && \
+			npx jest src/auth/flow-safety.test.ts src/cli/doctor.test.ts --runInBand; \
+	fi
+	@if [ -n "$${LIVE_CANARY_DOCTOR_ARGS:-}" ]; then \
+		echo "Running optional offline doctor with LIVE_CANARY_DOCTOR_ARGS..."; \
+		$(NODE) "$(PWD)/$(DRIVE_CLI_DIR)/dist/index.js" doctor $$LIVE_CANARY_DOCTOR_ARGS; \
+	else \
+		echo "Skipped credential-store doctor. Set LIVE_CANARY_DOCTOR_ARGS to run it."; \
+	fi
+	@echo "Offline live-canary preflight passed."
+
+check-live-canary-ack: ## Refuse real Proton tests without explicit acknowledgement
+	@if [ "$${PROTON_LFS_LIVE_CANARY:-}" != "$(LIVE_CANARY_ACK_VALUE)" ]; then \
+		echo "Refusing to run a real Proton canary."; \
+		echo "This target may touch a real Proton account and must never run by accident."; \
+		echo "Read docs/operations/live-canary-runbook.md first."; \
+		echo "Then run with:"; \
+		echo "  PROTON_LFS_LIVE_CANARY=$(LIVE_CANARY_ACK_VALUE) make test-e2e-real"; \
+		exit 2; \
+	fi
+
+test-e2e-real: check-live-canary-ack build-adapter build-drive-cli ## Real Proton Drive E2E (requires explicit live canary acknowledgement)
 	@mkdir -p $(GO_CACHE_DIR)
 	@eval "$$(./scripts/export-pass-env.sh)" && \
 		GOCACHE=$(PWD)/$(GO_CACHE_DIR) $(GO) test -tags integration ./tests/integration/... -run E2E -v
