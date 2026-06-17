@@ -44,6 +44,7 @@ func TestAdapterInit(t *testing.T) {
 	adapter := NewAdapter()
 	if adapter == nil {
 		t.Fatal("failed to create adapter")
+		return
 	}
 	if adapter.allowMockTransfers {
 		t.Fatal("mock transfers must be disabled by default")

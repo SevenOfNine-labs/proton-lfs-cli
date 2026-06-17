@@ -457,6 +457,92 @@ func TestParseBridgeOutput(t *testing.T) {
 	})
 }
 
+func TestParseBridgeOutputRejectsInvalidEnvelope(t *testing.T) {
+	cases := []struct {
+		name    string
+		stdout  string
+		wantErr string
+	}{
+		{
+			name:    "missing ok",
+			stdout:  `{"payload":{}}`,
+			wantErr: "missing required ok",
+		},
+		{
+			name:    "ok not boolean",
+			stdout:  `{"ok":"true"}`,
+			wantErr: "ok field must be boolean",
+		},
+		{
+			name:    "ok null",
+			stdout:  `{"ok":null}`,
+			wantErr: "ok field must be boolean",
+		},
+		{
+			name:    "success with error",
+			stdout:  `{"ok":true,"error":"unexpected"}`,
+			wantErr: "must not include an error message",
+		},
+		{
+			name:    "success with code",
+			stdout:  `{"ok":true,"code":200}`,
+			wantErr: "must not include an error code",
+		},
+		{
+			name:    "error without message",
+			stdout:  `{"ok":false,"code":401}`,
+			wantErr: "missing error message",
+		},
+		{
+			name:    "error without code",
+			stdout:  `{"ok":false,"error":"unauthorized"}`,
+			wantErr: "missing positive error code",
+		},
+		{
+			name:    "error with payload",
+			stdout:  `{"ok":false,"error":"unauthorized","code":401,"payload":{}}`,
+			wantErr: "must not include payload",
+		},
+		{
+			name:    "unknown field",
+			stdout:  `{"ok":true,"extra":1}`,
+			wantErr: `unknown field "extra"`,
+		},
+		{
+			name:    "code not integer",
+			stdout:  `{"ok":false,"error":"unauthorized","code":"401"}`,
+			wantErr: "code field must be integer",
+		},
+		{
+			name:    "error not string",
+			stdout:  `{"ok":false,"error":{"message":"unauthorized"},"code":401}`,
+			wantErr: "error field must be string",
+		},
+		{
+			name:    "code null",
+			stdout:  `{"ok":false,"error":"unauthorized","code":null}`,
+			wantErr: "code field must be integer",
+		},
+		{
+			name:    "details null",
+			stdout:  `{"ok":false,"error":"unauthorized","code":401,"details":null}`,
+			wantErr: "details field must be string",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := parseBridgeOutput([]byte(tc.stdout), nil)
+			if err == nil {
+				t.Fatal("expected invalid envelope error")
+			}
+			if !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("expected error containing %q, got %v", tc.wantErr, err)
+			}
+		})
+	}
+}
+
 func TestBuildCredentials(t *testing.T) {
 	t.Run("pass-cli provider", func(t *testing.T) {
 		creds := OperationCredentials{CredentialProvider: CredentialProviderPassCLI}
