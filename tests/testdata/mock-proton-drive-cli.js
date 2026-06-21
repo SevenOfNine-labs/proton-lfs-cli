@@ -75,6 +75,31 @@ if (command === 'auth') {
   });
 }
 
+if (command === 'auth-state') {
+  const state = process.env.MOCK_BRIDGE_AUTH_STATE || 'ready';
+  write({
+    ok: true,
+    payload: {
+      state,
+      hasSession: state !== 'needs_login' && state !== 'login_available',
+      sessionValid: state === 'ready',
+      sessionExpired: state === 'session_expired',
+      sessionUidPresent: state !== 'needs_login' && state !== 'login_available',
+      passwordMode: Number(process.env.MOCK_BRIDGE_PASSWORD_MODE || 1),
+      usernamePresent: false,
+      hasExplicitLoginPassword: false,
+      hasExplicitDataPassword: Boolean(request.dataPassword),
+      loginCredentialProvider: request.credentialProvider,
+      dataCredentialProvider: request.dataCredentialProvider,
+      dataCredentialHost: request.dataCredentialHost,
+      allowLogin: Boolean(request.credentialProvider),
+      willAttemptNetwork: false,
+      errors: [],
+      actions: []
+    }
+  });
+}
+
 if (command === 'init') {
   // Ensure the storage base directory exists
   fs.mkdirSync(STORAGE_DIR, { recursive: true });
