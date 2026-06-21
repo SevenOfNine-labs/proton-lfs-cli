@@ -128,7 +128,7 @@ func cliConfig(w io.Writer, args []string) int {
 	provider := args[0]
 	switch provider {
 	case "--help", "-h":
-		_, _ = fmt.Fprintln(w, "Usage: proton-git-lfs config [provider]")
+		_, _ = fmt.Fprintln(w, "Usage: proton-lfs-cli config [provider]")
 		_, _ = fmt.Fprintf(w, "\nShow or set the credential provider.\n")
 		_, _ = fmt.Fprintf(w, "With no argument, prints the current provider.\n\n")
 		_, _ = fmt.Fprintf(w, "Providers: %s, %s\n",

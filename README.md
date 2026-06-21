@@ -2,7 +2,7 @@
 
 End-to-end encrypted Git LFS backend for Proton Drive.
 
-[![Documentation](https://img.shields.io/badge/docs-unified-blue)](https://sevenofnine-ai.github.io/proton-lfs-cli/) [![Go Reference](https://pkg.go.dev/badge/github.com/SevenOfNine-ai/proton-lfs-cli.svg)](https://pkg.go.dev/github.com/SevenOfNine-ai/proton-lfs-cli) [![Tests](https://github.com/SevenOfNine-ai/proton-lfs-cli/actions/workflows/test.yml/badge.svg)](https://github.com/SevenOfNine-ai/proton-lfs-cli/actions/workflows/test.yml)
+[![Documentation](https://img.shields.io/badge/docs-unified-blue)](https://sevenofnine-labs.github.io/proton-lfs-cli/) [![Go Reference](https://pkg.go.dev/badge/github.com/SevenOfNine-labs/proton-lfs-cli.svg)](https://pkg.go.dev/github.com/SevenOfNine-labs/proton-lfs-cli) [![Tests](https://github.com/SevenOfNine-labs/proton-lfs-cli/actions/workflows/test.yml/badge.svg)](https://github.com/SevenOfNine-labs/proton-lfs-cli/actions/workflows/test.yml)
 
 ## Current State (2026-02-10)
 
@@ -24,11 +24,11 @@ No .NET SDK required.
 
 ## Documentation
 
-📚 **[Unified Documentation](https://sevenofnine-ai.github.io/proton-lfs-cli/)** - Complete documentation site with:
+📚 **[Unified Documentation](https://sevenofnine-labs.github.io/proton-lfs-cli/)** - Complete documentation site with:
 
-- **[Architecture & Guides](https://sevenofnine-ai.github.io/proton-lfs-cli/guides/)** - Project overview, architecture, testing, security
-- **[Go API Reference](https://pkg.go.dev/github.com/SevenOfNine-ai/proton-lfs-cli)** - Go package documentation
-- **[TypeScript Bridge API](https://sevenofnine-ai.github.io/proton-drive-cli/)** - proton-drive-cli documentation
+- **[Architecture & Guides](https://sevenofnine-labs.github.io/proton-lfs-cli/guides/)** - Project overview, architecture, testing, security
+- **[Go API Reference](https://pkg.go.dev/github.com/SevenOfNine-labs/proton-lfs-cli)** - Go package documentation
+- **[TypeScript Bridge API](https://sevenofnine-labs.github.io/proton-drive-cli/)** - proton-drive-cli documentation
 
 ## Usage
 
