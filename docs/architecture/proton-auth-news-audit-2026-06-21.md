@@ -7,6 +7,7 @@ audit.
 ## Sources Reviewed
 
 - Proton blog: `https://proton.me/blog/drive-sdk-june-2026`
+- Proton blog: `https://proton.me/blog/drive-cryptography-update`
 - Proton blog: `https://proton.me/blog/proton-drive-cli`
 - Proton blog: `https://proton.me/blog/authenticator-app`
 - Proton support: `https://proton.me/support/switch-two-password-mode`
@@ -20,6 +21,11 @@ audit.
 
 - Proton's June 2026 Drive SDK messaging emphasizes SDK-based Drive operations,
   not SDK-owned account authentication.
+- Proton's June 2026 Drive cryptography update reinforces that SDK freshness is
+  operationally important: clients that do not support the active Drive crypto
+  model can be unable to update newer files. This does not move login/session
+  ownership into the SDK, but it raises the cost of stale SDK pins before any
+  live canary.
 - The official SDK README at `ProtonDriveApps/sdk@f21e74cc` states that the SDK
   does not include authentication/login flows, session management, or user
   address providers. Integrating applications must still own that layer.
