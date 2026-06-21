@@ -6,4 +6,4 @@
 	url = https://github.com/protonpass/pass-cli.git
 [submodule "submodules/proton-drive-cli"]
 	path = submodules/proton-drive-cli
-	url = https://github.com/SevenOfNine-ai/proton-drive-cli.git
+	url = https://github.com/SevenOfNine-labs/proton-drive-cli.git
