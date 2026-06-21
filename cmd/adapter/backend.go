@@ -289,8 +289,12 @@ func (b *DriveCLIBackend) Initialize(session *Session) error {
 
 	creds := b.operationCredentials()
 
-	if err := b.bridge.Authenticate(creds); err != nil {
-		return mapBridgeError(err, "failed to authenticate with proton drive")
+	authState, err := b.bridge.AuthState(creds)
+	if err != nil {
+		return mapBridgeError(err, "failed to inspect proton drive auth state")
+	}
+	if err := mapAuthStateForTransfer(authState); err != nil {
+		return err
 	}
 
 	if err := b.bridge.InitLFSStorage(creds); err != nil {
@@ -300,6 +304,29 @@ func (b *DriveCLIBackend) Initialize(session *Session) error {
 	b.authenticated = true
 	session.Token = "direct-bridge"
 	return nil
+}
+
+func mapAuthStateForTransfer(state *BridgeAuthStateResponse) error {
+	if state == nil {
+		return newBackendError(502, "proton drive auth state is unavailable", nil)
+	}
+
+	switch strings.TrimSpace(state.State) {
+	case "ready":
+		return nil
+	case "needs_data_password":
+		return newBackendErrorWithCode(401, "mailbox/data password required for this Proton account", nil, ErrCodeDataPasswordRequired)
+	case "login_available", "needs_login":
+		return newBackendError(401, "no ready Proton Drive session; run proton-drive login before Git LFS transfer", nil)
+	case "session_expired":
+		return newBackendError(401, "Proton Drive session is expired; refresh or login before Git LFS transfer", nil)
+	case "session_invalid":
+		return newBackendError(401, "Proton Drive session is invalid; run proton-drive login before Git LFS transfer", nil)
+	case "configuration_error":
+		return newBackendError(400, "Proton Drive auth configuration error", nil)
+	default:
+		return newBackendError(502, "unrecognized Proton Drive auth state", nil)
+	}
 }
 
 func (b *DriveCLIBackend) Upload(session *Session, oid, sourcePath string, expectedSize int64) (int64, error) {

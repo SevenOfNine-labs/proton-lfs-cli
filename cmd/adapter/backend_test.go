@@ -26,7 +26,7 @@ func TestDriveCLIBackendRoundTrip(t *testing.T) {
 	backend := NewDriveCLIBackend(bc, CredentialProviderPassCLI)
 	session := &Session{Initialized: true, CreatedAt: time.Now()}
 
-	// Initialize (auth + init)
+	// Initialize (offline auth-state + init)
 	if err := backend.Initialize(session); err != nil {
 		t.Fatalf("Initialize returned error: %v", err)
 	}
@@ -70,11 +70,11 @@ func TestDriveCLIBackendInitializeWithEmptyProvider(t *testing.T) {
 	backend := NewDriveCLIBackend(bc, "")
 	session := &Session{Initialized: true, CreatedAt: time.Now()}
 
-	// With empty provider, auth is delegated to proton-drive-cli
-	// which will attempt resolution and succeed (mock bridge returns ok)
+	// With empty provider, a ready local session can initialize without
+	// allowing a full login attempt from the transfer path.
 	err := backend.Initialize(session)
 	if err != nil {
-		t.Fatalf("Initialize with empty provider should succeed (delegated): %v", err)
+		t.Fatalf("Initialize with empty provider should succeed when ready: %v", err)
 	}
 }
 
@@ -314,6 +314,39 @@ func TestDriveCLIBackendInitializeRateLimitError(t *testing.T) {
 	code, _ := backendErrorDetails(err)
 	if code != 429 {
 		t.Fatalf("expected 429, got %d (%v)", code, err)
+	}
+}
+
+func TestDriveCLIBackendInitializeBlocksLoginAvailableState(t *testing.T) {
+	bc := helperBridgeClient(t, "MOCK_BRIDGE_AUTH_STATE=login_available")
+	backend := NewDriveCLIBackend(bc, CredentialProviderPassCLI)
+	session := &Session{Initialized: true, CreatedAt: time.Now()}
+
+	err := backend.Initialize(session)
+	var backendErr *BackendError
+	if !errors.As(err, &backendErr) {
+		t.Fatalf("expected BackendError, got %T", err)
+	}
+	if backendErr.Code != 401 || backendErr.ErrorCode != ErrCodeAuthRequired {
+		t.Fatalf("expected auth_required 401, got %+v", backendErr)
+	}
+	if backend.authenticated {
+		t.Fatal("backend must not authenticate when offline auth-state is not ready")
+	}
+}
+
+func TestDriveCLIBackendInitializeMapsDataPasswordState(t *testing.T) {
+	bc := helperBridgeClient(t, "MOCK_BRIDGE_AUTH_STATE=needs_data_password")
+	backend := NewDriveCLIBackend(bc, CredentialProviderPassCLI)
+	session := &Session{Initialized: true, CreatedAt: time.Now()}
+
+	err := backend.Initialize(session)
+	var backendErr *BackendError
+	if !errors.As(err, &backendErr) {
+		t.Fatalf("expected BackendError, got %T", err)
+	}
+	if backendErr.Code != 401 || backendErr.ErrorCode != ErrCodeDataPasswordRequired {
+		t.Fatalf("expected data_password_required 401, got %+v", backendErr)
 	}
 }
 

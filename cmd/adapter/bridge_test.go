@@ -91,6 +91,25 @@ func TestHelperProcess(_ *testing.T) {
 	}
 
 	switch command {
+	case "auth-state":
+		state := os.Getenv("MOCK_BRIDGE_AUTH_STATE")
+		if state == "" {
+			state = "ready"
+		}
+		writeOKResponse(os.Stdout, map[string]any{
+			"state":                    state,
+			"hasSession":               state != "needs_login" && state != "login_available",
+			"sessionValid":             state == "ready",
+			"sessionExpired":           state == "session_expired",
+			"sessionUidPresent":        state != "needs_login" && state != "login_available",
+			"usernamePresent":          false,
+			"hasExplicitLoginPassword": false,
+			"hasExplicitDataPassword":  false,
+			"allowLogin":               req["credentialProvider"] != nil,
+			"willAttemptNetwork":       false,
+			"errors":                   []string{},
+			"actions":                  []string{},
+		})
 	case "auth":
 		writeOKResponse(os.Stdout, nil)
 	case "init":
@@ -296,6 +315,22 @@ func TestBridgeErrorMapping429(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "[429]") {
 		t.Fatalf("expected [429] in error, got: %v", err)
+	}
+}
+
+func TestBridgeAuthState(t *testing.T) {
+	bc := helperBridgeClient(t)
+	creds := OperationCredentials{CredentialProvider: CredentialProviderPassCLI}
+
+	state, err := bc.AuthState(creds)
+	if err != nil {
+		t.Fatalf("AuthState failed: %v", err)
+	}
+	if state.State != "ready" {
+		t.Fatalf("expected ready auth state, got %q", state.State)
+	}
+	if state.WillAttemptNetwork {
+		t.Fatal("auth-state must remain offline-only")
 	}
 }
 
@@ -598,6 +633,14 @@ func TestBuildCredentials(t *testing.T) {
 		}
 		if m["storageBase"] != "LFS" {
 			t.Fatalf("expected storageBase=LFS, got %v", m["storageBase"])
+		}
+	})
+
+	t.Run("explicit allowLogin false", func(t *testing.T) {
+		creds := OperationCredentials{CredentialProvider: CredentialProviderGitCredential}
+		m := buildCredentials(creds, "LFS", "v1", false)
+		if m["allowLogin"] != false {
+			t.Fatalf("expected allowLogin=false, got %v", m["allowLogin"])
 		}
 	})
 }

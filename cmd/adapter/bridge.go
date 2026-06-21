@@ -54,6 +54,28 @@ type BridgeClientConfig struct {
 	ExtraEnv      []string // additional env vars (for testing)
 }
 
+// BridgeAuthStateResponse mirrors proton-drive-cli bridge auth-state payloads.
+// It is intentionally local-only on the drive-cli side: no credential lookup,
+// no token refresh, and no Proton network request.
+type BridgeAuthStateResponse struct {
+	State                   string   `json:"state"`
+	HasSession              bool     `json:"hasSession"`
+	SessionValid            bool     `json:"sessionValid"`
+	SessionExpired          bool     `json:"sessionExpired"`
+	SessionUIDPresent       bool     `json:"sessionUidPresent"`
+	PasswordMode            int      `json:"passwordMode,omitempty"`
+	UsernamePresent         bool     `json:"usernamePresent"`
+	HasExplicitLoginPass    bool     `json:"hasExplicitLoginPassword"`
+	HasExplicitDataPass     bool     `json:"hasExplicitDataPassword"`
+	LoginCredentialProvider string   `json:"loginCredentialProvider,omitempty"`
+	DataCredentialProvider  string   `json:"dataCredentialProvider,omitempty"`
+	DataCredentialHost      string   `json:"dataCredentialHost,omitempty"`
+	AllowLogin              bool     `json:"allowLogin"`
+	WillAttemptNetwork      bool     `json:"willAttemptNetwork"`
+	Errors                  []string `json:"errors"`
+	Actions                 []string `json:"actions"`
+}
+
 // BridgeClient communicates with proton-drive-cli via subprocess stdin/stdout.
 type BridgeClient struct {
 	nodeBin       string
@@ -356,7 +378,7 @@ func parseBridgeOutput(stdout, _ []byte) (*BridgeResponse, error) {
 
 // buildCredentials creates the credential portion of a bridge request.
 // Always sends credentialProvider — proton-drive-cli resolves credentials locally.
-func buildCredentials(creds OperationCredentials, storageBase, appVersion string) map[string]any {
+func buildCredentials(creds OperationCredentials, storageBase, appVersion string, allowLogin ...bool) map[string]any {
 	m := map[string]any{}
 	if creds.CredentialProvider != "" {
 		m["credentialProvider"] = creds.CredentialProvider
@@ -373,6 +395,9 @@ func buildCredentials(creds OperationCredentials, storageBase, appVersion string
 	if appVersion != "" {
 		m["appVersion"] = appVersion
 	}
+	if len(allowLogin) > 0 {
+		m["allowLogin"] = allowLogin[0]
+	}
 	return m
 }
 
@@ -383,16 +408,40 @@ func (bc *BridgeClient) Authenticate(creds OperationCredentials) error {
 	return err
 }
 
+// AuthState runs `bridge auth-state` to inspect local auth readiness without
+// credential resolution or Proton network calls.
+func (bc *BridgeClient) AuthState(creds OperationCredentials) (*BridgeAuthStateResponse, error) {
+	req := buildCredentials(creds, bc.storageBase, bc.appVersion)
+	resp, err := bc.runBridgeCommand("auth-state", req)
+	if err != nil {
+		return nil, err
+	}
+	if resp == nil || len(resp.Payload) == 0 {
+		return nil, fmt.Errorf("bridge auth-state returned empty payload")
+	}
+	var state BridgeAuthStateResponse
+	if err := json.Unmarshal(resp.Payload, &state); err != nil {
+		return nil, fmt.Errorf("failed to parse auth-state payload: %w", err)
+	}
+	if strings.TrimSpace(state.State) == "" {
+		return nil, fmt.Errorf("bridge auth-state payload missing state")
+	}
+	if state.WillAttemptNetwork {
+		return nil, fmt.Errorf("bridge auth-state must be offline-only")
+	}
+	return &state, nil
+}
+
 // InitLFSStorage runs `bridge init` to ensure the LFS storage folder exists.
 func (bc *BridgeClient) InitLFSStorage(creds OperationCredentials) error {
-	req := buildCredentials(creds, bc.storageBase, bc.appVersion)
+	req := buildCredentials(creds, bc.storageBase, bc.appVersion, false)
 	_, err := bc.runBridgeCommand("init", req)
 	return err
 }
 
 // Upload runs `bridge upload` to encrypt and store a file in Proton Drive.
 func (bc *BridgeClient) Upload(creds OperationCredentials, oid, filePath string) error {
-	req := buildCredentials(creds, bc.storageBase, bc.appVersion)
+	req := buildCredentials(creds, bc.storageBase, bc.appVersion, false)
 	req["oid"] = oid
 	req["path"] = filePath
 	_, err := bc.runBridgeCommand("upload", req)
@@ -401,7 +450,7 @@ func (bc *BridgeClient) Upload(creds OperationCredentials, oid, filePath string)
 
 // Download runs `bridge download` to decrypt and retrieve a file from Proton Drive.
 func (bc *BridgeClient) Download(creds OperationCredentials, oid, outputPath string) error {
-	req := buildCredentials(creds, bc.storageBase, bc.appVersion)
+	req := buildCredentials(creds, bc.storageBase, bc.appVersion, false)
 	req["oid"] = oid
 	req["outputPath"] = outputPath
 	_, err := bc.runBridgeCommand("download", req)
@@ -410,7 +459,7 @@ func (bc *BridgeClient) Download(creds OperationCredentials, oid, outputPath str
 
 // Exists runs `bridge exists` to check if an OID is already stored.
 func (bc *BridgeClient) Exists(creds OperationCredentials, oid string) (bool, error) {
-	req := buildCredentials(creds, bc.storageBase, bc.appVersion)
+	req := buildCredentials(creds, bc.storageBase, bc.appVersion, false)
 	req["oid"] = oid
 	resp, err := bc.runBridgeCommand("exists", req)
 	if err != nil {
@@ -438,7 +487,7 @@ func (bc *BridgeClient) Exists(creds OperationCredentials, oid string) (bool, er
 
 // BatchExists runs `bridge batch-exists` for multiple OIDs.
 func (bc *BridgeClient) BatchExists(creds OperationCredentials, oids []string) (map[string]bool, error) {
-	req := buildCredentials(creds, bc.storageBase, bc.appVersion)
+	req := buildCredentials(creds, bc.storageBase, bc.appVersion, false)
 	req["oids"] = oids
 	resp, err := bc.runBridgeCommand("batch-exists", req)
 	if err != nil {
@@ -458,7 +507,7 @@ func (bc *BridgeClient) BatchExists(creds OperationCredentials, oids []string) (
 
 // BatchDelete runs `bridge batch-delete` for multiple OIDs.
 func (bc *BridgeClient) BatchDelete(creds OperationCredentials, oids []string) (map[string]bool, error) {
-	req := buildCredentials(creds, bc.storageBase, bc.appVersion)
+	req := buildCredentials(creds, bc.storageBase, bc.appVersion, false)
 	req["oids"] = oids
 	resp, err := bc.runBridgeCommand("batch-delete", req)
 	if err != nil {
