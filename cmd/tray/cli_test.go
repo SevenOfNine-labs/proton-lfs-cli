@@ -377,6 +377,32 @@ func TestCliRegisterGitCredentialProvider(t *testing.T) {
 	}
 }
 
+func TestCliRegisterQuotesDriveCLIPath(t *testing.T) {
+	saveFuncVars(t)
+	setupFakeHome(t, fakeHomeOpts{configJSON: `{"credentialProvider":"pass-cli"}`})
+	gitCfg := setupGitConfig(t, "")
+
+	findAdapter = func() string { return "/tmp/test-adapter" }
+	findDriveCLI = func() string { return "/Applications/Proton Drive CLI/proton-drive-cli" }
+
+	var buf bytes.Buffer
+	code := cliRegister(&buf)
+
+	if code != 0 {
+		t.Fatalf("expected exit 0, got %d; output:\n%s", code, buf.String())
+	}
+
+	data, err := os.ReadFile(gitCfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfgStr := string(data)
+	want := "--drive-cli-bin '/Applications/Proton Drive CLI/proton-drive-cli'"
+	if !strings.Contains(cfgStr, want) {
+		t.Errorf("git config missing quoted drive-cli path %q:\n%s", want, cfgStr)
+	}
+}
+
 func TestCliRegisterNoAdapter(t *testing.T) {
 	saveFuncVars(t)
 	setupFakeHome(t, fakeHomeOpts{})

@@ -169,13 +169,7 @@ func cliRegister(w io.Writer) int {
 
 	prefs := config.LoadPrefs()
 	driveCLIPath := findDriveCLI()
-	args := "--backend sdk"
-	if prefs.CredentialProvider == config.CredentialProviderGitCredential {
-		args += " --credential-provider git-credential"
-	}
-	if driveCLIPath != "" {
-		args += " --drive-cli-bin " + driveCLIPath
-	}
+	args := buildProtonTransferArgs(prefs.CredentialProvider, driveCLIPath)
 	if err := exec.Command("git", "config", "--global",
 		"lfs.customtransfer.proton.args", args).Run(); err != nil {
 		_, _ = fmt.Fprintf(w, "error: git config failed: %v\n", err)

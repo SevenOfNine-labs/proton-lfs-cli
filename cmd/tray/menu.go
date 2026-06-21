@@ -142,13 +142,7 @@ func registerGitLFS() {
 
 	prefs := config.LoadPrefs()
 	driveCLIPath := discoverDriveCLIBinary()
-	args := "--backend sdk"
-	if prefs.CredentialProvider == config.CredentialProviderGitCredential {
-		args += " --credential-provider git-credential"
-	}
-	if driveCLIPath != "" {
-		args += " --drive-cli-bin " + driveCLIPath
-	}
+	args := buildProtonTransferArgs(prefs.CredentialProvider, driveCLIPath)
 	if err := exec.Command("git", "config", "--global", "lfs.customtransfer.proton.args", args).Run(); err != nil {
 		sendNotification("Error: git config failed")
 		return
