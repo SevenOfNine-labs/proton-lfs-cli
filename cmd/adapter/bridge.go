@@ -208,6 +208,9 @@ func (bc *BridgeClient) runBridgeCommand(command string, request map[string]any)
 
 	resp, parseErr := parseBridgeOutput(stdout.Bytes(), stderr.Bytes())
 	if parseErr != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return nil, fmt.Errorf("bridge %s timed out after %s", command, bc.timeout)
+		}
 		if err != nil {
 			stderrText := sanitizeStderr(stderr.String())
 			if stderrText != "" {

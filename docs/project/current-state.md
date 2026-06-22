@@ -26,6 +26,8 @@ Date: 2026-06-22
   retry loops.
 - Bridge batch operations are private maintenance helpers and are rejected as
   Git LFS transfer events.
+- Bridge subprocess tests cover strict envelopes, typed timeouts, malformed
+  output, stderr redaction, and concurrency limits.
 
 ## Architecture
 

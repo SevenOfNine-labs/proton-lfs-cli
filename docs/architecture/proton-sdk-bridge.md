@@ -60,6 +60,8 @@ command-specific parser.
 - Errors must be typed and per-object, not process-fatal.
 - Session failure must produce explicit adapter errors, never silent success.
 - API contracts must remain deterministic so adapter tests can assert behavior.
+- Subprocess failures must not leak secrets: malformed output, timeouts, and
+  stderr diagnostics are covered by mocked bridge tests.
 
 ## Known Issues
 
@@ -71,5 +73,6 @@ command-specific parser.
 
 1. Add command-specific payload schema validation between adapter and
    subprocess.
-2. Add fault-injection tests (timeouts, partial writes, session expiry).
+2. Extend fault-injection tests beyond timeout, partial-output, and
+   session-expiry coverage as new SDK failure modes are identified.
 3. Add a real-account canary only after the mocked auth gates stay green.

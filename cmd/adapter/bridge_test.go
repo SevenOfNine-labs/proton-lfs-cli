@@ -91,6 +91,18 @@ func TestHelperProcess(_ *testing.T) {
 		}
 	}
 
+	if rawStdout, ok := os.LookupEnv("MOCK_BRIDGE_RAW_STDOUT"); ok {
+		fmt.Fprint(os.Stdout, rawStdout)
+		if rawStderr := os.Getenv("MOCK_BRIDGE_RAW_STDERR"); rawStderr != "" {
+			fmt.Fprint(os.Stderr, rawStderr)
+		}
+		code := 0
+		if codeStr := os.Getenv("MOCK_BRIDGE_RAW_EXIT_CODE"); codeStr != "" {
+			fmt.Sscanf(codeStr, "%d", &code)
+		}
+		os.Exit(code)
+	}
+
 	// Check for mock error injection via env
 	if mockErr := os.Getenv("MOCK_BRIDGE_ERROR"); mockErr != "" {
 		code := 500
@@ -514,6 +526,60 @@ func TestBridgeSemaphoreExhaustion(t *testing.T) {
 
 	// Release semaphore
 	<-bc.semaphore
+}
+
+func TestBridgeCommandTimeoutReturnsTypedError(t *testing.T) {
+	bc := NewBridgeClient(BridgeClientConfig{
+		NodeBin:       os.Args[0],
+		CLIBin:        "-test.run=TestHelperProcess",
+		Timeout:       20 * time.Millisecond,
+		MaxConcurrent: 1,
+		ExtraEnv:      []string{"GO_TEST_HELPER_PROCESS=1", "MOCK_BRIDGE_DELAY=250ms"},
+	})
+
+	creds := OperationCredentials{CredentialProvider: CredentialProviderPassCLI}
+	start := time.Now()
+	err := bc.Authenticate(creds)
+	if err == nil {
+		t.Fatal("expected timeout error")
+	}
+	if time.Since(start) > time.Second {
+		t.Fatalf("timeout test took too long: %s", time.Since(start))
+	}
+	if !strings.Contains(err.Error(), "timed out after") {
+		t.Fatalf("expected typed timeout error, got %v", err)
+	}
+}
+
+func TestBridgeCommandRejectsPartialJSONOutput(t *testing.T) {
+	bc := helperBridgeClient(t, `MOCK_BRIDGE_RAW_STDOUT={"ok":true`)
+	creds := OperationCredentials{CredentialProvider: CredentialProviderPassCLI}
+	err := bc.Authenticate(creds)
+	if err == nil {
+		t.Fatal("expected partial JSON output error")
+	}
+	if !strings.Contains(err.Error(), "no valid JSON envelope found") {
+		t.Fatalf("expected malformed output error, got %v", err)
+	}
+}
+
+func TestBridgeCommandSanitizesStderrOnMalformedOutput(t *testing.T) {
+	bc := helperBridgeClient(t,
+		"MOCK_BRIDGE_RAW_STDOUT=not-json",
+		"MOCK_BRIDGE_RAW_STDERR=fatal auth failed: Bearer secret-token",
+		"MOCK_BRIDGE_RAW_EXIT_CODE=1",
+	)
+	creds := OperationCredentials{CredentialProvider: CredentialProviderPassCLI}
+	err := bc.Authenticate(creds)
+	if err == nil {
+		t.Fatal("expected subprocess failure")
+	}
+	if strings.Contains(err.Error(), "secret-token") {
+		t.Fatalf("stderr leaked secret: %v", err)
+	}
+	if !strings.Contains(err.Error(), "[redacted]") {
+		t.Fatalf("expected sanitized stderr, got %v", err)
+	}
 }
 
 func TestBridgeCredentialPassthroughPassCLI(t *testing.T) {
