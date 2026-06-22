@@ -224,13 +224,14 @@ func (a *Adapter) handleUpload(msg *InboundMessage, enc *json.Encoder) error {
 		return a.sendTransferError(enc, msg.OID, 409, "upload content hash does not match oid")
 	}
 
-	storedSize, err := a.backend.Upload(a.session, normalizedOID, msg.Path, sourceSize)
+	progress := newTransferProgress(enc, normalizedOID)
+	storedSize, err := a.uploadWithProgress(normalizedOID, msg.Path, sourceSize, progress.report)
 	if err != nil {
 		code, message := backendErrorDetails(err)
 		return a.sendTransferError(enc, msg.OID, code, message)
 	}
 
-	if err := a.sendProgressSequence(enc, normalizedOID, storedSize); err != nil {
+	if err := progress.finish(a, storedSize); err != nil {
 		return err
 	}
 
@@ -258,7 +259,8 @@ func (a *Adapter) handleDownload(msg *InboundMessage, enc *json.Encoder) error {
 	}
 
 	normalizedOID := strings.ToLower(msg.OID)
-	stagedPath, stagedSize, err := a.backend.Download(a.session, normalizedOID)
+	progress := newTransferProgress(enc, normalizedOID)
+	stagedPath, stagedSize, err := a.downloadWithProgress(normalizedOID, progress.report)
 	if err != nil {
 		code, message := backendErrorDetails(err)
 		return a.sendTransferError(enc, msg.OID, code, message)
@@ -281,7 +283,7 @@ func (a *Adapter) handleDownload(msg *InboundMessage, enc *json.Encoder) error {
 		stagedSize = objectSize
 	}
 
-	if err := a.sendProgressSequence(enc, normalizedOID, stagedSize); err != nil {
+	if err := progress.finish(a, stagedSize); err != nil {
 		_ = os.Remove(stagedPath)
 		return err
 	}
@@ -477,6 +479,64 @@ func (a *Adapter) sendProgressSequence(enc *json.Encoder, oid string, totalSize 
 	return nil
 }
 
+func (a *Adapter) uploadWithProgress(oid, sourcePath string, expectedSize int64, progress ProgressFunc) (int64, error) {
+	if backend, ok := a.backend.(ProgressTransferBackend); ok {
+		return backend.UploadWithProgress(a.session, oid, sourcePath, expectedSize, progress)
+	}
+	return a.backend.Upload(a.session, oid, sourcePath, expectedSize)
+}
+
+func (a *Adapter) downloadWithProgress(oid string, progress ProgressFunc) (string, int64, error) {
+	if backend, ok := a.backend.(ProgressTransferBackend); ok {
+		return backend.DownloadWithProgress(a.session, oid, progress)
+	}
+	return a.backend.Download(a.session, oid)
+}
+
+type transferProgress struct {
+	enc        *json.Encoder
+	oid        string
+	bytesSoFar int64
+	emitted    bool
+}
+
+func newTransferProgress(enc *json.Encoder, oid string) *transferProgress {
+	return &transferProgress{enc: enc, oid: oid}
+}
+
+func (p *transferProgress) report(bytesSoFar, bytesSinceLast int64) error {
+	if bytesSoFar < p.bytesSoFar {
+		return fmt.Errorf("progress moved backwards: previous=%d current=%d", p.bytesSoFar, bytesSoFar)
+	}
+	if bytesSinceLast < 0 {
+		return fmt.Errorf("progress increment is negative: %d", bytesSinceLast)
+	}
+	if expected := bytesSoFar - p.bytesSoFar; bytesSinceLast != expected {
+		return fmt.Errorf("progress increment mismatch: got=%d expected=%d", bytesSinceLast, expected)
+	}
+	p.bytesSoFar = bytesSoFar
+	p.emitted = true
+	return p.enc.Encode(OutboundMessage{
+		Event:      EventProgress,
+		OID:        p.oid,
+		BytesSoFar: bytesSoFar,
+		BytesSince: bytesSinceLast,
+	})
+}
+
+func (p *transferProgress) finish(a *Adapter, totalSize int64) error {
+	if !p.emitted {
+		return a.sendProgressSequence(p.enc, p.oid, totalSize)
+	}
+	if totalSize < p.bytesSoFar {
+		return fmt.Errorf("progress total %d exceeds transferred size %d", p.bytesSoFar, totalSize)
+	}
+	if totalSize > p.bytesSoFar {
+		return p.report(totalSize, totalSize-p.bytesSoFar)
+	}
+	return nil
+}
+
 func (a *Adapter) localObjectPath(oid string) string {
 	if len(oid) < 4 {
 		return filepath.Join(a.localStoreDir, oid)
@@ -545,50 +605,94 @@ func calculateFileSHA256(path string) (string, int64, error) {
 }
 
 func copyFile(srcPath, dstPath string) error {
+	_, err := copyFileWithProgress(srcPath, dstPath, nil)
+	return err
+}
+
+func copyFileWithProgress(srcPath, dstPath string, progress ProgressFunc) (int64, error) {
 	src, err := os.Open(srcPath)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	defer func() { _ = src.Close() }()
 
 	tmpPath := fmt.Sprintf("%s.tmp-%d", dstPath, time.Now().UnixNano())
 	dst, err := os.OpenFile(tmpPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 	if err != nil {
-		return err
+		return 0, err
 	}
 
-	if _, err := io.Copy(dst, src); err != nil {
+	n, err := copyWithProgress(dst, src, progress)
+	if err != nil {
 		_ = dst.Close()
 		_ = os.Remove(tmpPath)
-		return err
+		return n, err
 	}
 	if err := dst.Sync(); err != nil {
 		_ = dst.Close()
 		_ = os.Remove(tmpPath)
-		return err
+		return n, err
 	}
 	if err := dst.Close(); err != nil {
 		_ = os.Remove(tmpPath)
-		return err
+		return n, err
 	}
 	if err := os.Rename(tmpPath, dstPath); err != nil {
 		_ = os.Remove(tmpPath)
-		return err
+		return n, err
 	}
-	return nil
+	return n, nil
 }
 
 func copyIntoOpenFile(srcPath string, dst *os.File) error {
+	_, err := copyIntoOpenFileWithProgress(srcPath, dst, nil)
+	return err
+}
+
+func copyIntoOpenFileWithProgress(srcPath string, dst *os.File, progress ProgressFunc) (int64, error) {
 	src, err := os.Open(srcPath)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	defer func() { _ = src.Close() }()
 
-	if _, err := io.Copy(dst, src); err != nil {
-		return err
+	n, err := copyWithProgress(dst, src, progress)
+	if err != nil {
+		return n, err
 	}
-	return dst.Sync()
+	return n, dst.Sync()
+}
+
+func copyWithProgress(dst io.Writer, src io.Reader, progress ProgressFunc) (int64, error) {
+	buf := make([]byte, progressChunkSize)
+	var total int64
+	for {
+		nr, er := src.Read(buf)
+		if nr > 0 {
+			nw, ew := dst.Write(buf[:nr])
+			if nw > 0 {
+				total += int64(nw)
+				if progress != nil {
+					if err := progress(total, int64(nw)); err != nil {
+						return total, err
+					}
+				}
+			}
+			if ew != nil {
+				return total, ew
+			}
+			if nw != nr {
+				return total, io.ErrShortWrite
+			}
+		}
+		if er != nil {
+			if er == io.EOF {
+				break
+			}
+			return total, er
+		}
+	}
+	return total, nil
 }
 
 // createTempFile creates a temporary file for downloads
@@ -654,14 +758,14 @@ PROTOCOL COMPLIANCE (submodules/git-lfs/docs/custom-transfers.md)
       - init (upload/download operation)
       - upload with SHA-256 integrity verification
       - download with temp file path return
-      - progress reporting (64KB chunks)
+      - progress reporting (64KB chunks; local backend streams during copy)
       - complete with per-object error handling
       - terminate with credential zeroing
       - standalone mode (action: null, no batch API)
       - concurrent instances (git-lfs spawns multiple adapter processes)
 
     Not implemented:
-      - Real-time streaming progress (progress is post-transfer)
+      - SDK real-time streaming progress (SDK progress is post-transfer)
       - Resume/retry on transient failure
       - Verify action (not required per spec)
 

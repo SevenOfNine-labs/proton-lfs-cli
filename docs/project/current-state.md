@@ -39,7 +39,8 @@ Go Adapter → proton-drive-cli subprocess (stdin/stdout JSON, provider selector
 - Real-account canary validation with a disposable account after mocked
   auth/session gates stay green and explicit canary acknowledgement is set.
 - Production observability baseline (metrics, SLOs, alerts, runbooks).
-- Streaming transfer progress and resume support where the SDK can expose it.
+- SDK streaming transfer progress and resume support where the SDK can expose
+  it. The local backend streams progress during filesystem copies.
 
 ## Local Baseline
 

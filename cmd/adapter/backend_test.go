@@ -591,6 +591,92 @@ func TestLocalStoreBackendDownloadNotFound(t *testing.T) {
 	}
 }
 
+func TestLocalStoreBackendUploadReportsProgress(t *testing.T) {
+	var _ ProgressTransferBackend = (*LocalStoreBackend)(nil)
+
+	b := NewLocalStoreBackend(t.TempDir())
+	session := &Session{Initialized: true}
+	payload := []byte(strings.Repeat("u", int(progressChunkSize*2+7)))
+	oidBytes := sha256.Sum256(payload)
+	oid := hex.EncodeToString(oidBytes[:])
+	uploadPath := filepath.Join(t.TempDir(), "upload.bin")
+	if err := os.WriteFile(uploadPath, payload, 0o600); err != nil {
+		t.Fatalf("failed to write upload payload: %v", err)
+	}
+
+	var calls []int64
+	size, err := b.UploadWithProgress(session, oid, uploadPath, int64(len(payload)), func(bytesSoFar, bytesSinceLast int64) error {
+		if bytesSinceLast <= 0 {
+			t.Fatalf("bytesSinceLast must be positive, got %d", bytesSinceLast)
+		}
+		if len(calls) > 0 && bytesSoFar <= calls[len(calls)-1] {
+			t.Fatalf("progress must increase, got previous=%d current=%d", calls[len(calls)-1], bytesSoFar)
+		}
+		calls = append(calls, bytesSoFar)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("UploadWithProgress returned error: %v", err)
+	}
+	if size != int64(len(payload)) {
+		t.Fatalf("uploaded size=%d, want %d", size, len(payload))
+	}
+	if len(calls) != 3 {
+		t.Fatalf("expected 3 progress callbacks, got %d (%v)", len(calls), calls)
+	}
+	if calls[len(calls)-1] != int64(len(payload)) {
+		t.Fatalf("final progress=%d, want %d", calls[len(calls)-1], len(payload))
+	}
+}
+
+func TestLocalStoreBackendDownloadReportsProgress(t *testing.T) {
+	b := NewLocalStoreBackend(t.TempDir())
+	session := &Session{Initialized: true}
+	payload := []byte(strings.Repeat("d", int(progressChunkSize+13)))
+	oidBytes := sha256.Sum256(payload)
+	oid := hex.EncodeToString(oidBytes[:])
+
+	objectPath := b.objectPath(oid)
+	if err := os.MkdirAll(filepath.Dir(objectPath), 0o700); err != nil {
+		t.Fatalf("failed to prepare object directory: %v", err)
+	}
+	if err := os.WriteFile(objectPath, payload, 0o600); err != nil {
+		t.Fatalf("failed to seed object: %v", err)
+	}
+
+	var calls []int64
+	downloadPath, size, err := b.DownloadWithProgress(session, oid, func(bytesSoFar, bytesSinceLast int64) error {
+		if bytesSinceLast <= 0 {
+			t.Fatalf("bytesSinceLast must be positive, got %d", bytesSinceLast)
+		}
+		if len(calls) > 0 && bytesSoFar <= calls[len(calls)-1] {
+			t.Fatalf("progress must increase, got previous=%d current=%d", calls[len(calls)-1], bytesSoFar)
+		}
+		calls = append(calls, bytesSoFar)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("DownloadWithProgress returned error: %v", err)
+	}
+	defer os.Remove(downloadPath)
+	if size != int64(len(payload)) {
+		t.Fatalf("download size=%d, want %d", size, len(payload))
+	}
+	if len(calls) != 2 {
+		t.Fatalf("expected 2 progress callbacks, got %d (%v)", len(calls), calls)
+	}
+	if calls[len(calls)-1] != int64(len(payload)) {
+		t.Fatalf("final progress=%d, want %d", calls[len(calls)-1], len(payload))
+	}
+	downloaded, err := os.ReadFile(downloadPath)
+	if err != nil {
+		t.Fatalf("failed to read staged download: %v", err)
+	}
+	if string(downloaded) != string(payload) {
+		t.Fatal("downloaded payload mismatch")
+	}
+}
+
 func TestClassifyErrorCode(t *testing.T) {
 	tests := []struct {
 		name     string

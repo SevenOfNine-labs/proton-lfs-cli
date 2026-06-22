@@ -18,6 +18,18 @@ type TransferBackend interface {
 	Download(session *Session, oid string) (string, int64, error)
 }
 
+// ProgressFunc reports transfer progress using Git LFS custom-transfer byte
+// semantics: bytesSoFar is cumulative and bytesSinceLast is the increment.
+type ProgressFunc func(bytesSoFar, bytesSinceLast int64) error
+
+// ProgressTransferBackend is implemented by backends that can emit progress
+// while their own transfer/staging work is in progress.
+type ProgressTransferBackend interface {
+	TransferBackend
+	UploadWithProgress(session *Session, oid, sourcePath string, expectedSize int64, progress ProgressFunc) (int64, error)
+	DownloadWithProgress(session *Session, oid string, progress ProgressFunc) (string, int64, error)
+}
+
 // ErrorCode is a machine-readable error classification for structured error handling.
 type ErrorCode string
 
@@ -159,6 +171,10 @@ func (b *LocalStoreBackend) Initialize(session *Session) error {
 }
 
 func (b *LocalStoreBackend) Upload(session *Session, oid, sourcePath string, expectedSize int64) (int64, error) {
+	return b.UploadWithProgress(session, oid, sourcePath, expectedSize, nil)
+}
+
+func (b *LocalStoreBackend) UploadWithProgress(session *Session, oid, sourcePath string, expectedSize int64, progress ProgressFunc) (int64, error) {
 	if err := b.Initialize(session); err != nil {
 		return 0, err
 	}
@@ -167,7 +183,7 @@ func (b *LocalStoreBackend) Upload(session *Session, oid, sourcePath string, exp
 	if err := os.MkdirAll(filepath.Dir(objectPath), 0o700); err != nil {
 		return 0, newBackendError(500, "failed to prepare local object directory", err)
 	}
-	if err := copyFile(sourcePath, objectPath); err != nil {
+	if _, err := copyFileWithProgress(sourcePath, objectPath, progress); err != nil {
 		return 0, newBackendError(500, "failed to persist object in local store", err)
 	}
 
@@ -188,6 +204,10 @@ func (b *LocalStoreBackend) Upload(session *Session, oid, sourcePath string, exp
 }
 
 func (b *LocalStoreBackend) Download(session *Session, oid string) (string, int64, error) {
+	return b.DownloadWithProgress(session, oid, nil)
+}
+
+func (b *LocalStoreBackend) DownloadWithProgress(session *Session, oid string, progress ProgressFunc) (string, int64, error) {
 	if err := b.validateSession(session); err != nil {
 		return "", 0, err
 	}
@@ -213,7 +233,7 @@ func (b *LocalStoreBackend) Download(session *Session, oid string) (string, int6
 	}
 	tmpPath := tmpFile.Name()
 
-	if err := copyIntoOpenFile(objectPath, tmpFile); err != nil {
+	if _, err := copyIntoOpenFileWithProgress(objectPath, tmpFile, progress); err != nil {
 		_ = tmpFile.Close()
 		_ = os.Remove(tmpPath)
 		return "", 0, newBackendError(500, "failed to stage object for download", err)

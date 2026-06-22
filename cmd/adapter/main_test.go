@@ -66,6 +66,50 @@ func (b *observingBackend) Download(_ *Session, _ string) (string, int64, error)
 	return b.downloadPath, b.downloadSize, nil
 }
 
+type streamingObservingBackend struct {
+	uploadSize         int64
+	downloadPath       string
+	downloadSize       int64
+	uploadStreamed     bool
+	downloadStreamed   bool
+	onUploadProgress   func()
+	onDownloadProgress func()
+}
+
+func (b *streamingObservingBackend) Initialize(_ *Session) error {
+	return nil
+}
+
+func (b *streamingObservingBackend) Upload(_ *Session, _, _ string, _ int64) (int64, error) {
+	return b.uploadSize, nil
+}
+
+func (b *streamingObservingBackend) Download(_ *Session, _ string) (string, int64, error) {
+	return b.downloadPath, b.downloadSize, nil
+}
+
+func (b *streamingObservingBackend) UploadWithProgress(_ *Session, _, _ string, _ int64, progress ProgressFunc) (int64, error) {
+	b.uploadStreamed = true
+	if err := progress(b.uploadSize, b.uploadSize); err != nil {
+		return 0, err
+	}
+	if b.onUploadProgress != nil {
+		b.onUploadProgress()
+	}
+	return b.uploadSize, nil
+}
+
+func (b *streamingObservingBackend) DownloadWithProgress(_ *Session, _ string, progress ProgressFunc) (string, int64, error) {
+	b.downloadStreamed = true
+	if err := progress(b.downloadSize, b.downloadSize); err != nil {
+		return "", 0, err
+	}
+	if b.onDownloadProgress != nil {
+		b.onDownloadProgress()
+	}
+	return b.downloadPath, b.downloadSize, nil
+}
+
 type progressCountingWriter struct {
 	t      *testing.T
 	count  int64
@@ -904,6 +948,41 @@ func TestUploadProgressIsPostTransfer(t *testing.T) {
 	}
 }
 
+func TestUploadUsesStreamingProgressBackend(t *testing.T) {
+	payload := []byte("streaming-upload")
+	oidBytes := sha256.Sum256(payload)
+	oid := hex.EncodeToString(oidBytes[:])
+	uploadPath := filepath.Join(t.TempDir(), "payload.bin")
+	if err := os.WriteFile(uploadPath, payload, 0o600); err != nil {
+		t.Fatalf("failed to create upload file: %v", err)
+	}
+
+	adapter := NewAdapter()
+	adapter.session = &Session{Initialized: true}
+	buf := new(bytes.Buffer)
+	backend := &streamingObservingBackend{
+		uploadSize: int64(len(payload)),
+		onUploadProgress: func() {
+			if !strings.Contains(buf.String(), `"event":"progress"`) {
+				t.Fatalf("streaming backend did not emit progress before returning: %q", buf.String())
+			}
+		},
+	}
+	adapter.backend = backend
+
+	msg := InboundMessage{Event: EventUpload, OID: oid, Size: int64(len(payload)), Path: uploadPath}
+	if err := adapter.handleUpload(&msg, json.NewEncoder(buf)); err != nil {
+		t.Fatalf("handleUpload returned error: %v", err)
+	}
+	if !backend.uploadStreamed {
+		t.Fatal("expected UploadWithProgress to be used")
+	}
+	msgs := decodeAllMessages(t, buf.Bytes())
+	if len(msgs) != 2 || msgs[0].Event != EventProgress || msgs[1].Event != EventComplete {
+		t.Fatalf("expected streamed progress then complete, got %+v", msgs)
+	}
+}
+
 func TestDownloadProgressIsPostTransfer(t *testing.T) {
 	payload := []byte("post-transfer-download")
 	oidBytes := sha256.Sum256(payload)
@@ -933,6 +1012,42 @@ func TestDownloadProgressIsPostTransfer(t *testing.T) {
 	msgs := decodeAllMessages(t, buf.Bytes())
 	if len(msgs) != 2 || msgs[0].Event != EventProgress || msgs[1].Event != EventComplete {
 		t.Fatalf("expected post-transfer progress then complete, got %+v", msgs)
+	}
+}
+
+func TestDownloadUsesStreamingProgressBackend(t *testing.T) {
+	payload := []byte("streaming-download")
+	oidBytes := sha256.Sum256(payload)
+	oid := hex.EncodeToString(oidBytes[:])
+	downloadPath := filepath.Join(t.TempDir(), "download.bin")
+	if err := os.WriteFile(downloadPath, payload, 0o600); err != nil {
+		t.Fatalf("failed to create download file: %v", err)
+	}
+
+	adapter := NewAdapter()
+	adapter.session = &Session{Initialized: true}
+	buf := new(bytes.Buffer)
+	backend := &streamingObservingBackend{
+		downloadPath: downloadPath,
+		downloadSize: int64(len(payload)),
+		onDownloadProgress: func() {
+			if !strings.Contains(buf.String(), `"event":"progress"`) {
+				t.Fatalf("streaming backend did not emit progress before returning: %q", buf.String())
+			}
+		},
+	}
+	adapter.backend = backend
+
+	msg := InboundMessage{Event: EventDownload, OID: oid, Size: int64(len(payload))}
+	if err := adapter.handleDownload(&msg, json.NewEncoder(buf)); err != nil {
+		t.Fatalf("handleDownload returned error: %v", err)
+	}
+	if !backend.downloadStreamed {
+		t.Fatal("expected DownloadWithProgress to be used")
+	}
+	msgs := decodeAllMessages(t, buf.Bytes())
+	if len(msgs) != 2 || msgs[0].Event != EventProgress || msgs[1].Event != EventComplete {
+		t.Fatalf("expected streamed progress then complete, got %+v", msgs)
 	}
 }
 

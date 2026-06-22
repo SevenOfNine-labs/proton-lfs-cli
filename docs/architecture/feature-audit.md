@@ -164,7 +164,7 @@ The tray binary also provides a small CLI when launched with arguments.
 | No default real Proton transfer canary. | Mocked bridge can miss SDK/API changes. | Keep guarded; run with disposable account only after offline doctor and explicit acknowledgement. |
 | Docs link drift can recur as plans move to implemented docs. | New contributors can follow stale paths. | Keep `docs/README.md` and release checklists updated with each maturity change. |
 | `BatchExists`/`BatchDelete` are internal helper surfaces. | They can be mistaken for production Git LFS protocol features. | Keep them tested as bridge maintenance helpers and out of the transfer loop. |
-| Adapter progress is post-transfer, not streaming. | Poor UX for large objects and timeouts. | Add streaming progress from backend operations where SDK supports it. |
+| SDK adapter progress remains post-transfer. | Poor UX for large SDK-backed objects and timeouts. | Add SDK streaming progress when the drive-cli/SDK bridge exposes reliable callbacks. |
 | Resume is not implemented. | Interrupted transfers restart after transient retry attempts are exhausted. | Keep retry/idempotency semantics explicit and add resume only if SDK support is available. |
 | Tray GUI/manual platform behavior lacks automation. | Menu/status/autostart regressions may escape unit tests. | Add release checklist and, if feasible, platform smoke automation. |
 | Real SDK integration is opt-in but easy to confuse with mocked E2E. | Accidental auth attempts could create account risk. | Keep `PROTON_LFS_RUN_SDK_INTEGRATION` and `PROTON_LFS_LIVE_CANARY` gates; document them prominently. |
