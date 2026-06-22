@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -140,6 +141,22 @@ func (w *progressCountingWriter) Write(p []byte) (int, error) {
 	w.latest = msg
 	w.count++
 	return len(p), nil
+}
+
+type virtualZeroReader struct {
+	remaining int64
+}
+
+func (r *virtualZeroReader) Read(p []byte) (int, error) {
+	if r.remaining <= 0 {
+		return 0, io.EOF
+	}
+	n := int64(len(p))
+	if n > r.remaining {
+		n = r.remaining
+	}
+	r.remaining -= n
+	return int(n), nil
 }
 
 func TestAdapterInit(t *testing.T) {
@@ -998,6 +1015,42 @@ func TestSendProgressSequenceLargeObjectStreamingCounter(t *testing.T) {
 	}
 	if writer.latest.BytesSince != largeSize%progressChunkSize {
 		t.Fatalf("last bytesSinceLast=%d, want %d", writer.latest.BytesSince, largeSize%progressChunkSize)
+	}
+}
+
+func TestCopyWithProgressLargeObjectVirtualReader(t *testing.T) {
+	const largeSize int64 = 5*1024*1024*1024 + 17
+	reader := &virtualZeroReader{remaining: largeSize}
+
+	var calls int64
+	var last int64
+	n, err := copyWithProgress(io.Discard, reader, func(bytesSoFar, bytesSinceLast int64) error {
+		if bytesSoFar <= last {
+			t.Fatalf("progress must increase: previous=%d current=%d", last, bytesSoFar)
+		}
+		if bytesSinceLast <= 0 || bytesSinceLast > progressChunkSize {
+			t.Fatalf("invalid increment %d", bytesSinceLast)
+		}
+		if bytesSinceLast != bytesSoFar-last {
+			t.Fatalf("bytesSinceLast=%d, want %d", bytesSinceLast, bytesSoFar-last)
+		}
+		last = bytesSoFar
+		calls++
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("copyWithProgress returned error: %v", err)
+	}
+	if n != largeSize {
+		t.Fatalf("copied bytes=%d, want %d", n, largeSize)
+	}
+
+	expectedCalls := (largeSize + progressChunkSize - 1) / progressChunkSize
+	if calls != expectedCalls {
+		t.Fatalf("progress calls=%d, want %d", calls, expectedCalls)
+	}
+	if last != largeSize {
+		t.Fatalf("final progress=%d, want %d", last, largeSize)
 	}
 }
 
