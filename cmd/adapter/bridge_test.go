@@ -596,7 +596,7 @@ func TestBridgeTransferCommandsForceAllowLoginFalse(t *testing.T) {
 			name:        "batch-exists",
 			wantCommand: "batch-exists",
 			run: func(bc *BridgeClient) error {
-				_, err := bc.BatchExists(creds, []string{validOID})
+				_, err := bc.batchExists(creds, []string{validOID})
 				return err
 			},
 		},
@@ -604,7 +604,7 @@ func TestBridgeTransferCommandsForceAllowLoginFalse(t *testing.T) {
 			name:        "batch-delete",
 			wantCommand: "batch-delete",
 			run: func(bc *BridgeClient) error {
-				_, err := bc.BatchDelete(creds, []string{validOID})
+				_, err := bc.batchDelete(creds, []string{validOID})
 				return err
 			},
 		},
@@ -634,13 +634,13 @@ func TestBridgeTransferCommandsForceAllowLoginFalse(t *testing.T) {
 	}
 }
 
-func TestBridgeBatchExists(t *testing.T) {
+func TestBridgeBatchExistsMaintenanceHelper(t *testing.T) {
 	bc := helperBridgeClient(t)
 	creds := OperationCredentials{CredentialProvider: CredentialProviderPassCLI}
 	oids := []string{validOID, "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"}
-	result, err := bc.BatchExists(creds, oids)
+	result, err := bc.batchExists(creds, oids)
 	if err != nil {
-		t.Fatalf("BatchExists failed: %v", err)
+		t.Fatalf("batchExists failed: %v", err)
 	}
 	for _, oid := range oids {
 		if !result[oid] {
@@ -649,13 +649,13 @@ func TestBridgeBatchExists(t *testing.T) {
 	}
 }
 
-func TestBridgeBatchDelete(t *testing.T) {
+func TestBridgeBatchDeleteMaintenanceHelper(t *testing.T) {
 	bc := helperBridgeClient(t)
 	creds := OperationCredentials{CredentialProvider: CredentialProviderPassCLI}
 	oids := []string{validOID}
-	result, err := bc.BatchDelete(creds, oids)
+	result, err := bc.batchDelete(creds, oids)
 	if err != nil {
-		t.Fatalf("BatchDelete failed: %v", err)
+		t.Fatalf("batchDelete failed: %v", err)
 	}
 	if !result[validOID] {
 		t.Fatal("expected oid to be deleted")

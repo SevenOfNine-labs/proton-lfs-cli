@@ -24,6 +24,8 @@ Date: 2026-06-22
 - Transfer failures preserve retryable/temporary backend metadata in status JSON
   and render it in helper/tray status surfaces without adding automatic login or
   retry loops.
+- Bridge batch operations are private maintenance helpers and are rejected as
+  Git LFS transfer events.
 
 ## Architecture
 

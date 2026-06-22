@@ -79,8 +79,8 @@ provider selectors and operation metadata to `proton-drive-cli`.
 | `Upload` | `upload` | `oid`, local `path`, selectors, `allowLogin=false`. | No | Beta |
 | `Download` | `download` | `oid`, `outputPath`, selectors, `allowLogin=false`. | No | Beta |
 | `Exists` | `exists` | `oid`, selectors, `allowLogin=false`. | No | Beta |
-| `BatchExists` | `batch-exists` | `oids`, selectors, `allowLogin=false`. | No | Internal helper only; not used by the Git LFS transfer loop. |
-| `BatchDelete` | `batch-delete` | `oids`, selectors, `allowLogin=false`. | No | Internal helper only; cleanup/maintenance surface. |
+| `batchExists` | `batch-exists` | `oids`, selectors, `allowLogin=false`. | No | Private maintenance helper only; not accepted as a Git LFS transfer event. |
+| `batchDelete` | `batch-delete` | `oids`, selectors, `allowLogin=false`. | No | Private cleanup/maintenance helper only; not accepted as a Git LFS transfer event. |
 | `Authenticate` | `auth` | Selectors and storage base. | Yes if drive-cli resolves credentials. | Legacy/helper; transfer path now gates with `auth-state`. |
 
 ### Auth-State Gate
@@ -163,7 +163,7 @@ The tray binary also provides a small CLI when launched with arguments.
 | --- | --- | --- |
 | No default real Proton transfer canary. | Mocked bridge can miss SDK/API changes. | Keep guarded; run with disposable account only after offline doctor and explicit acknowledgement. |
 | Docs link drift can recur as plans move to implemented docs. | New contributors can follow stale paths. | Keep `docs/README.md` and release checklists updated with each maturity change. |
-| `BatchExists`/`BatchDelete` are internal helper surfaces. | They can be mistaken for production Git LFS protocol features. | Keep them tested as bridge maintenance helpers and out of the transfer loop. |
+| `batchExists`/`batchDelete` are private bridge helper surfaces. | They can still be mistaken for production Git LFS protocol features if docs drift. | Keep them tested as maintenance helpers, rejected as adapter events, and out of the transfer loop. |
 | SDK adapter progress remains post-transfer. | Poor UX for large SDK-backed objects and timeouts. | Add SDK streaming progress when the drive-cli/SDK bridge exposes reliable callbacks. |
 | Resume is not implemented. | Interrupted transfers restart after transient retry attempts are exhausted. | Retryable/temporary failures are surfaced in status JSON and helper/tray messaging; add resume only if SDK support is available. |
 | Tray GUI/manual platform behavior lacks automation. | Menu/status/autostart regressions may escape unit tests. | Add release checklist and, if feasible, platform smoke automation. |

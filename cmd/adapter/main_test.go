@@ -194,6 +194,33 @@ func TestInitRejectsInvalidOperation(t *testing.T) {
 	}
 }
 
+func TestAdapterRejectsBatchMaintenanceCommandsAsTransferEvents(t *testing.T) {
+	for _, event := range []string{"batch-exists", "batch-delete"} {
+		t.Run(event, func(t *testing.T) {
+			adapter := NewAdapter()
+			adapter.allowMockTransfers = true
+			adapter.session = &Session{Initialized: true}
+
+			buf := new(bytes.Buffer)
+			err := adapter.handleMessage(&InboundMessage{Event: event, OID: validOID}, json.NewEncoder(buf))
+			if err != nil {
+				t.Fatalf("handleMessage returned error: %v", err)
+			}
+
+			var out OutboundMessage
+			if err := json.Unmarshal(bytes.TrimSpace(buf.Bytes()), &out); err != nil {
+				t.Fatalf("failed to decode output: %v", err)
+			}
+			if out.Error == nil || out.Error.Code != 400 {
+				t.Fatalf("expected protocol rejection for maintenance event, got %+v", out)
+			}
+			if !strings.Contains(out.Error.Message, "unknown event") {
+				t.Fatalf("expected unknown event rejection, got %+v", out.Error)
+			}
+		})
+	}
+}
+
 func TestUploadFailsClosedWithoutMockMode(t *testing.T) {
 	adapter := NewAdapter()
 	configureLocalBackend(adapter, "")
