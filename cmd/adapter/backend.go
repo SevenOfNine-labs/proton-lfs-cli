@@ -366,7 +366,10 @@ func (b *DriveCLIBackend) Upload(session *Session, oid, sourcePath string, expec
 
 	// Dedup: skip upload if OID already exists in remote storage
 	exists, err := b.bridge.Exists(b.operationCredentials(), oid)
-	if err == nil && exists {
+	if err != nil {
+		return 0, mapBridgeError(err, "drive-cli existence check failed")
+	}
+	if exists {
 		info, statErr := os.Stat(sourcePath)
 		if statErr != nil {
 			if errors.Is(statErr, os.ErrNotExist) {

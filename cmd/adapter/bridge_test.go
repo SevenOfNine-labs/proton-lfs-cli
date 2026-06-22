@@ -105,12 +105,15 @@ func TestHelperProcess(_ *testing.T) {
 
 	// Check for mock error injection via env
 	if mockErr := os.Getenv("MOCK_BRIDGE_ERROR"); mockErr != "" {
-		code := 500
-		if codeStr := os.Getenv("MOCK_BRIDGE_ERROR_CODE"); codeStr != "" {
-			fmt.Sscanf(codeStr, "%d", &code)
+		errorCommand := strings.TrimSpace(os.Getenv("MOCK_BRIDGE_ERROR_COMMAND"))
+		if errorCommand == "" || errorCommand == command {
+			code := 500
+			if codeStr := os.Getenv("MOCK_BRIDGE_ERROR_CODE"); codeStr != "" {
+				fmt.Sscanf(codeStr, "%d", &code)
+			}
+			writeErrorResponse(os.Stdout, code, mockErr)
+			os.Exit(1)
 		}
-		writeErrorResponse(os.Stdout, code, mockErr)
-		os.Exit(1)
 	}
 
 	// Check for mock delay

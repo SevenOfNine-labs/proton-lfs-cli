@@ -204,6 +204,44 @@ func TestDriveCLIBackendUploadDedup(t *testing.T) {
 	}
 }
 
+func TestDriveCLIBackendUploadFailsClosedWhenExistsCheckFails(t *testing.T) {
+	payload := []byte("exists-check-failure")
+	oidBytes := sha256.Sum256(payload)
+	oid := hex.EncodeToString(oidBytes[:])
+
+	uploadPath := filepath.Join(t.TempDir(), "upload.bin")
+	if err := os.WriteFile(uploadPath, payload, 0o600); err != nil {
+		t.Fatalf("failed to create upload file: %v", err)
+	}
+
+	logPath := filepath.Join(t.TempDir(), "bridge-commands.log")
+	bc := helperBridgeClient(t,
+		"MOCK_BRIDGE_COMMAND_LOG="+logPath,
+		"MOCK_BRIDGE_ERROR_COMMAND=exists",
+		"MOCK_BRIDGE_ERROR=drive service is unavailable",
+		"MOCK_BRIDGE_ERROR_CODE=503",
+	)
+	backend := NewDriveCLIBackend(bc, CredentialProviderPassCLI)
+	backend.authenticated = true
+
+	session := &Session{Initialized: true, Token: "direct-bridge"}
+	_, err := backend.Upload(session, oid, uploadPath, int64(len(payload)))
+
+	var backendErr *BackendError
+	if !errors.As(err, &backendErr) {
+		t.Fatalf("expected BackendError, got %T %v", err, err)
+	}
+	if backendErr.Code != 503 || backendErr.ErrorCode != ErrCodeServerError {
+		t.Fatalf("unexpected backend error classification: %+v", backendErr)
+	}
+	if !backendErr.Retryable || !backendErr.Temporary {
+		t.Fatalf("exists-check outage should be retryable and temporary: %+v", backendErr)
+	}
+
+	commands := readLoggedBridgeCommands(t, logPath)
+	assertBridgeCommands(t, commands, "exists")
+}
+
 func TestDriveCLIBackendGitCredentialMode(t *testing.T) {
 	bc := helperBridgeClient(t)
 	backend := &DriveCLIBackend{
