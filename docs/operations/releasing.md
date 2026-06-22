@@ -20,6 +20,7 @@ Before tagging a release that changes tray/helper behavior, run
 # 1. Ensure submodule pins and tests pass
 make check-submodules
 make test && make test-integration
+make live-canary-preflight
 
 # 2. Tag the release
 git tag v0.2.0

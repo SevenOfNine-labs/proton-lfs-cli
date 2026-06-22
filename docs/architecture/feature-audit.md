@@ -81,7 +81,7 @@ root bridge request shape remains allowed and includes newly required fields.
 | `InitLFSStorage` | `init` | Storage base, selectors, `allowLogin=false`. | No | Beta |
 | `Upload` | `upload` | `oid`, local `path`, selectors, `allowLogin=false`. | No | Beta |
 | `Download` | `download` | `oid`, `outputPath`, selectors, `allowLogin=false`. | No | Beta |
-| `Exists` | `exists` | `oid`, selectors, `allowLogin=false`. | No | Beta |
+| `Exists` | `exists` | `oid`, selectors, `allowLogin=false`. | No | Beta; upload dedup fails closed on non-404 errors. |
 | `batchExists` | `batch-exists` | `oids`, selectors, `allowLogin=false`. | No | Private maintenance helper only; not accepted as a Git LFS transfer event. |
 | `batchDelete` | `batch-delete` | `oids`, selectors, `allowLogin=false`. | No | Private cleanup/maintenance helper only; not accepted as a Git LFS transfer event. |
 | `Authenticate` | `auth` | Selectors and storage base. | Yes if drive-cli resolves credentials. | Legacy/helper; transfer path now gates with `auth-state`. |
@@ -142,6 +142,7 @@ The tray binary also provides a small CLI when launched with arguments.
 | Auth-state mapping | `cmd/adapter/backend_test.go`, `cmd/adapter/bridge_test.go`. | Stable |
 | Credential selector handling | `cmd/adapter/gitcred_test.go`, `cmd/adapter/bridge_test.go`. | Stable |
 | Mocked SDK E2E | `tests/integration/git_lfs_e2e_mock_test.go`, `tests/testdata/mock-proton-drive-cli.js`. | Stable and safe by default |
+| Transfer robustness | `cmd/adapter/backend_test.go`, `cmd/adapter/main_test.go`. | Stable offline coverage for fail-closed dedup errors, progress semantics, and virtual multi-GiB copy counters. |
 | Real SDK subprocess integration | `tests/integration/git_lfs_sdk_backend_test.go`. | Guarded; requires `PROTON_LFS_RUN_SDK_INTEGRATION=1` or `make test-integration-sdk`. |
 | Real Proton E2E | `tests/integration/git_lfs_e2e_real_test.go`. | Guarded by `PROTON_LFS_LIVE_CANARY`. |
 | Credential security | `tests/integration/credential_security_test.go`. | Partial; some checks skip without local session/pass-cli. |
@@ -171,7 +172,7 @@ The tray binary also provides a small CLI when launched with arguments.
 | Docs link drift can recur as plans move to implemented docs. | New contributors can follow stale paths. | Keep `docs/README.md` and release checklists updated with each maturity change. |
 | `batchExists`/`batchDelete` are private bridge helper surfaces. | They can still be mistaken for production Git LFS protocol features if docs drift. | Keep them tested as maintenance helpers, rejected as adapter events, and out of the transfer loop. |
 | SDK adapter progress remains post-transfer. | Poor UX for large SDK-backed objects and timeouts. | Add SDK streaming progress when the drive-cli/SDK bridge exposes reliable callbacks. |
-| Resume is not implemented. | Interrupted transfers restart after transient retry attempts are exhausted. | Retryable/temporary failures are surfaced in status JSON and helper/tray messaging; add resume only if SDK support is available. |
+| Resume is not implemented. | Interrupted transfers restart after transient retry attempts are exhausted. | Retryable/temporary failures are surfaced in status JSON and helper/tray messaging; upload dedup now fails closed on uncertain remote state; add resume only if SDK support is available. |
 | Tray GUI/manual platform behavior lacks automation. | Menu/status/autostart regressions may escape unit tests. | Add release checklist and, if feasible, platform smoke automation. |
 | Real SDK integration is opt-in but easy to confuse with mocked E2E. | Accidental auth attempts could create account risk. | Keep `PROTON_LFS_RUN_SDK_INTEGRATION` and `PROTON_LFS_LIVE_CANARY` gates; document them prominently. |
 | Bridge contract drift remains possible when schemas change. | New states/errors/required request fields may be misclassified or omitted if tests are bypassed. | Keep drive-cli schemas and root contract tests required for every bridge change. |
@@ -185,6 +186,10 @@ The tray binary also provides a small CLI when launched with arguments.
 - The official SDK layout migration from `js/sdk` to `client/js` is now pinned
   through `proton-drive-cli@b97563b` and the root submodule pointer. No real
   Proton login or canary was run for this migration.
+- SDK upload dedup now fails closed on non-404 `exists` errors and preserves
+  retryable/temporary classification for transient outages.
+- Adapter progress coverage now includes a virtual multi-GiB `copyWithProgress`
+  test that exercises the real streaming loop without large fixtures.
 
 ## Definition of Done for Future Feature Changes
 

@@ -31,6 +31,11 @@ Date: 2026-06-22
 - Transfer failures preserve retryable/temporary backend metadata in status JSON
   and render it in helper/tray status surfaces without adding automatic login or
   retry loops.
+- SDK uploads fail closed when the pre-upload remote `exists` check fails with
+  a non-404 bridge error; `404` remains the only "missing, continue to upload"
+  existence-check result.
+- Large-object progress coverage includes virtual multi-GiB copy/progress tests
+  that do not allocate or write large fixtures.
 - Bridge batch operations are private maintenance helpers and are rejected as
   Git LFS transfer events.
 - Bridge subprocess tests cover strict envelopes, typed timeouts, malformed

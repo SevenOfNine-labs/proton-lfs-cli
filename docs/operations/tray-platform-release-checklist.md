@@ -40,6 +40,27 @@ refresh behavior changes.
 - Trigger a mocked refresh failure and confirm the visible message includes a
   recovery action, not a retry loop.
 
+## Canary Gates
+
+- Run `make live-canary-preflight` with no live doctor args and confirm it
+  skips credential-store doctor instead of touching Proton.
+- Run the browser-fork canary script tests with `go test ./scripts` and confirm
+  fake-drive coverage still proves one login command and no transfer commands.
+- Confirm `make test-e2e-real` is not part of default CI or `make test`.
+- For any real disposable-account run, record the exact
+  `LIVE_CANARY_DOCTOR_ARGS` and acknowledgement used.
+
+## Transfer Robustness
+
+- Run `go test ./cmd/adapter` and confirm fail-closed upload dedup coverage is
+  present for non-404 `exists` failures.
+- Confirm status output surfaces retryable/temporary metadata for transient
+  transfer failures.
+- Confirm large-object progress coverage uses virtual or mocked data, not
+  checked-in large fixtures.
+- Confirm `batch-exists` and `batch-delete` remain documented as private
+  maintenance helpers and are rejected as Git LFS transfer events.
+
 ## Release Evidence
 
 Record:
@@ -47,6 +68,10 @@ Record:
 - OS and desktop environment.
 - Adapter commit and `proton-drive-cli` submodule commit.
 - `make check-submodules` output.
+- `make live-canary-preflight` output.
+- `go test ./cmd/adapter ./cmd/tray ./internal/config ./internal/preflight ./scripts` output.
 - Credential provider used.
 - Whether two-password/data-password mode was tested.
+- Whether browser-fork canary was skipped, mocked only, or run with a
+  disposable account.
 - Screenshot or terminal output with secrets redacted.
