@@ -78,6 +78,71 @@ func TestDriveCLIBackendInitializeWithEmptyProvider(t *testing.T) {
 	}
 }
 
+func TestDriveCLIBackendInitializeUsesOfflineGateBeforeInit(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "bridge-commands.log")
+	bc := helperBridgeClient(t, "MOCK_BRIDGE_COMMAND_LOG="+logPath)
+	backend := NewDriveCLIBackend(bc, CredentialProviderPassCLI)
+	session := &Session{Initialized: true, CreatedAt: time.Now()}
+
+	if err := backend.Initialize(session); err != nil {
+		t.Fatalf("Initialize returned error: %v", err)
+	}
+
+	commands := readLoggedBridgeCommands(t, logPath)
+	assertBridgeCommands(t, commands, "auth-state", "init")
+
+	if _, ok := commands[0].Request["allowLogin"]; ok {
+		t.Fatalf("auth-state request should not include allowLogin, got %v", commands[0].Request)
+	}
+	if commands[1].Request["allowLogin"] != false {
+		t.Fatalf("init request allowLogin = %v, want false", commands[1].Request["allowLogin"])
+	}
+}
+
+func TestDriveCLIBackendInitializeBlocksAllNonReadyStatesBeforeInitOrAuth(t *testing.T) {
+	cases := []struct {
+		state     string
+		code      int
+		errorCode ErrorCode
+	}{
+		{state: "login_available", code: 401, errorCode: ErrCodeAuthRequired},
+		{state: "needs_login", code: 401, errorCode: ErrCodeAuthRequired},
+		{state: "needs_data_password", code: 401, errorCode: ErrCodeDataPasswordRequired},
+		{state: "needs_key_password", code: 401, errorCode: ErrCodeKeyPasswordRequired},
+		{state: "session_expired", code: 401, errorCode: ErrCodeAuthRequired},
+		{state: "session_invalid", code: 401, errorCode: ErrCodeAuthRequired},
+		{state: "configuration_error", code: 400, errorCode: ErrCodeInvalidRequest},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.state, func(t *testing.T) {
+			logPath := filepath.Join(t.TempDir(), "bridge-commands.log")
+			bc := helperBridgeClient(t,
+				"MOCK_BRIDGE_AUTH_STATE="+tc.state,
+				"MOCK_BRIDGE_COMMAND_LOG="+logPath,
+			)
+			backend := NewDriveCLIBackend(bc, CredentialProviderPassCLI)
+			session := &Session{Initialized: true, CreatedAt: time.Now()}
+
+			err := backend.Initialize(session)
+			var backendErr *BackendError
+			if !errors.As(err, &backendErr) {
+				t.Fatalf("expected BackendError, got %T %v", err, err)
+			}
+			if backendErr.Code != tc.code || backendErr.ErrorCode != tc.errorCode {
+				t.Fatalf("state %s mapped to code=%d errorCode=%s, want code=%d errorCode=%s",
+					tc.state, backendErr.Code, backendErr.ErrorCode, tc.code, tc.errorCode)
+			}
+			if backend.authenticated {
+				t.Fatalf("state %s must not mark backend authenticated", tc.state)
+			}
+
+			commands := readLoggedBridgeCommands(t, logPath)
+			assertBridgeCommands(t, commands, "auth-state")
+		})
+	}
+}
+
 func TestDriveCLIBackendUploadMapsNotFoundError(t *testing.T) {
 	bc := helperBridgeClient(t,
 		"MOCK_BRIDGE_EXISTS_RESULT=false",

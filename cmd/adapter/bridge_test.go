@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -39,6 +40,28 @@ func TestHelperProcess(_ *testing.T) {
 	if err := json.NewDecoder(os.Stdin).Decode(&req); err != nil {
 		writeErrorResponse(os.Stdout, 500, "failed to read stdin: "+err.Error())
 		os.Exit(1)
+	}
+
+	if logPath := os.Getenv("MOCK_BRIDGE_COMMAND_LOG"); logPath != "" {
+		requestBytes, err := json.Marshal(req)
+		if err != nil {
+			writeErrorResponse(os.Stdout, 500, "failed to marshal command log request: "+err.Error())
+			os.Exit(1)
+		}
+		f, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+		if err != nil {
+			writeErrorResponse(os.Stdout, 500, "failed to open command log: "+err.Error())
+			os.Exit(1)
+		}
+		if _, err := f.WriteString(command + "\t" + string(requestBytes) + "\n"); err != nil {
+			_ = f.Close()
+			writeErrorResponse(os.Stdout, 500, "failed to write command log: "+err.Error())
+			os.Exit(1)
+		}
+		if err := f.Close(); err != nil {
+			writeErrorResponse(os.Stdout, 500, "failed to close command log: "+err.Error())
+			os.Exit(1)
+		}
 	}
 
 	if expectedJSON := os.Getenv("MOCK_BRIDGE_EXPECT_REQUEST"); expectedJSON != "" {
@@ -230,6 +253,50 @@ func helperBridgeClient(t *testing.T, extraEnv ...string) *BridgeClient {
 		AppVersion:    "test-1.0",
 		ExtraEnv:      env,
 	})
+}
+
+type loggedBridgeCommand struct {
+	Command string
+	Request map[string]any
+}
+
+func readLoggedBridgeCommands(t *testing.T, logPath string) []loggedBridgeCommand {
+	t.Helper()
+	raw, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("failed to read bridge command log: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(raw)), "\n")
+	commands := make([]loggedBridgeCommand, 0, len(lines))
+	for _, line := range lines {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		parts := strings.SplitN(line, "\t", 2)
+		if len(parts) != 2 {
+			t.Fatalf("invalid bridge command log line: %q", line)
+		}
+		var request map[string]any
+		if err := json.Unmarshal([]byte(parts[1]), &request); err != nil {
+			t.Fatalf("failed to parse bridge command request %q: %v", parts[1], err)
+		}
+		commands = append(commands, loggedBridgeCommand{
+			Command: parts[0],
+			Request: request,
+		})
+	}
+	return commands
+}
+
+func assertBridgeCommands(t *testing.T, commands []loggedBridgeCommand, want ...string) {
+	t.Helper()
+	got := make([]string, 0, len(commands))
+	for _, command := range commands {
+		got = append(got, command.Command)
+	}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("bridge commands = %v, want %v", got, want)
+	}
 }
 
 func TestBridgeAuthenticate(t *testing.T) {
@@ -481,6 +548,89 @@ func TestBridgeDataCredentialSelectorPassthrough(t *testing.T) {
 	}
 	if err := bc.Authenticate(creds); err != nil {
 		t.Fatalf("Auth with data credential selectors failed: %v", err)
+	}
+}
+
+func TestBridgeTransferCommandsForceAllowLoginFalse(t *testing.T) {
+	creds := OperationCredentials{CredentialProvider: CredentialProviderGitCredential}
+	uploadPath := filepath.Join(t.TempDir(), "upload.bin")
+	if err := os.WriteFile(uploadPath, []byte("upload"), 0o600); err != nil {
+		t.Fatalf("failed to create upload file: %v", err)
+	}
+
+	cases := []struct {
+		name        string
+		wantCommand string
+		run         func(*BridgeClient) error
+	}{
+		{
+			name:        "init",
+			wantCommand: "init",
+			run: func(bc *BridgeClient) error {
+				return bc.InitLFSStorage(creds)
+			},
+		},
+		{
+			name:        "upload",
+			wantCommand: "upload",
+			run: func(bc *BridgeClient) error {
+				return bc.Upload(creds, validOID, uploadPath)
+			},
+		},
+		{
+			name:        "download",
+			wantCommand: "download",
+			run: func(bc *BridgeClient) error {
+				return bc.Download(creds, validOID, filepath.Join(t.TempDir(), "download.bin"))
+			},
+		},
+		{
+			name:        "exists",
+			wantCommand: "exists",
+			run: func(bc *BridgeClient) error {
+				_, err := bc.Exists(creds, validOID)
+				return err
+			},
+		},
+		{
+			name:        "batch-exists",
+			wantCommand: "batch-exists",
+			run: func(bc *BridgeClient) error {
+				_, err := bc.BatchExists(creds, []string{validOID})
+				return err
+			},
+		},
+		{
+			name:        "batch-delete",
+			wantCommand: "batch-delete",
+			run: func(bc *BridgeClient) error {
+				_, err := bc.BatchDelete(creds, []string{validOID})
+				return err
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			logPath := filepath.Join(t.TempDir(), "bridge-commands.log")
+			bc := helperBridgeClient(t, "MOCK_BRIDGE_COMMAND_LOG="+logPath)
+			if err := tc.run(bc); err != nil {
+				t.Fatalf("%s failed: %v", tc.name, err)
+			}
+
+			commands := readLoggedBridgeCommands(t, logPath)
+			assertBridgeCommands(t, commands, tc.wantCommand)
+			request := commands[0].Request
+			if request["allowLogin"] != false {
+				t.Fatalf("%s request allowLogin = %v, want false", tc.name, request["allowLogin"])
+			}
+			if _, ok := request["password"]; ok {
+				t.Fatalf("%s request must not include login password", tc.name)
+			}
+			if _, ok := request["dataPassword"]; ok {
+				t.Fatalf("%s request must not include data password", tc.name)
+			}
+		})
 	}
 }
 
