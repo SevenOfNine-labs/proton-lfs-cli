@@ -495,6 +495,13 @@ type bridgeErrorDetails struct {
 	FIDO2Available bool   `json:"fido2Available"`
 }
 
+func bridgeStatusOrDefault(bridgeErr *BridgeError, fallback int) int {
+	if bridgeErr != nil && bridgeErr.Code > 0 {
+		return bridgeErr.Code
+	}
+	return fallback
+}
+
 func mapStructuredBridgeError(bridgeErr *BridgeError, fallbackMessage string, original error) error {
 	if bridgeErr == nil {
 		return newBackendError(502, fallbackMessage, original)
@@ -513,6 +520,8 @@ func mapStructuredBridgeError(bridgeErr *BridgeError, fallbackMessage string, or
 	errorCode := strings.ToUpper(strings.TrimSpace(details.ErrorCode))
 
 	switch {
+	case errorCode == "AUTH_FAILED" || errorCode == "INVALID_CREDENTIALS" || errorCode == "SESSION_EXPIRED":
+		return newBackendErrorWithCode(bridgeStatusOrDefault(bridgeErr, 401), "session is invalid or expired", original, ErrCodeAuthRequired)
 	case errorCode == "TWO_FACTOR_REQUIRED" || strings.Contains(lowerMsg, "two-factor") || strings.Contains(lowerMsg, "2fa") || strings.Contains(lowerMsg, "fido2"):
 		message := "two-factor authentication required"
 		if details.TwoFactorType == "fido2" {
@@ -525,6 +534,20 @@ func mapStructuredBridgeError(bridgeErr *BridgeError, fallbackMessage string, or
 		return newBackendErrorWithCode(401, "mailbox/data password required for this Proton account", original, ErrCodeDataPasswordRequired)
 	case strings.Contains(lowerMsg, "failed to decrypt") || strings.Contains(lowerMsg, "decrypt any keys"):
 		return newBackendErrorWithCode(401, "mailbox/data password could not unlock Proton keys", original, ErrCodeKeyUnlockFailed)
+	case errorCode == "CAPTCHA_REQUIRED":
+		return newBackendErrorWithCode(bridgeStatusOrDefault(bridgeErr, 407), "captcha verification required — run: proton-drive login", original, ErrCodeCaptchaRequired)
+	case errorCode == "RATE_LIMITED":
+		return newBackendErrorWithCode(bridgeStatusOrDefault(bridgeErr, 429), "rate limited by proton api — wait and retry", original, ErrCodeRateLimited)
+	case errorCode == "NOT_FOUND" || errorCode == "FILE_NOT_FOUND" || errorCode == "PATH_NOT_FOUND":
+		return newBackendErrorWithCode(bridgeStatusOrDefault(bridgeErr, 404), "object not found in drive backend", original, ErrCodeNotFound)
+	case errorCode == "PERMISSION_DENIED":
+		return newBackendErrorWithCode(bridgeStatusOrDefault(bridgeErr, 403), "permission denied by drive backend", original, ErrCodePermissionDenied)
+	case errorCode == "NETWORK_ERROR" || errorCode == "TIMEOUT" || errorCode == "CONNECTION_REFUSED":
+		return newBackendErrorWithCode(bridgeStatusOrDefault(bridgeErr, 502), "drive service is unavailable", original, ErrCodeNetworkFailure)
+	case errorCode == "FILE_TOO_LARGE" || errorCode == "INVALID_FILE" || errorCode == "INVALID_PATH" || errorCode == "NOT_A_FOLDER" || errorCode == "VALIDATION_ERROR" || errorCode == "OPERATION_CANCELLED":
+		return newBackendErrorWithCode(bridgeStatusOrDefault(bridgeErr, 400), msg, original, ErrCodeInvalidRequest)
+	case errorCode == "API_ERROR" || errorCode == "QUOTA_EXCEEDED" || errorCode == "DISK_FULL" || errorCode == "UPLOAD_FAILED" || errorCode == "DOWNLOAD_FAILED" || errorCode == "ENCRYPTION_FAILED" || errorCode == "DECRYPTION_FAILED" || errorCode == "UNKNOWN_ERROR":
+		return newBackendErrorWithCode(bridgeStatusOrDefault(bridgeErr, 502), fallbackMessage, original, ErrCodeServerError)
 	}
 
 	switch bridgeErr.Code {
@@ -536,6 +559,8 @@ func mapStructuredBridgeError(bridgeErr *BridgeError, fallbackMessage string, or
 		return newBackendError(407, "captcha verification required — run: proton-drive login", original)
 	case 429:
 		return newBackendError(429, "rate limited by proton api — wait and retry", original)
+	case 403:
+		return newBackendErrorWithCode(403, "permission denied by drive backend", original, ErrCodePermissionDenied)
 	case 503:
 		return newBackendError(503, "drive service is unavailable", original)
 	default:
