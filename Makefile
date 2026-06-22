@@ -18,7 +18,7 @@ LIVE_CANARY_ACK_VALUE := I_UNDERSTAND_THIS_TOUCHES_A_REAL_PROTON_ACCOUNT
 	build build-adapter build-tray build-lfs build-drive-cli build-sea build-all build-bundle \
 	install uninstall \
 	test test-adapter test-tray test-lfs test-integration test-integration-timeout test-integration-stress test-integration-sdk test-e2e-mock test-e2e-real test-all \
-	live-canary-preflight browser-fork-canary pass-env check-live-canary-ack check-live-canary-doctor-args check-browser-fork-canary-args check-sdk-prereqs check-sdk-real-prereqs \
+	live-canary-preflight browser-fork-canary pass-env check-submodules check-live-canary-ack check-live-canary-doctor-args check-browser-fork-canary-args check-sdk-prereqs check-sdk-real-prereqs \
 	fmt lint lint-go \
 	docs docs-lint \
 	clean status install-hooks
@@ -333,6 +333,9 @@ test-e2e-real: check-live-canary-ack check-live-canary-doctor-args live-canary-p
 
 pass-env: ## Print export commands for Proton Pass-based adapter credentials
 	@./scripts/export-pass-env.sh
+
+check-submodules: ## Verify pinned root and Proton SDK submodule checkouts
+	@./scripts/check-submodules.sh
 
 check-sdk-prereqs: ## Verify prerequisites for sdk integration tests
 	@command -v git-lfs >/dev/null 2>&1 || (echo "git-lfs not found on PATH" && exit 1)

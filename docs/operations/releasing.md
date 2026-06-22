@@ -17,7 +17,8 @@ Before tagging a release that changes tray/helper behavior, run
 ### Steps
 
 ```bash
-# 1. Ensure tests pass
+# 1. Ensure submodule pins and tests pass
+make check-submodules
 make test && make test-integration
 
 # 2. Tag the release
@@ -26,6 +27,12 @@ git push origin v0.2.0
 ```
 
 The `build.yml` workflow runs automatically. When the tag matches `v*`, the `release` job creates a GitHub Release with the binaries.
+
+`make check-submodules` intentionally verifies only the root-owned
+submodules and the `proton-drive-cli` SDK gitlink. Do not use
+`git submodule status --recursive` as release evidence while the upstream
+Proton SDK commit contains nested gitlinks without a matching `.gitmodules`
+entry, such as `kt/sdk/src/main/jniLibs`.
 
 ### Verifying
 

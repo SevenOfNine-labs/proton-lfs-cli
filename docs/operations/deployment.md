@@ -14,12 +14,18 @@ No .NET SDK required.
 ## Local Bring-Up
 
 ```bash
-git submodule update --init --recursive
+git submodule update --init submodules/git-lfs submodules/pass-cli submodules/proton-drive-cli
+git -C submodules/proton-drive-cli submodule update --init submodules/sdk
+make check-submodules
 make setup
 make build-all    # Builds Go adapter, Git LFS, and proton-drive-cli
 make test
 make test-integration
 ```
+
+`make check-submodules` avoids recursive descent into the Proton SDK because
+the current upstream SDK commit contains nested gitlinks that are not declared
+in its `.gitmodules` file.
 
 Build proton-drive-cli:
 

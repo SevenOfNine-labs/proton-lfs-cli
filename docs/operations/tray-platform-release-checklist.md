@@ -46,6 +46,7 @@ Record:
 
 - OS and desktop environment.
 - Adapter commit and `proton-drive-cli` submodule commit.
+- `make check-submodules` output.
 - Credential provider used.
 - Whether two-password/data-password mode was tested.
 - Screenshot or terminal output with secrets redacted.
