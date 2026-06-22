@@ -123,8 +123,9 @@ func isRetryableCode(code int) bool {
 
 // isTemporaryCode determines if an HTTP status code indicates a temporary error
 func isTemporaryCode(code int) bool {
-	// 503 (Service Unavailable) and 5xx are typically temporary
-	return code == 503 || (code >= 500 && code < 600)
+	// Rate limits and 5xx server errors are temporary, but only 5xx are
+	// retryable by the adapter without user-controlled waiting.
+	return code == 429 || code == 503 || (code >= 500 && code < 600)
 }
 
 func backendErrorDetails(err error) (int, string) {

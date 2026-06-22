@@ -25,7 +25,7 @@ Runtime behavior and tests remain authoritative.
 | Local backend | Deterministic filesystem object store for tests and offline development. | Stable | `cmd/adapter/backend.go`. | Adapter unit tests and local integration tests. |
 | SDK backend | Spawns `proton-drive-cli bridge` subprocess and stores objects in Proton Drive under `/LFS`. | Beta | `cmd/adapter/bridge.go`, `cmd/adapter/backend.go`. | Bridge unit tests, mocked E2E, opt-in SDK integration. |
 | Tray/helper CLI | User-facing `proton-lfs-cli` helper for login, register, status, config, logout, and tray lifecycle. | Beta | `cmd/tray/*.go`. | `cmd/tray/*_test.go`. |
-| Status reporting | Writes transfer state for tray/CLI display. | Stable | `internal/config/status.go`. | `internal/config/status_test.go`, tray status tests. |
+| Status reporting | Writes transfer state, machine error code, retryability, and temporary-failure metadata for tray/CLI display. | Stable | `internal/config/status.go`. | `internal/config/status_test.go`, tray status tests. |
 | Preferences | Stores selected credential provider and enabled state. | Stable | `internal/config/prefs.go`. | `internal/config/config_test.go`, tray CLI tests. |
 | Build/package automation | Builds Go adapter/tray, proton-drive-cli, Git LFS, SEA bundle, and app bundles. | Beta | `Makefile`, `scripts/*.sh`. | Build targets are exercised manually and in previous commits; not fully unit-tested. |
 | Submodule pin verification | Verifies root submodule pins and the nested Proton SDK gitlink without recursive SDK traversal. | Stable | `scripts/check-submodules.sh`, `Makefile`. | `make check-submodules`. |
@@ -165,7 +165,7 @@ The tray binary also provides a small CLI when launched with arguments.
 | Docs link drift can recur as plans move to implemented docs. | New contributors can follow stale paths. | Keep `docs/README.md` and release checklists updated with each maturity change. |
 | `BatchExists`/`BatchDelete` are internal helper surfaces. | They can be mistaken for production Git LFS protocol features. | Keep them tested as bridge maintenance helpers and out of the transfer loop. |
 | SDK adapter progress remains post-transfer. | Poor UX for large SDK-backed objects and timeouts. | Add SDK streaming progress when the drive-cli/SDK bridge exposes reliable callbacks. |
-| Resume is not implemented. | Interrupted transfers restart after transient retry attempts are exhausted. | Keep retry/idempotency semantics explicit and add resume only if SDK support is available. |
+| Resume is not implemented. | Interrupted transfers restart after transient retry attempts are exhausted. | Retryable/temporary failures are surfaced in status JSON; add resume only if SDK support is available. |
 | Tray GUI/manual platform behavior lacks automation. | Menu/status/autostart regressions may escape unit tests. | Add release checklist and, if feasible, platform smoke automation. |
 | Real SDK integration is opt-in but easy to confuse with mocked E2E. | Accidental auth attempts could create account risk. | Keep `PROTON_LFS_RUN_SDK_INTEGRATION` and `PROTON_LFS_LIVE_CANARY` gates; document them prominently. |
 | Bridge contract drift remains possible when schemas change. | New states/errors may be misclassified if tests are bypassed. | Keep drive-cli schemas and root contract tests required for every bridge change. |

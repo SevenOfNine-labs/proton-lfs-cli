@@ -21,6 +21,8 @@ Date: 2026-06-22
 - Submodule pins are checked with `make check-submodules` instead of relying on
   recursive SDK traversal, because the official Proton SDK commit currently
   contains an unmapped nested gitlink.
+- Transfer failures preserve retryable/temporary backend metadata in the status
+  JSON for tray/helper display without adding automatic login or retry loops.
 
 ## Architecture
 

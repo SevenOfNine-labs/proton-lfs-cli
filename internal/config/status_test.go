@@ -74,12 +74,14 @@ func TestStatusWithErrorFields(t *testing.T) {
 
 	// Write status with error fields
 	originalStatus := StatusReport{
-		State:       StateRateLimited,
+		State:       StateError,
 		LastOID:     "def456",
 		LastOp:      "download",
-		Error:       "Rate limit exceeded",
-		ErrorCode:   "rate_limited",
-		ErrorDetail: "Wait before retrying operations",
+		Error:       "Service unavailable",
+		ErrorCode:   "server_error",
+		ErrorDetail: "Retry may succeed after transient failure",
+		Retryable:   true,
+		Temporary:   true,
 		RetryCount:  3,
 		Timestamp:   time.Now(),
 	}
@@ -104,6 +106,12 @@ func TestStatusWithErrorFields(t *testing.T) {
 	}
 	if readStatus.RetryCount != originalStatus.RetryCount {
 		t.Errorf("RetryCount mismatch: got %d, want %d", readStatus.RetryCount, originalStatus.RetryCount)
+	}
+	if readStatus.Retryable != originalStatus.Retryable {
+		t.Errorf("Retryable mismatch: got %v, want %v", readStatus.Retryable, originalStatus.Retryable)
+	}
+	if readStatus.Temporary != originalStatus.Temporary {
+		t.Errorf("Temporary mismatch: got %v, want %v", readStatus.Temporary, originalStatus.Temporary)
 	}
 }
 

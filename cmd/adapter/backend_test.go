@@ -737,7 +737,7 @@ func TestIsTemporaryCode(t *testing.T) {
 		{500, true},
 		{502, true},
 		{504, true},
-		{429, false},
+		{429, true},
 		{404, false},
 		{401, false},
 		{200, false},
@@ -805,5 +805,8 @@ func TestNewBackendErrorRateLimited(t *testing.T) {
 	}
 	if backendErr.Retryable {
 		t.Error("expected Retryable = false for 429")
+	}
+	if !backendErr.Temporary {
+		t.Error("expected Temporary = true for 429")
 	}
 }

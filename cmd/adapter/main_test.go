@@ -552,6 +552,63 @@ func TestClassifyErrorAuthChallengeStates(t *testing.T) {
 	}
 }
 
+func TestSendBackendTransferErrorWritesRetryMetadata(t *testing.T) {
+	statusPath := filepath.Join(t.TempDir(), "status.json")
+	t.Setenv(config.EnvStatusFile, statusPath)
+
+	adapter := NewAdapter()
+	buf := new(bytes.Buffer)
+	err := newBackendError(503, "drive service is unavailable", nil)
+	if sendErr := adapter.sendBackendTransferError(json.NewEncoder(buf), validOID, err); sendErr != nil {
+		t.Fatalf("sendBackendTransferError returned error: %v", sendErr)
+	}
+
+	var out OutboundMessage
+	if err := json.Unmarshal(bytes.TrimSpace(buf.Bytes()), &out); err != nil {
+		t.Fatalf("failed to decode transfer error: %v", err)
+	}
+	if out.Error == nil || out.Error.Code != 503 {
+		t.Fatalf("expected 503 transfer error, got %+v", out)
+	}
+
+	report, err := config.ReadStatus()
+	if err != nil {
+		t.Fatalf("ReadStatus failed: %v", err)
+	}
+	if report.ErrorCode != string(ErrCodeServerError) {
+		t.Fatalf("status errorCode=%q, want %q", report.ErrorCode, ErrCodeServerError)
+	}
+	if !report.Retryable || !report.Temporary {
+		t.Fatalf("expected retryable temporary status, got %+v", report)
+	}
+}
+
+func TestSendBackendTransferErrorPreservesNonRetryableAuthMetadata(t *testing.T) {
+	statusPath := filepath.Join(t.TempDir(), "status.json")
+	t.Setenv(config.EnvStatusFile, statusPath)
+
+	adapter := NewAdapter()
+	buf := new(bytes.Buffer)
+	err := newBackendErrorWithCode(401, "stored browser-fork key password required for this Proton session", nil, ErrCodeKeyPasswordRequired)
+	if sendErr := adapter.sendBackendTransferError(json.NewEncoder(buf), validOID, err); sendErr != nil {
+		t.Fatalf("sendBackendTransferError returned error: %v", sendErr)
+	}
+
+	report, err := config.ReadStatus()
+	if err != nil {
+		t.Fatalf("ReadStatus failed: %v", err)
+	}
+	if report.State != config.StateAuthRequired {
+		t.Fatalf("status state=%q, want auth_required", report.State)
+	}
+	if report.ErrorCode != string(ErrCodeKeyPasswordRequired) {
+		t.Fatalf("status errorCode=%q, want %q", report.ErrorCode, ErrCodeKeyPasswordRequired)
+	}
+	if report.Retryable || report.Temporary {
+		t.Fatalf("auth blocker must not be retryable/temporary: %+v", report)
+	}
+}
+
 func TestUploadRejectsPathTraversal(t *testing.T) {
 	adapter := NewAdapter()
 	adapter.allowMockTransfers = true

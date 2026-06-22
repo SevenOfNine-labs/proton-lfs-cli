@@ -227,8 +227,7 @@ func (a *Adapter) handleUpload(msg *InboundMessage, enc *json.Encoder) error {
 	progress := newTransferProgress(enc, normalizedOID)
 	storedSize, err := a.uploadWithProgress(normalizedOID, msg.Path, sourceSize, progress.report)
 	if err != nil {
-		code, message := backendErrorDetails(err)
-		return a.sendTransferError(enc, msg.OID, code, message)
+		return a.sendBackendTransferError(enc, msg.OID, err)
 	}
 
 	if err := progress.finish(a, storedSize); err != nil {
@@ -262,8 +261,7 @@ func (a *Adapter) handleDownload(msg *InboundMessage, enc *json.Encoder) error {
 	progress := newTransferProgress(enc, normalizedOID)
 	stagedPath, stagedSize, err := a.downloadWithProgress(normalizedOID, progress.report)
 	if err != nil {
-		code, message := backendErrorDetails(err)
-		return a.sendTransferError(enc, msg.OID, code, message)
+		return a.sendBackendTransferError(enc, msg.OID, err)
 	}
 
 	objectHash, objectSize, err := calculateFileSHA256(stagedPath)
@@ -413,10 +411,26 @@ func classifyError(code int, message string) (state string, errorCode string, er
 }
 
 func (a *Adapter) sendTransferError(enc *json.Encoder, oid string, code int, message string) error {
+	return a.sendTransferErrorWithMetadata(enc, oid, code, message, "", false, false)
+}
+
+func (a *Adapter) sendBackendTransferError(enc *json.Encoder, oid string, err error) error {
+	code, message := backendErrorDetails(err)
+	var backendErr *BackendError
+	if errors.As(err, &backendErr) {
+		return a.sendTransferErrorWithMetadata(enc, oid, code, message, backendErr.ErrorCode, backendErr.Retryable, backendErr.Temporary)
+	}
+	return a.sendTransferError(enc, oid, code, message)
+}
+
+func (a *Adapter) sendTransferErrorWithMetadata(enc *json.Encoder, oid string, code int, message string, backendErrorCode ErrorCode, retryable, temporary bool) error {
 	a.logger.Printf("Error [%d]: %s", code, message)
 
 	// Classify error to determine appropriate status state and metadata
 	state, errorCode, errorDetail := classifyError(code, message)
+	if backendErrorCode != "" && backendErrorCode != ErrCodeUnknown {
+		errorCode = string(backendErrorCode)
+	}
 
 	_ = config.WriteStatus(config.StatusReport{
 		State:       state,
@@ -424,6 +438,8 @@ func (a *Adapter) sendTransferError(enc *json.Encoder, oid string, code int, mes
 		Error:       message,
 		ErrorCode:   errorCode,
 		ErrorDetail: errorDetail,
+		Retryable:   retryable,
+		Temporary:   temporary,
 	})
 
 	return enc.Encode(OutboundMessage{
