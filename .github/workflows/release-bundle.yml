@@ -111,21 +111,17 @@ jobs:
         shell: bash
         run: yarn install --immutable
 
-      - name: Build SDK types
+      - name: Build vendored SDK
         shell: bash
         run: |
-          # SDK dist/ is not git-tracked; emit declarations for proton-drive-cli
-          # --noCheck: skip type checking (SDK has TS 5.9 compat issues)
-          node_modules/.bin/tsc -p submodules/proton-drive-cli/submodules/sdk/js/sdk --noCheck
+          cd submodules/proton-drive-cli/submodules/sdk/client/js
+          npm ci
+          npm run build
 
-      - name: Build proton-drive-cli TypeScript
+      - name: Build proton-drive-cli runtime
         shell: bash
         working-directory: submodules/proton-drive-cli
-        run: |
-          # tsc may be in workspace or hoisted to root node_modules
-          TSC="./node_modules/.bin/tsc"
-          [ -x "$TSC" ] || TSC="../../node_modules/.bin/tsc"
-          "$TSC"
+        run: yarn build
 
       - name: Build proton-drive-cli SEA
         shell: bash

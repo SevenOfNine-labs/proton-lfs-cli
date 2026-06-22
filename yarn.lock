@@ -1188,9 +1188,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@protontech/drive-sdk@portal:./submodules/sdk/js/sdk::locator=%40sevenofnine-ai%2Fproton-drive-cli%40workspace%3Asubmodules%2Fproton-drive-cli":
+"@protontech/drive-sdk@portal:./submodules/sdk/client/js::locator=%40sevenofnine-ai%2Fproton-drive-cli%40workspace%3Asubmodules%2Fproton-drive-cli":
   version: 0.0.0-use.local
-  resolution: "@protontech/drive-sdk@portal:./submodules/sdk/js/sdk::locator=%40sevenofnine-ai%2Fproton-drive-cli%40workspace%3Asubmodules%2Fproton-drive-cli"
+  resolution: "@protontech/drive-sdk@portal:./submodules/sdk/client/js::locator=%40sevenofnine-ai%2Fproton-drive-cli%40workspace%3Asubmodules%2Fproton-drive-cli"
   dependencies:
     "@noble/hashes": "npm:^1.8.0"
     ttag: "npm:^1.8.7"
@@ -1211,7 +1211,7 @@ __metadata:
   resolution: "@sevenofnine-ai/proton-drive-cli@workspace:submodules/proton-drive-cli"
   dependencies:
     "@protontech/crypto": "npm:^2.0.0"
-    "@protontech/drive-sdk": "portal:./submodules/sdk/js/sdk"
+    "@protontech/drive-sdk": "portal:./submodules/sdk/client/js"
     "@protontech/openpgp": "npm:^6.2.2"
     "@swc/cli": "npm:^0.8.0"
     "@swc/core": "npm:^1.15.3"

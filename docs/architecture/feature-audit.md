@@ -174,13 +174,16 @@ The tray binary also provides a small CLI when launched with arguments.
 | Tray GUI/manual platform behavior lacks automation. | Menu/status/autostart regressions may escape unit tests. | Add release checklist and, if feasible, platform smoke automation. |
 | Real SDK integration is opt-in but easy to confuse with mocked E2E. | Accidental auth attempts could create account risk. | Keep `PROTON_LFS_RUN_SDK_INTEGRATION` and `PROTON_LFS_LIVE_CANARY` gates; document them prominently. |
 | Bridge contract drift remains possible when schemas change. | New states/errors/required request fields may be misclassified or omitted if tests are bypassed. | Keep drive-cli schemas and root contract tests required for every bridge change. |
-| Official SDK upstream layout has moved past the pinned `js/sdk` package path. | A naive SDK submodule update would break `proton-drive-cli` dependency resolution before auth behavior is retested. | Migrate the package path/build scripts/import assumptions in a dedicated drive-cli-first slice, then update the root submodule pointer after full tests. |
+| Official SDK layout can move or force-update again. | Future SDK updates can break drive-cli package paths or API assumptions before auth behavior is retested. | Keep SDK updates drive-cli-first, require lint/build/docs/full mocked tests there, then update the root submodule pointer and root checks. |
 
 ## Audit Findings Fixed in This Pass
 
 - The dependency audit of `proton-drive-cli` found that
   `KEY_PASSWORD_REQUIRED` needed bridge status mapping to `401`. That fix lives
   in the submodule commit for this audit pass.
+- The official SDK layout migration from `js/sdk` to `client/js` is now pinned
+  through `proton-drive-cli@b97563b` and the root submodule pointer. No real
+  Proton login or canary was run for this migration.
 
 ## Definition of Done for Future Feature Changes
 

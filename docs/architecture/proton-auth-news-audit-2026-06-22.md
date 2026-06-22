@@ -11,8 +11,9 @@ attempted during this audit.
 - Proton blog: `https://proton.me/blog/drive-sdk-january-2026`
 - Proton blog: `https://proton.me/blog/drive-sdk-june-2026`
 - Official SDK upstream: `https://github.com/ProtonDriveApps/sdk`
-- Local fetched SDK tree: `ProtonDriveApps/sdk@a3fc5e54`
-- Current pinned SDK tree: `ProtonDriveApps/sdk@f21e74cc`
+- Migrated SDK tree: `ProtonDriveApps/sdk@a3fc5e54`
+- Previous SDK tree: `ProtonDriveApps/sdk@f21e74cc`
+- Migrated drive-cli submodule: `SevenOfNine-labs/proton-drive-cli@b97563b`
 
 ## Findings
 
@@ -45,29 +46,33 @@ attempted during this audit.
   more reliable SDK-backed file operations. They do not move account login or
   session ownership into the SDK.
 
-### Upstream SDK Pin Check
+### Upstream SDK Migration
 
 - The nested SDK remote `origin/main` currently resolves to
   `a3fc5e54984011da9f4b73ae63fd9701830842df` (`docs: add readme for client
   module`).
-- Our pinned SDK remains `f21e74ccf326d05c0d6efe2cdada89f7000fada6`
+- The previous SDK tree was `f21e74ccf326d05c0d6efe2cdada89f7000fada6`
   (`cli/v0.4.6`, `Fix persisting content key packet in crypto cache`).
-- The remote update is not a fast-forward from our current pin. The fetched
-  tree reorganizes key paths, including `js/cli -> cli`, `js/sdk -> client/js`,
-  `cs -> client/cs`, and Kotlin/Swift paths under `incubating/client`.
-- Our `proton-drive-cli` package currently depends on the nested SDK through
-  `portal:./submodules/sdk/js/sdk`. Updating the SDK pin directly would remove
-  that path and break dependency resolution/builds until the package path and
-  any import assumptions are migrated.
+- The official `main` ref force-moved between the local refs and reorganized
+  key paths, including `js/cli -> cli`, `js/sdk -> client/js`, `cs ->
+  client/cs`, and Kotlin/Swift paths under `incubating/client`.
+- `proton-drive-cli@b97563b` completed the drive-cli-first migration by
+  changing the SDK portal path to `portal:./submodules/sdk/client/js`, updating
+  build/docs workflows, adapting the new `NodeEntity` result shape, adding the
+  SDK-required SRP salt method, and bundling the runtime so Node can load the
+  latest SDK safely.
 
 ## Local Decision
 
-- Do not update `submodules/proton-drive-cli/submodules/sdk` in this pass.
-- Treat the fetched `a3fc5e54` SDK tree as an upstream migration signal, not a
-  safe patch-level update.
-- Keep the current SDK pin `f21e74cc` until a dedicated migration slice updates
-  the package portal path, build scripts, docs, and tests to the new upstream
-  layout.
+- The SDK layout migration is now pinned through the root
+  `submodules/proton-drive-cli` pointer, after the drive-cli slice passed
+  lint, build, docs generation, targeted SDK/bridge tests, and the full mocked
+  Jest suite.
+- Keep treating SDK updates as drive-cli-first changes: update and push
+  `proton-drive-cli`, then update the root submodule pointer and rerun root
+  checks.
+- Do not run a real Proton login or canary merely because the SDK is now
+  migrated; the canary gate remains separate.
 
 ## Impact on Our Auth Plan
 
@@ -83,15 +88,17 @@ attempted during this audit.
   providers or OS secret stores, never in root adapter config and never in Git
   LFS transfer messages.
 
-## Follow-Up Migration Slice
+## Completed Migration Slice
 
-Before updating to `ProtonDriveApps/sdk@a3fc5e54` or later:
+Completed in `proton-drive-cli@b97563b` and this root pointer/docs update:
 
-1. Update `proton-drive-cli/package.json` from
-   `portal:./submodules/sdk/js/sdk` to the new upstream client package path.
-2. Update build/test scripts and TypeScript imports for the new SDK layout.
-3. Compare the official CLI browser-auth and secret-store implementation with
-   our browser-fork/key-password store.
-4. Run full `proton-drive-cli` lint/build/test.
-5. Update the root submodule pointer and rerun `make check-submodules`,
-   `make test`, and `make test-e2e-mock`.
+1. Updated `proton-drive-cli/package.json` from the old SDK package path to
+   `portal:./submodules/sdk/client/js`.
+2. Updated build/test/docs scripts and TypeScript adapter assumptions for the
+   new SDK layout.
+3. Kept auth behavior unchanged: transfer commands still check offline
+   `auth-state` first and still send `allowLogin=false`.
+4. Ran full drive-cli lint/build/docs/test validation without real Proton
+   login.
+5. Updated the root submodule pointer and root workflows for the new nested SDK
+   path.

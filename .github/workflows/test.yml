@@ -334,8 +334,8 @@ jobs:
           corepack prepare yarn@4.1.1 --activate
 
       - name: Build vendored SDK
-        working-directory: submodules/proton-drive-cli/submodules/sdk/js/sdk
-        run: npm install && npm run build
+        working-directory: submodules/proton-drive-cli/submodules/sdk/client/js
+        run: npm ci && npm run build
 
       - name: Install dependencies
         working-directory: submodules/proton-drive-cli
