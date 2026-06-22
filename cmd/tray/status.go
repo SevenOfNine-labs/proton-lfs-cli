@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -142,37 +143,117 @@ func applyStatus() {
 		systray.SetTemplateIcon(iconIdle, iconIdle)
 	}
 
-	// Update tooltip with detailed context
+	systray.SetTooltip(statusTooltip(report))
+}
+
+func transferStatusText(report config.StatusReport) string {
+	switch report.State {
+	case config.StateTransferring:
+		op := strings.TrimSpace(report.LastOp)
+		if op == "" {
+			op = "transfer"
+		}
+		return fmt.Sprintf("%s in progress", op)
+	case config.StateError, config.StateRateLimited, config.StateAuthRequired, config.StateCaptcha:
+		op := strings.TrimSpace(report.LastOp)
+		if op == "" {
+			op = "transfer"
+		}
+		return fmt.Sprintf("%s %s (%s)", op, relativeStatusTime(report.Timestamp), statusFailureSummary(report))
+	case config.StateOK:
+		return fmt.Sprintf("%s %s (ok)", report.LastOp, relativeStatusTime(report.Timestamp))
+	default:
+		return "idle"
+	}
+}
+
+func statusTooltip(report config.StatusReport) string {
 	switch {
 	case report.State == config.StateTransferring && report.LastOp == "upload":
-		systray.SetTooltip("Proton LFS — Uploading…")
+		return "Proton LFS — Uploading…"
 	case report.State == config.StateTransferring && report.LastOp == "download":
-		systray.SetTooltip("Proton LFS — Downloading…")
+		return "Proton LFS — Downloading…"
 	case report.State == config.StateTransferring:
-		systray.SetTooltip("Proton LFS — Transferring…")
+		return "Proton LFS — Transferring…"
 	case report.State == config.StateRateLimited:
 		if report.ErrorDetail != "" {
-			systray.SetTooltip(fmt.Sprintf("Proton LFS — Rate Limited: %s", truncate(report.ErrorDetail, 60)))
-		} else {
-			systray.SetTooltip("Proton LFS — Rate Limit Active")
+			return fmt.Sprintf("Proton LFS — Rate Limited: %s%s", truncate(report.ErrorDetail, 60), statusMetadataSuffix(report))
 		}
+		return "Proton LFS — Rate Limit Active" + statusMetadataSuffix(report)
 	case report.State == config.StateAuthRequired:
-		systray.SetTooltip("Proton LFS — Authentication Required")
+		if report.ErrorDetail != "" {
+			return fmt.Sprintf("Proton LFS — Authentication Required: %s", truncate(report.ErrorDetail, 60))
+		}
+		return "Proton LFS — Authentication Required"
 	case report.State == config.StateCaptcha:
-		systray.SetTooltip("Proton LFS — CAPTCHA Verification Required")
+		return "Proton LFS — CAPTCHA Verification Required"
 	case report.State == config.StateError:
 		if report.ErrorCode != "" && report.ErrorDetail != "" {
-			systray.SetTooltip(fmt.Sprintf("Proton LFS — %s: %s", report.ErrorCode, truncate(report.ErrorDetail, 50)))
-		} else if report.Error != "" {
-			systray.SetTooltip(fmt.Sprintf("Proton LFS — Error: %s", truncate(report.Error, 60)))
-		} else {
-			systray.SetTooltip("Proton LFS — Error")
+			return fmt.Sprintf("Proton LFS — %s: %s%s", report.ErrorCode, truncate(report.ErrorDetail, 50), statusMetadataSuffix(report))
 		}
+		if report.Error != "" {
+			return fmt.Sprintf("Proton LFS — Error: %s%s", truncate(report.Error, 60), statusMetadataSuffix(report))
+		}
+		return "Proton LFS — Error" + statusMetadataSuffix(report)
 	case report.State == config.StateOK && !report.Timestamp.IsZero():
-		systray.SetTooltip(fmt.Sprintf("Proton LFS — Last %s %s", report.LastOp, relativeTime(report.Timestamp)))
+		return fmt.Sprintf("Proton LFS — Last %s %s", report.LastOp, relativeTime(report.Timestamp))
 	default:
-		systray.SetTooltip("Proton LFS")
+		return "Proton LFS"
 	}
+}
+
+func statusFailureSummary(report config.StatusReport) string {
+	parts := []string{statusFailureMessage(report)}
+	if report.ErrorCode != "" {
+		parts = append(parts, "code="+report.ErrorCode)
+	}
+	if report.Retryable {
+		parts = append(parts, "retryable")
+	}
+	if report.Temporary {
+		parts = append(parts, "temporary")
+	}
+	return strings.Join(parts, "; ")
+}
+
+func statusFailureMessage(report config.StatusReport) string {
+	if report.Error != "" {
+		return report.Error
+	}
+	if report.ErrorDetail != "" {
+		return report.ErrorDetail
+	}
+	switch report.State {
+	case config.StateRateLimited:
+		return "rate limit active"
+	case config.StateAuthRequired:
+		return "authentication required"
+	case config.StateCaptcha:
+		return "captcha required"
+	default:
+		return "failed"
+	}
+}
+
+func statusMetadataSuffix(report config.StatusReport) string {
+	var parts []string
+	if report.Retryable {
+		parts = append(parts, "retryable")
+	}
+	if report.Temporary {
+		parts = append(parts, "temporary")
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return " (" + strings.Join(parts, ", ") + ")"
+}
+
+func relativeStatusTime(t time.Time) string {
+	if t.IsZero() {
+		return "recently"
+	}
+	return relativeTime(t)
 }
 
 func relativeTime(t time.Time) string {

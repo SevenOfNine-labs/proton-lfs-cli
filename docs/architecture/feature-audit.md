@@ -108,10 +108,10 @@ The tray binary also provides a small CLI when launched with arguments.
 | `proton-lfs-cli login` | Verify stored credentials, prompt/store if missing, run `proton-drive-cli login --credential-provider`. | Beta | `cmd/tray/cli_test.go`. |
 | `proton-lfs-cli logout` | Delegate to `proton-drive-cli logout`. | Beta | `cmd/tray/cli_test.go`. |
 | `proton-lfs-cli register` | Configure global Git LFS custom transfer for Proton. | Stable | `cmd/tray/cli_test.go`, `custom_transfer_args_test.go`. |
-| `proton-lfs-cli status` | Print session, LFS registration, provider, transfer status. | Stable | `cmd/tray/status_test.go`, `cmd/tray/cli_test.go`. |
+| `proton-lfs-cli status` | Print session, LFS registration, provider, transfer status, and retryability/temporary failure hints. | Stable | `cmd/tray/status_test.go`, `cmd/tray/cli_test.go`. |
 | `proton-lfs-cli config [provider]` | Show or set preferred credential provider. | Stable | `cmd/tray/cli_test.go`. |
 | Tray Connect | Verify credentials, open terminal for setup if missing, otherwise login silently. | Beta | `cmd/tray/cli_test.go`, `cmd/tray/setup_test.go`. |
-| Tray status watcher | Poll transfer status and session/LFS registration; refresh session every 15 minutes. | Beta | `cmd/tray/status_test.go`. |
+| Tray status watcher | Poll transfer status and session/LFS registration; display retryability/temporary failure hints; refresh session every 15 minutes. | Beta | `cmd/tray/status_test.go`. |
 | Autostart | macOS LaunchAgent and Linux desktop autostart. | Beta | `cmd/tray/setup_test.go`; packaging/manual validation still needed. |
 
 ## Storage and Runtime Files
@@ -165,7 +165,7 @@ The tray binary also provides a small CLI when launched with arguments.
 | Docs link drift can recur as plans move to implemented docs. | New contributors can follow stale paths. | Keep `docs/README.md` and release checklists updated with each maturity change. |
 | `BatchExists`/`BatchDelete` are internal helper surfaces. | They can be mistaken for production Git LFS protocol features. | Keep them tested as bridge maintenance helpers and out of the transfer loop. |
 | SDK adapter progress remains post-transfer. | Poor UX for large SDK-backed objects and timeouts. | Add SDK streaming progress when the drive-cli/SDK bridge exposes reliable callbacks. |
-| Resume is not implemented. | Interrupted transfers restart after transient retry attempts are exhausted. | Retryable/temporary failures are surfaced in status JSON; add resume only if SDK support is available. |
+| Resume is not implemented. | Interrupted transfers restart after transient retry attempts are exhausted. | Retryable/temporary failures are surfaced in status JSON and helper/tray messaging; add resume only if SDK support is available. |
 | Tray GUI/manual platform behavior lacks automation. | Menu/status/autostart regressions may escape unit tests. | Add release checklist and, if feasible, platform smoke automation. |
 | Real SDK integration is opt-in but easy to confuse with mocked E2E. | Accidental auth attempts could create account risk. | Keep `PROTON_LFS_RUN_SDK_INTEGRATION` and `PROTON_LFS_LIVE_CANARY` gates; document them prominently. |
 | Bridge contract drift remains possible when schemas change. | New states/errors may be misclassified if tests are bypassed. | Keep drive-cli schemas and root contract tests required for every bridge change. |

@@ -76,20 +76,7 @@ func cliStatus(w io.Writer) int {
 	if err != nil {
 		_, _ = fmt.Fprintln(w, "Transfer: no data")
 	} else {
-		switch report.State {
-		case config.StateTransferring:
-			_, _ = fmt.Fprintf(w, "Transfer: %s in progress\n", report.LastOp)
-		case config.StateError:
-			msg := "failed"
-			if report.Error != "" {
-				msg = report.Error
-			}
-			_, _ = fmt.Fprintf(w, "Transfer: %s %s (%s)\n", report.LastOp, relativeTime(report.Timestamp), msg)
-		case config.StateOK:
-			_, _ = fmt.Fprintf(w, "Transfer: %s %s (ok)\n", report.LastOp, relativeTime(report.Timestamp))
-		default:
-			_, _ = fmt.Fprintln(w, "Transfer: idle")
-		}
+		_, _ = fmt.Fprintf(w, "Transfer: %s\n", transferStatusText(report))
 	}
 	return 0
 }

@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"proton-lfs-cli/internal/config"
 )
 
 func TestRelativeTime(t *testing.T) {
@@ -85,6 +87,70 @@ func TestTruncateMultibyteInput(t *testing.T) {
 	}
 	// Document byte-slicing behavior: truncation happens at byte boundary
 	t.Logf("truncate(%q, 4) = %q (len=%d)", input, got, len(got))
+}
+
+func TestTransferStatusTextWithRetryMetadata(t *testing.T) {
+	report := config.StatusReport{
+		State:     config.StateError,
+		LastOp:    "upload",
+		Error:     "drive service is unavailable",
+		ErrorCode: "server_error",
+		Retryable: true,
+		Temporary: true,
+		Timestamp: time.Now().Add(-1 * time.Minute),
+	}
+
+	got := transferStatusText(report)
+	for _, want := range []string{
+		"upload",
+		"drive service is unavailable",
+		"code=server_error",
+		"retryable",
+		"temporary",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("transferStatusText missing %q: %s", want, got)
+		}
+	}
+}
+
+func TestStatusTooltipWithTemporaryRateLimit(t *testing.T) {
+	report := config.StatusReport{
+		State:       config.StateRateLimited,
+		ErrorDetail: "Wait before retrying operations",
+		ErrorCode:   "rate_limited",
+		Temporary:   true,
+	}
+
+	got := statusTooltip(report)
+	for _, want := range []string{
+		"Rate Limited",
+		"Wait before retrying operations",
+		"temporary",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("statusTooltip missing %q: %s", want, got)
+		}
+	}
+	if strings.Contains(got, "retryable") {
+		t.Fatalf("rate-limit tooltip must not show adapter retryable: %s", got)
+	}
+}
+
+func TestStatusTooltipAuthBlockerOmitsRetryMetadata(t *testing.T) {
+	report := config.StatusReport{
+		State:       config.StateAuthRequired,
+		ErrorDetail: "Run proton-drive login before Git LFS transfer",
+		ErrorCode:   "auth_required",
+	}
+
+	got := statusTooltip(report)
+	if !strings.Contains(got, "Authentication Required") {
+		t.Fatalf("statusTooltip missing auth state: %s", got)
+	}
+	if strings.Contains(got, "retryable") || strings.Contains(got, "temporary") {
+		t.Fatalf("auth tooltip must not show retry metadata: %s", got)
+	}
 }
 
 func TestSessionFilePath(t *testing.T) {

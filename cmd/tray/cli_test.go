@@ -187,6 +187,72 @@ func TestCliStatusError(t *testing.T) {
 	}
 }
 
+func TestCliStatusErrorShowsRetryMetadata(t *testing.T) {
+	saveFuncVars(t)
+	ts := time.Now().Add(-2 * time.Minute).UTC()
+	statusJSON, _ := json.Marshal(config.StatusReport{
+		State:     config.StateError,
+		LastOp:    "download",
+		Error:     "drive service is unavailable",
+		ErrorCode: "server_error",
+		Retryable: true,
+		Temporary: true,
+		Timestamp: ts,
+	})
+	setupFakeHome(t, fakeHomeOpts{statusJSON: string(statusJSON)})
+	setupGitConfig(t, "")
+
+	var buf bytes.Buffer
+	code := cliStatus(&buf)
+	out := buf.String()
+
+	if code != 0 {
+		t.Fatalf("expected exit 0, got %d", code)
+	}
+	for _, want := range []string{
+		"download",
+		"drive service is unavailable",
+		"code=server_error",
+		"retryable",
+		"temporary",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestCliStatusAuthBlockerIsNotRetryable(t *testing.T) {
+	saveFuncVars(t)
+	statusJSON, _ := json.Marshal(config.StatusReport{
+		State:     config.StateAuthRequired,
+		LastOp:    "upload",
+		Error:     "stored browser-fork key password required",
+		ErrorCode: "key_password_required",
+	})
+	setupFakeHome(t, fakeHomeOpts{statusJSON: string(statusJSON)})
+	setupGitConfig(t, "")
+
+	var buf bytes.Buffer
+	code := cliStatus(&buf)
+	out := buf.String()
+
+	if code != 0 {
+		t.Fatalf("expected exit 0, got %d", code)
+	}
+	for _, want := range []string{
+		"stored browser-fork key password required",
+		"code=key_password_required",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "retryable") || strings.Contains(out, "temporary") {
+		t.Errorf("auth blocker must not show retry metadata:\n%s", out)
+	}
+}
+
 func TestCliStatusIdle(t *testing.T) {
 	saveFuncVars(t)
 	statusJSON, _ := json.Marshal(config.StatusReport{State: config.StateIdle})
