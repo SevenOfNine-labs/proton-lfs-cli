@@ -254,7 +254,16 @@ live-canary-preflight: build-adapter build-drive-cli ## Offline gate before any 
 	fi
 	@if [ -n "$${LIVE_CANARY_DOCTOR_ARGS:-}" ]; then \
 		echo "Running optional offline doctor with LIVE_CANARY_DOCTOR_ARGS..."; \
-		$(NODE) "$(PWD)/$(DRIVE_CLI_DIR)/dist/index.js" doctor $$LIVE_CANARY_DOCTOR_ARGS; \
+		if ! DOCTOR_OUTPUT="$$( $(NODE) "$(PWD)/$(DRIVE_CLI_DIR)/dist/index.js" doctor --json $$LIVE_CANARY_DOCTOR_ARGS )"; then \
+			echo "$$DOCTOR_OUTPUT"; \
+			echo "Offline doctor failed; refusing live canary."; \
+			exit 2; \
+		fi; \
+		echo "$$DOCTOR_OUTPUT"; \
+		if ! printf '%s\n' "$$DOCTOR_OUTPUT" | grep -q '"canAttemptLiveCanary": true'; then \
+			echo "Offline doctor did not mark live canary as ready."; \
+			exit 2; \
+		fi; \
 	else \
 		echo "Skipped credential-store doctor. Set LIVE_CANARY_DOCTOR_ARGS to run it."; \
 	fi
@@ -270,7 +279,7 @@ check-live-canary-ack: ## Refuse real Proton tests without explicit acknowledgem
 		exit 2; \
 	fi
 
-test-e2e-real: check-live-canary-ack build-adapter build-drive-cli ## Real Proton Drive E2E (requires explicit live canary acknowledgement)
+test-e2e-real: check-live-canary-ack live-canary-preflight ## Real Proton Drive E2E (requires explicit live canary acknowledgement)
 	@mkdir -p $(GO_CACHE_DIR)
 	@eval "$$(./scripts/export-pass-env.sh)" && \
 		GOCACHE=$(PWD)/$(GO_CACHE_DIR) $(GO) test -tags integration ./tests/integration/... -run E2E -v
