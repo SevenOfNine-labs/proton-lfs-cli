@@ -12,6 +12,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"proton-lfs-cli/internal/preflight"
 )
 
 const liveCanaryAckValue = "I_UNDERSTAND_THIS_TOUCHES_A_REAL_PROTON_ACCOUNT"
@@ -76,18 +78,27 @@ func requireLiveCanaryDoctor(t *testing.T, driveCliBin, doctorArgs string) {
 		t.Skipf("real E2E test skipped: offline doctor failed: %v [%s]", err, redactBridgeOutput(string(out)))
 	}
 
-	var report struct {
-		CanAttemptLiveCanary bool `json:"canAttemptLiveCanary"`
-		AuthState            struct {
-			State string `json:"state"`
-		} `json:"authState"`
+	states, err := preflight.LoadBridgeAuthStates(filepath.Join(
+		repoRoot(t),
+		"submodules",
+		"proton-drive-cli",
+		"schemas",
+		"bridge",
+		"v1",
+		"auth-state-payload.schema.json",
+	))
+	if err != nil {
+		t.Skipf("real E2E test skipped: offline doctor schema unavailable: %v", err)
 	}
-	if err := json.Unmarshal(out, &report); err != nil {
-		t.Skipf("real E2E test skipped: offline doctor returned invalid JSON: %v [%s]", err, redactBridgeOutput(string(out)))
+	readiness, err := preflight.ValidateDoctorReadiness(
+		out,
+		states,
+		preflight.DoctorReadinessRequirements{RequireLiveCanary: true},
+	)
+	if err != nil {
+		t.Skipf("real E2E test skipped: %v [%s]", err, redactBridgeOutput(string(out)))
 	}
-	if !report.CanAttemptLiveCanary {
-		t.Skipf("real E2E test skipped: offline doctor blocked live canary (authState=%s)", report.AuthState.State)
-	}
+	t.Logf("offline doctor passed: authState=%s", readiness.AuthState.State)
 }
 
 // TestE2ERealProtonDrivePipeline exercises the full Git LFS pipeline through

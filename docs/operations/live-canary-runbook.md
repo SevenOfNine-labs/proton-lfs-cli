@@ -40,6 +40,8 @@ LIVE_CANARY_DOCTOR_ARGS="--credential-provider git-credential --data-credential-
 
 The preflight is offline by default. It runs root Go tests, the mocked auth
 safety gate, the doctor tests, TypeScript lint, and a build freshness check.
+When `LIVE_CANARY_DOCTOR_ARGS` is set, it also parses `doctor --json` with the
+root structured readiness checker and requires `canAttemptLiveCanary=true`.
 It does not perform Proton SRP login or token refresh.
 
 ## Account Rules
@@ -148,9 +150,9 @@ LIVE_BROWSER_FORK_LOGIN_ARGS="--key-password-provider pass-cli" \
   make browser-fork-canary
 ```
 
-Stop after this target. Only run `make test-e2e-real` later, in a separate
-command, after recording that offline doctor reported `authMode=browser-fork`,
-`state=ready`, and `canAttemptTransfer=true`.
+Stop after this target. The target parses the offline doctor JSON and requires
+`authMode=browser-fork`, `state=ready`, and `canAttemptTransfer=true`. Only run
+`make test-e2e-real` later, in a separate command, after recording that result.
 
 ## Real E2E Guard
 
@@ -162,6 +164,9 @@ PROTON_LFS_LIVE_CANARY=I_UNDERSTAND_THIS_TOUCHES_A_REAL_PROTON_ACCOUNT \
 LIVE_CANARY_DOCTOR_ARGS="--credential-provider pass-cli" \
   make test-e2e-real
 ```
+
+The Makefile and the Go real-E2E prerequisite both parse the same structured
+doctor readiness fields before any transfer can start.
 
 For a two-password account, use the same data credential provider arguments
 that passed preflight:

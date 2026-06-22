@@ -119,12 +119,16 @@ LIVE_CANARY_DOCTOR_ARGS="--credential-provider pass-cli" \
 
 The Go test also checks these gates directly before resolving credentials, so a
 direct `go test -tags integration ... -run E2EReal` invocation skips unless the
-same live-canary environment is present.
+same live-canary environment is present. The Makefile and Go test both parse
+the structured `doctor --json` readiness fields instead of matching free-form
+doctor output.
 
 `make browser-fork-canary` is a separate live-login path. It requires
 `PROTON_LFS_LIVE_CANARY`, `LIVE_CANARY_DOCTOR_ARGS`, and
 `LIVE_BROWSER_FORK_LOGIN_ARGS`, runs one `login --auth-mode browser-fork`, then
-only inspects local status and offline doctor readiness.
+only inspects local status and offline doctor readiness. Its post-login doctor
+inspection requires `authMode=browser-fork`, `state=ready`, and
+`canAttemptTransfer=true`.
 
 ## High-Value Missing Tests
 

@@ -167,6 +167,7 @@ The tray binary also provides a small CLI when launched with arguments.
 | Gap | Risk | Required action |
 | --- | --- | --- |
 | No default real Proton transfer canary. | Mocked bridge can miss SDK/API changes. | Keep guarded; run with disposable account only after offline doctor and explicit acknowledgement. |
+| Live canary doctor output drift. | A textual output change could accidentally bypass or block canary readiness. | Parse structured `doctor --json` readiness fields with the root preflight checker and bridge auth-state schema. |
 | Docs link drift can recur as plans move to implemented docs. | New contributors can follow stale paths. | Keep `docs/README.md` and release checklists updated with each maturity change. |
 | `batchExists`/`batchDelete` are private bridge helper surfaces. | They can still be mistaken for production Git LFS protocol features if docs drift. | Keep them tested as maintenance helpers, rejected as adapter events, and out of the transfer loop. |
 | SDK adapter progress remains post-transfer. | Poor UX for large SDK-backed objects and timeouts. | Add SDK streaming progress when the drive-cli/SDK bridge exposes reliable callbacks. |

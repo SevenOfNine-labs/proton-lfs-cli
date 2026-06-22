@@ -262,7 +262,7 @@ live-canary-preflight: check-submodules build-adapter build-drive-cli ## Offline
 			exit 2; \
 		fi; \
 		echo "$$DOCTOR_OUTPUT"; \
-		if ! printf '%s\n' "$$DOCTOR_OUTPUT" | grep -q '"canAttemptLiveCanary": true'; then \
+		if ! printf '%s\n' "$$DOCTOR_OUTPUT" | $(GO) run ./scripts/check_doctor_readiness.go --require-live-canary; then \
 			echo "Offline doctor did not mark live canary as ready."; \
 			exit 2; \
 		fi; \
@@ -314,15 +314,7 @@ browser-fork-canary: check-live-canary-ack check-live-canary-doctor-args check-b
 		exit 2; \
 	fi; \
 	echo "$$DOCTOR_OUTPUT"; \
-	if ! printf '%s\n' "$$DOCTOR_OUTPUT" | grep -q '"authMode": "browser-fork"'; then \
-		echo "Offline doctor did not report a browser-fork session."; \
-		exit 2; \
-	fi; \
-	if ! printf '%s\n' "$$DOCTOR_OUTPUT" | grep -q '"state": "ready"'; then \
-		echo "Offline doctor did not report ready auth state after browser-fork login."; \
-		exit 2; \
-	fi; \
-	if ! printf '%s\n' "$$DOCTOR_OUTPUT" | grep -q '"canAttemptTransfer": true'; then \
+	if ! printf '%s\n' "$$DOCTOR_OUTPUT" | $(GO) run ./scripts/check_doctor_readiness.go --require-auth-mode browser-fork --require-state ready --require-transfer; then \
 		echo "Offline doctor did not mark transfers ready after browser-fork login."; \
 		exit 2; \
 	fi
