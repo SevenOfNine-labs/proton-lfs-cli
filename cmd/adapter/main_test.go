@@ -40,6 +40,64 @@ func configureLocalBackend(adapter *Adapter, storeDir string) {
 	adapter.backend = NewLocalStoreBackend(storeDir)
 }
 
+type observingBackend struct {
+	uploadSize   int64
+	downloadPath string
+	downloadSize int64
+	onUpload     func()
+	onDownload   func()
+}
+
+func (b *observingBackend) Initialize(_ *Session) error {
+	return nil
+}
+
+func (b *observingBackend) Upload(_ *Session, _, _ string, _ int64) (int64, error) {
+	if b.onUpload != nil {
+		b.onUpload()
+	}
+	return b.uploadSize, nil
+}
+
+func (b *observingBackend) Download(_ *Session, _ string) (string, int64, error) {
+	if b.onDownload != nil {
+		b.onDownload()
+	}
+	return b.downloadPath, b.downloadSize, nil
+}
+
+type progressCountingWriter struct {
+	t      *testing.T
+	count  int64
+	last   int64
+	latest OutboundMessage
+}
+
+func (w *progressCountingWriter) Write(p []byte) (int, error) {
+	w.t.Helper()
+
+	var msg OutboundMessage
+	if err := json.Unmarshal(bytes.TrimSpace(p), &msg); err != nil {
+		w.t.Fatalf("failed to decode progress message: %v", err)
+	}
+	if msg.Event != EventProgress {
+		w.t.Fatalf("expected progress event, got %+v", msg)
+	}
+	if msg.OID != validOID {
+		w.t.Fatalf("expected oid %s, got %s", validOID, msg.OID)
+	}
+	if msg.BytesSoFar < w.last {
+		w.t.Fatalf("progress moved backwards: previous=%d current=%d", w.last, msg.BytesSoFar)
+	}
+	if msg.BytesSince != msg.BytesSoFar-w.last {
+		w.t.Fatalf("bytesSinceLast=%d, want %d", msg.BytesSince, msg.BytesSoFar-w.last)
+	}
+	w.last = msg.BytesSoFar
+	w.latest = msg
+	w.count++
+	return len(p), nil
+}
+
 func TestAdapterInit(t *testing.T) {
 	adapter := NewAdapter()
 	if adapter == nil {
@@ -791,6 +849,90 @@ func TestSendProgressSequenceSmallerThanChunk(t *testing.T) {
 	}
 	if msgs[0].BytesSoFar != 100 {
 		t.Fatalf("expected bytesSoFar=100, got %d", msgs[0].BytesSoFar)
+	}
+}
+
+func TestSendProgressSequenceLargeObjectStreamingCounter(t *testing.T) {
+	adapter := NewAdapter()
+	const largeSize int64 = 3*1024*1024*1024 + 123
+	writer := &progressCountingWriter{t: t}
+
+	if err := adapter.sendProgressSequence(json.NewEncoder(writer), validOID, largeSize); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	expectedCount := (largeSize + progressChunkSize - 1) / progressChunkSize
+	if writer.count != expectedCount {
+		t.Fatalf("expected %d progress messages, got %d", expectedCount, writer.count)
+	}
+	if writer.last != largeSize {
+		t.Fatalf("last bytesSoFar=%d, want %d", writer.last, largeSize)
+	}
+	if writer.latest.BytesSince != largeSize%progressChunkSize {
+		t.Fatalf("last bytesSinceLast=%d, want %d", writer.latest.BytesSince, largeSize%progressChunkSize)
+	}
+}
+
+func TestUploadProgressIsPostTransfer(t *testing.T) {
+	payload := []byte("post-transfer-upload")
+	oidBytes := sha256.Sum256(payload)
+	oid := hex.EncodeToString(oidBytes[:])
+	uploadPath := filepath.Join(t.TempDir(), "payload.bin")
+	if err := os.WriteFile(uploadPath, payload, 0o600); err != nil {
+		t.Fatalf("failed to create upload file: %v", err)
+	}
+
+	adapter := NewAdapter()
+	adapter.session = &Session{Initialized: true}
+	buf := new(bytes.Buffer)
+	adapter.backend = &observingBackend{
+		uploadSize: int64(len(payload)),
+		onUpload: func() {
+			if buf.Len() != 0 {
+				t.Fatalf("progress was emitted before backend upload returned: %q", buf.String())
+			}
+		},
+	}
+
+	msg := InboundMessage{Event: EventUpload, OID: oid, Size: int64(len(payload)), Path: uploadPath}
+	if err := adapter.handleUpload(&msg, json.NewEncoder(buf)); err != nil {
+		t.Fatalf("handleUpload returned error: %v", err)
+	}
+	msgs := decodeAllMessages(t, buf.Bytes())
+	if len(msgs) != 2 || msgs[0].Event != EventProgress || msgs[1].Event != EventComplete {
+		t.Fatalf("expected post-transfer progress then complete, got %+v", msgs)
+	}
+}
+
+func TestDownloadProgressIsPostTransfer(t *testing.T) {
+	payload := []byte("post-transfer-download")
+	oidBytes := sha256.Sum256(payload)
+	oid := hex.EncodeToString(oidBytes[:])
+	downloadPath := filepath.Join(t.TempDir(), "download.bin")
+	if err := os.WriteFile(downloadPath, payload, 0o600); err != nil {
+		t.Fatalf("failed to create download file: %v", err)
+	}
+
+	adapter := NewAdapter()
+	adapter.session = &Session{Initialized: true}
+	buf := new(bytes.Buffer)
+	adapter.backend = &observingBackend{
+		downloadPath: downloadPath,
+		downloadSize: int64(len(payload)),
+		onDownload: func() {
+			if buf.Len() != 0 {
+				t.Fatalf("progress was emitted before backend download returned: %q", buf.String())
+			}
+		},
+	}
+
+	msg := InboundMessage{Event: EventDownload, OID: oid, Size: int64(len(payload))}
+	if err := adapter.handleDownload(&msg, json.NewEncoder(buf)); err != nil {
+		t.Fatalf("handleDownload returned error: %v", err)
+	}
+	msgs := decodeAllMessages(t, buf.Bytes())
+	if len(msgs) != 2 || msgs[0].Event != EventProgress || msgs[1].Event != EventComplete {
+		t.Fatalf("expected post-transfer progress then complete, got %+v", msgs)
 	}
 }
 
