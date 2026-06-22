@@ -25,8 +25,10 @@ The adapter (`cmd/adapter/bridge.go`) communicates with `proton-drive-cli` using
 The Go adapter validates the top-level response envelope strictly. `ok` must
 be a boolean, success responses cannot include error fields, failed responses
 must include a non-empty `error` string and positive `code`, and unknown
-top-level fields are rejected. Payload shape is still validated by each
-command-specific parser.
+top-level fields are rejected. proton-drive-cli validates request fields against
+`schemas/bridge/v1/request-field-rules.json` before command handlers run, and
+the root adapter has contract tests proving the fields it sends remain allowed
+and complete.
 
 ## Bridge Commands
 
@@ -62,6 +64,9 @@ command-specific parser.
 - API contracts must remain deterministic so adapter tests can assert behavior.
 - Subprocess failures must not leak secrets: malformed output, timeouts, and
   stderr diagnostics are covered by mocked bridge tests.
+- Command-specific bridge request fields must stay aligned with
+  `request-field-rules.json`; adding a required field or disallowing a root
+  field must fail root contract tests before runtime.
 
 ## Known Issues
 
@@ -71,8 +76,6 @@ command-specific parser.
 
 ## Next Hardening Targets
 
-1. Add command-specific payload schema validation between adapter and
-   subprocess.
-2. Extend fault-injection tests beyond timeout, partial-output, and
+1. Extend fault-injection tests beyond timeout, partial-output, and
    session-expiry coverage as new SDK failure modes are identified.
-3. Add a real-account canary only after the mocked auth gates stay green.
+2. Add a real-account canary only after the mocked auth gates stay green.

@@ -23,6 +23,15 @@ type bridgeErrorCodeContract struct {
 	} `json:"errorCodes"`
 }
 
+type bridgeRequestFieldRulesContract struct {
+	Commands map[string]bridgeRequestFieldRule `json:"commands"`
+}
+
+type bridgeRequestFieldRule struct {
+	Required []string `json:"required"`
+	Allowed  []string `json:"allowed"`
+}
+
 func readBridgeContract[T any](t *testing.T, name string) T {
 	t.Helper()
 	wd, err := os.Getwd()
@@ -88,6 +97,14 @@ func assertStringSlicesEqual(t *testing.T, label string, got, want []string) {
 	}
 }
 
+func stringSet(values []string) map[string]struct{} {
+	set := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		set[value] = struct{}{}
+	}
+	return set
+}
+
 func TestBridgeContractRequestFieldsAreKnown(t *testing.T) {
 	schema := readBridgeContract[contractSchema](t, "request.schema.json")
 	expected := sortedStrings([]string{
@@ -109,6 +126,54 @@ func TestBridgeContractRequestFieldsAreKnown(t *testing.T) {
 	})
 
 	assertStringSlicesEqual(t, "bridge request fields", sortedKeys(schema.Properties), expected)
+}
+
+func TestBridgeContractRequestFieldRulesCoverRootRequests(t *testing.T) {
+	contract := readBridgeContract[bridgeRequestFieldRulesContract](t, "request-field-rules.json")
+	baseCredentialFields := []string{
+		"credentialProvider",
+		"dataCredentialProvider",
+		"dataCredentialHost",
+		"storageBase",
+		"appVersion",
+	}
+	transferCredentialFields := append(append([]string(nil), baseCredentialFields...), "allowLogin")
+
+	cases := []struct {
+		command string
+		fields  []string
+	}{
+		{command: "auth", fields: baseCredentialFields},
+		{command: "auth-state", fields: baseCredentialFields},
+		{command: "init", fields: transferCredentialFields},
+		{command: "upload", fields: append(append([]string(nil), transferCredentialFields...), "oid", "path")},
+		{command: "download", fields: append(append([]string(nil), transferCredentialFields...), "oid", "outputPath")},
+		{command: "exists", fields: append(append([]string(nil), transferCredentialFields...), "oid")},
+		{command: "delete", fields: append(append([]string(nil), transferCredentialFields...), "oid")},
+		{command: "batch-exists", fields: append(append([]string(nil), transferCredentialFields...), "oids")},
+		{command: "batch-delete", fields: append(append([]string(nil), transferCredentialFields...), "oids")},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.command, func(t *testing.T) {
+			rule, ok := contract.Commands[tc.command]
+			if !ok {
+				t.Fatalf("bridge command %q has no request field rule", tc.command)
+			}
+			fields := stringSet(tc.fields)
+			allowed := stringSet(rule.Allowed)
+			for _, field := range tc.fields {
+				if _, ok := allowed[field]; !ok {
+					t.Fatalf("root sends field %q to bridge %s, but contract only allows %v", field, tc.command, rule.Allowed)
+				}
+			}
+			for _, field := range rule.Required {
+				if _, ok := fields[field]; !ok {
+					t.Fatalf("bridge %s requires field %q, but root request shape has %v", tc.command, field, tc.fields)
+				}
+			}
+		})
+	}
 }
 
 func TestBridgeContractResponseEnvelopeFieldsMatchGoStruct(t *testing.T) {

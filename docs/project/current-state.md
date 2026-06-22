@@ -15,6 +15,9 @@ Date: 2026-06-22
   non-ready state without invoking `bridge auth` or allowing SRP login.
 - Shared bridge contract schemas are versioned in `proton-drive-cli` and
   verified by root Go contract tests.
+- Command-specific bridge request-field rules are versioned in
+  `proton-drive-cli` and root tests verify the adapter request shapes against
+  them.
 - Credential providers (`pass-cli`, `git-credential`) are handled by proton-drive-cli's `src/credentials/` module.
 - Security hardening: OID validation, path traversal prevention, subprocess pool (max 10), per-operation timeout (5 min).
 - Security tests: command injection, rate limiting, credential flow, session file permissions.

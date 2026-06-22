@@ -69,6 +69,9 @@ The adapter is invoked by Git LFS, not directly by end users.
 
 The root adapter never resolves Proton account passwords itself. It sends
 provider selectors and operation metadata to `proton-drive-cli`.
+proton-drive-cli owns the per-command request-field matrix in
+`schemas/bridge/v1/request-field-rules.json`; root contract tests verify every
+root bridge request shape remains allowed and includes newly required fields.
 
 ### Root-to-Drive-CLI Commands
 
@@ -134,6 +137,7 @@ The tray binary also provides a small CLI when launched with arguments.
 | Concurrency and stress | `tests/integration/git_lfs_custom_transfer_concurrency*.go`. | Stable local coverage |
 | Timeout/failure modes | `tests/integration/git_lfs_custom_transfer_timeout_semantics_test.go`, `git_lfs_custom_transfer_failure_modes_test.go`. | Stable local coverage |
 | Bridge subprocess envelope/security | `cmd/adapter/bridge_test.go` covers strict envelopes, timeouts, malformed output, stderr redaction, and concurrency limits. | Stable |
+| Bridge request-field contract | `cmd/adapter/bridge_contract_test.go` consumes drive-cli `request-field-rules.json` and fails when root request shapes drift. | Stable |
 | Auth-state mapping | `cmd/adapter/backend_test.go`, `cmd/adapter/bridge_test.go`. | Stable |
 | Credential selector handling | `cmd/adapter/gitcred_test.go`, `cmd/adapter/bridge_test.go`. | Stable |
 | Mocked SDK E2E | `tests/integration/git_lfs_e2e_mock_test.go`, `tests/testdata/mock-proton-drive-cli.js`. | Stable and safe by default |
@@ -168,7 +172,7 @@ The tray binary also provides a small CLI when launched with arguments.
 | Resume is not implemented. | Interrupted transfers restart after transient retry attempts are exhausted. | Retryable/temporary failures are surfaced in status JSON and helper/tray messaging; add resume only if SDK support is available. |
 | Tray GUI/manual platform behavior lacks automation. | Menu/status/autostart regressions may escape unit tests. | Add release checklist and, if feasible, platform smoke automation. |
 | Real SDK integration is opt-in but easy to confuse with mocked E2E. | Accidental auth attempts could create account risk. | Keep `PROTON_LFS_RUN_SDK_INTEGRATION` and `PROTON_LFS_LIVE_CANARY` gates; document them prominently. |
-| Bridge contract drift remains possible when schemas change. | New states/errors may be misclassified if tests are bypassed. | Keep drive-cli schemas and root contract tests required for every bridge change. |
+| Bridge contract drift remains possible when schemas change. | New states/errors/required request fields may be misclassified or omitted if tests are bypassed. | Keep drive-cli schemas and root contract tests required for every bridge change. |
 
 ## Audit Findings Fixed in This Pass
 
