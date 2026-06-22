@@ -375,6 +375,18 @@ func TestBridgeExistsNotFound(t *testing.T) {
 	}
 }
 
+func TestBridgeExistsRejectsMalformedSuccessPayload(t *testing.T) {
+	bc := helperBridgeClient(t, `MOCK_BRIDGE_RAW_STDOUT={"ok":true,"payload":{"exists":"true"}}`)
+	creds := OperationCredentials{CredentialProvider: CredentialProviderPassCLI}
+	exists, err := bc.Exists(creds, validOID)
+	if err == nil {
+		t.Fatalf("expected malformed exists payload to fail, got exists=%v", exists)
+	}
+	if !strings.Contains(err.Error(), "exists field must be boolean") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestBridgeErrorMapping401(t *testing.T) {
 	bc := helperBridgeClient(t, "MOCK_BRIDGE_ERROR=unauthorized", "MOCK_BRIDGE_ERROR_CODE=401")
 	creds := OperationCredentials{CredentialProvider: CredentialProviderPassCLI}
@@ -745,12 +757,45 @@ func TestParseBridgeBoolMapPayload(t *testing.T) {
 		t.Fatal("expected wrapped oid result")
 	}
 
-	empty, err := parseBridgeBoolMapPayload("batch-delete", nil)
-	if err != nil {
-		t.Fatalf("empty payload parse failed: %v", err)
+	if _, err := parseBridgeBoolMapPayload("batch-delete", nil); err == nil {
+		t.Fatal("expected empty batch payload to fail")
 	}
-	if len(empty) != 0 {
-		t.Fatalf("expected empty result map, got %v", empty)
+
+	if _, err := parseBridgeBoolMapPayload("batch-delete", json.RawMessage(`{"not-an-oid":true}`)); err == nil {
+		t.Fatal("expected invalid oid key to fail")
+	}
+}
+
+func TestParseBridgeExistsPayload(t *testing.T) {
+	got, err := parseBridgeExistsPayload(json.RawMessage(`{"oid":"` + validOID + `","exists":true}`))
+	if err != nil {
+		t.Fatalf("valid exists payload failed: %v", err)
+	}
+	if !got {
+		t.Fatal("expected exists=true")
+	}
+
+	cases := []struct {
+		name    string
+		payload json.RawMessage
+		wantErr string
+	}{
+		{name: "empty", payload: nil, wantErr: "missing payload"},
+		{name: "missing exists", payload: json.RawMessage(`{"oid":"` + validOID + `"}`), wantErr: "missing exists"},
+		{name: "unknown field", payload: json.RawMessage(`{"exists":true,"extra":1}`), wantErr: "unknown field"},
+		{name: "exists string", payload: json.RawMessage(`{"exists":"true"}`), wantErr: "must be boolean"},
+		{name: "bad oid", payload: json.RawMessage(`{"oid":"bad","exists":true}`), wantErr: "64-character hex"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := parseBridgeExistsPayload(tc.payload)
+			if err == nil {
+				t.Fatal("expected error")
+			}
+			if !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("expected error containing %q, got %v", tc.wantErr, err)
+			}
+		})
 	}
 }
 

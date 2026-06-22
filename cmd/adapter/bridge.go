@@ -480,17 +480,7 @@ func (bc *BridgeClient) Exists(creds OperationCredentials, oid string) (bool, er
 	if resp == nil {
 		return false, nil
 	}
-	// Parse payload for explicit exists flag
-	var result struct {
-		Exists bool `json:"exists"`
-	}
-	if len(resp.Payload) > 0 {
-		if err := json.Unmarshal(resp.Payload, &result); err == nil {
-			return result.Exists, nil
-		}
-	}
-	// If the command succeeded, the object exists
-	return true, nil
+	return parseBridgeExistsPayload(resp.Payload)
 }
 
 // batchExists runs `bridge batch-exists` for multiple OIDs.
@@ -521,25 +511,82 @@ func (bc *BridgeClient) batchDelete(creds OperationCredentials, oids []string) (
 
 func parseBridgeBoolMapPayload(command string, payload json.RawMessage) (map[string]bool, error) {
 	var result map[string]bool
-	if len(payload) > 0 {
-		if err := json.Unmarshal(payload, &result); err == nil {
-			if result == nil {
-				return map[string]bool{}, nil
-			}
-			return result, nil
-		}
+	if len(bytes.TrimSpace(payload)) == 0 {
+		return nil, fmt.Errorf("%s response missing payload", command)
+	}
 
-		var wrapped struct {
-			Results map[string]bool `json:"results"`
+	if err := json.Unmarshal(payload, &result); err == nil {
+		if result == nil {
+			return map[string]bool{}, nil
 		}
-		if err := json.Unmarshal(payload, &wrapped); err != nil {
-			return nil, fmt.Errorf("failed to parse %s response: %w", command, err)
+		if err := validateBridgeBoolMapKeys(command, result); err != nil {
+			return nil, err
 		}
-		if wrapped.Results != nil {
-			return wrapped.Results, nil
+		return result, nil
+	}
+
+	var wrapped struct {
+		Results map[string]bool `json:"results"`
+	}
+	if err := json.Unmarshal(payload, &wrapped); err != nil {
+		return nil, fmt.Errorf("failed to parse %s response: %w", command, err)
+	}
+	if wrapped.Results == nil {
+		return nil, fmt.Errorf("%s response missing results", command)
+	}
+	if err := validateBridgeBoolMapKeys(command, wrapped.Results); err != nil {
+		return nil, err
+	}
+	return wrapped.Results, nil
+}
+
+func parseBridgeExistsPayload(payload json.RawMessage) (bool, error) {
+	if len(bytes.TrimSpace(payload)) == 0 {
+		return false, fmt.Errorf("exists response missing payload")
+	}
+
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(payload, &fields); err != nil {
+		return false, fmt.Errorf("failed to parse exists response: %w", err)
+	}
+	if fields == nil {
+		return false, fmt.Errorf("exists response must be an object")
+	}
+	for field := range fields {
+		switch field {
+		case "oid", "exists":
+		default:
+			return false, fmt.Errorf("exists response contains unknown field %q", field)
 		}
 	}
-	return map[string]bool{}, nil
+
+	rawExists, ok := fields["exists"]
+	if !ok {
+		return false, fmt.Errorf("exists response missing exists field")
+	}
+	var exists bool
+	if err := json.Unmarshal(rawExists, &exists); err != nil {
+		return false, fmt.Errorf("exists response exists field must be boolean: %w", err)
+	}
+	if rawOID, ok := fields["oid"]; ok {
+		var oid string
+		if err := json.Unmarshal(rawOID, &oid); err != nil {
+			return false, fmt.Errorf("exists response oid field must be string: %w", err)
+		}
+		if !oidPattern.MatchString(strings.ToLower(oid)) {
+			return false, fmt.Errorf("exists response oid field must be a 64-character hex string")
+		}
+	}
+	return exists, nil
+}
+
+func validateBridgeBoolMapKeys(command string, results map[string]bool) error {
+	for oid := range results {
+		if !oidPattern.MatchString(strings.ToLower(oid)) {
+			return fmt.Errorf("%s response contains invalid oid key %q", command, oid)
+		}
+	}
+	return nil
 }
 
 // resolveNodeBinary returns the path to the Node.js binary.

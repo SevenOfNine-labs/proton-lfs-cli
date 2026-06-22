@@ -138,6 +138,7 @@ The tray binary also provides a small CLI when launched with arguments.
 | Timeout/failure modes | `tests/integration/git_lfs_custom_transfer_timeout_semantics_test.go`, `git_lfs_custom_transfer_failure_modes_test.go`. | Stable local coverage |
 | Bridge subprocess envelope/security | `cmd/adapter/bridge_test.go` covers strict envelopes, timeouts, malformed output, stderr redaction, and concurrency limits. | Stable |
 | Bridge request-field contract | `cmd/adapter/bridge_contract_test.go` consumes drive-cli `request-field-rules.json` and fails when root request shapes drift. | Stable |
+| Bridge success payload parsing | `cmd/adapter/bridge_test.go` rejects malformed `exists` and batch helper payloads instead of inferring success. | Stable |
 | Auth-state mapping | `cmd/adapter/backend_test.go`, `cmd/adapter/bridge_test.go`. | Stable |
 | Credential selector handling | `cmd/adapter/gitcred_test.go`, `cmd/adapter/bridge_test.go`. | Stable |
 | Mocked SDK E2E | `tests/integration/git_lfs_e2e_mock_test.go`, `tests/testdata/mock-proton-drive-cli.js`. | Stable and safe by default |

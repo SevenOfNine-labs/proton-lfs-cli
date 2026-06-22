@@ -28,7 +28,8 @@ must include a non-empty `error` string and positive `code`, and unknown
 top-level fields are rejected. proton-drive-cli validates request fields against
 `schemas/bridge/v1/request-field-rules.json` before command handlers run, and
 the root adapter has contract tests proving the fields it sends remain allowed
-and complete.
+and complete. Root command-specific success parsers also fail closed for
+malformed `exists` and batch helper payloads instead of inferring success.
 
 ## Bridge Commands
 
