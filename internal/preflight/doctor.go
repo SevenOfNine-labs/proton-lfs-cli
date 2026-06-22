@@ -124,6 +124,9 @@ func ValidateDoctorReadiness(
 		AuthState:            *raw.AuthState,
 	}
 
+	if !readiness.OK {
+		return readiness, fmt.Errorf("offline doctor did not pass (%s)", readiness.blockerSummary())
+	}
 	if requirements.RequireState != "" && readiness.AuthState.State != requirements.RequireState {
 		return readiness, fmt.Errorf("offline doctor auth state mismatch: want %s, got %s (%s)",
 			requirements.RequireState,

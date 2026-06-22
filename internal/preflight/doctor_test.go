@@ -18,11 +18,15 @@ var testAuthStates = []string{
 }
 
 func doctorJSON(state string, transferReady bool, liveCanaryReady bool, extra string) []byte {
+	return doctorJSONWithOK(true, state, transferReady, liveCanaryReady, extra)
+}
+
+func doctorJSONWithOK(ok bool, state string, transferReady bool, liveCanaryReady bool, extra string) []byte {
 	if extra != "" {
 		extra = "," + extra
 	}
 	return []byte(`{
-		"ok": true,
+		"ok": ` + boolJSON(ok) + `,
 		"canAttemptTransfer": ` + boolJSON(transferReady) + `,
 		"canAttemptLiveCanary": ` + boolJSON(liveCanaryReady) + `,
 		"authState": {
@@ -54,6 +58,23 @@ func TestValidateDoctorReadinessAllowsLiveCanaryLoginAvailable(t *testing.T) {
 	}
 }
 
+func TestValidateDoctorReadinessAllowsReadyTransfer(t *testing.T) {
+	readiness, err := ValidateDoctorReadiness(
+		doctorJSON("ready", true, true, `"authMode":"srp"`),
+		testAuthStates,
+		DoctorReadinessRequirements{
+			RequireTransfer: true,
+			RequireState:    "ready",
+		},
+	)
+	if err != nil {
+		t.Fatalf("ValidateDoctorReadiness returned error: %v", err)
+	}
+	if !readiness.CanAttemptTransfer {
+		t.Fatal("CanAttemptTransfer = false, want true")
+	}
+}
+
 func TestValidateDoctorReadinessRejectsBlockedTransfer(t *testing.T) {
 	_, err := ValidateDoctorReadiness(
 		doctorJSON("needs_data_password", false, false, ""),
@@ -67,6 +88,33 @@ func TestValidateDoctorReadinessRejectsBlockedTransfer(t *testing.T) {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("error missing %q: %v", want, err)
 		}
+	}
+}
+
+func TestValidateDoctorReadinessRejectsFailedDoctor(t *testing.T) {
+	_, err := ValidateDoctorReadiness(
+		doctorJSONWithOK(false, "ready", true, true, `"errors":["doctor failed"]`),
+		testAuthStates,
+		DoctorReadinessRequirements{RequireLiveCanary: true},
+	)
+	if err == nil {
+		t.Fatal("expected failed doctor error")
+	}
+	for _, want := range []string{"offline doctor did not pass", "authState=ready", "doctor failed"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error missing %q: %v", want, err)
+		}
+	}
+}
+
+func TestValidateDoctorReadinessRejectsMalformedJSON(t *testing.T) {
+	_, err := ValidateDoctorReadiness(
+		[]byte(`{"ok":true`),
+		testAuthStates,
+		DoctorReadinessRequirements{},
+	)
+	if err == nil || !strings.Contains(err.Error(), "invalid JSON") {
+		t.Fatalf("expected invalid JSON error, got %v", err)
 	}
 }
 
