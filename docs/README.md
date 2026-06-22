@@ -10,6 +10,7 @@ Project-owned docs live here. Upstream/vendor docs remain under `submodules/` an
 4. `docs/architecture/proton-auth-hardening-plan.md`
 5. `docs/architecture/proton-auth-news-audit-2026-06-21.md`
 6. `docs/operations/live-canary-runbook.md`
+7. `docs/operations/tray-platform-release-checklist.md`
 
 ## Structure
 
@@ -17,7 +18,6 @@ Project-owned docs live here. Upstream/vendor docs remain under `submodules/` an
 - `docs/architecture/`: component boundaries and protocol contracts.
 - `docs/operations/`: runtime configuration, deployment, and release guidance.
 - `docs/testing/`: test strategy, coverage gaps, and requirement traceability.
-- `docs/reference/`: concise scope references to external specs.
 
 Machine-readable requirement mapping: `docs/testing/spec-requirements.yaml`.
 

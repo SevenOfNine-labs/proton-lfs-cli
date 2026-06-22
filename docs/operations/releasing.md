@@ -11,6 +11,9 @@ This project has two independently versioned artifacts:
 
 The build workflow cross-compiles for five targets (linux/darwin amd64+arm64, windows amd64), uploads them as artifacts, and — on `v*` tags — creates a GitHub Release with all binaries attached.
 
+Before tagging a release that changes tray/helper behavior, run
+`docs/operations/tray-platform-release-checklist.md`.
+
 ### Steps
 
 ```bash
