@@ -24,6 +24,10 @@ Date: 2026-06-22
 - Submodule pins are checked with `make check-submodules` instead of relying on
   recursive SDK traversal, because the official Proton SDK commit currently
   contains an unmapped nested gitlink.
+- Latest official Proton Drive CLI/SDK auth signals were reviewed on
+  2026-06-22. The fetched SDK `origin/main@a3fc5e54` was not pinned because it
+  is a non-fast-forward layout migration that removes the current
+  `submodules/sdk/js/sdk` package path.
 - Transfer failures preserve retryable/temporary backend metadata in status JSON
   and render it in helper/tray status surfaces without adding automatic login or
   retry loops.
@@ -48,6 +52,9 @@ Go Adapter → proton-drive-cli subprocess (stdin/stdout JSON, provider selector
 
 - Real-account canary validation with a disposable account after mocked
   auth/session gates stay green and explicit canary acknowledgement is set.
+- Dedicated migration to the new upstream SDK layout after replacing the
+  `portal:./submodules/sdk/js/sdk` package path and rerunning drive-cli/root
+  contract tests.
 - Production observability baseline (metrics, SLOs, alerts, runbooks).
 - SDK streaming transfer progress and resume support where the SDK can expose
   it. The local backend streams progress during filesystem copies.

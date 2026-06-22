@@ -8,9 +8,10 @@ Project-owned docs live here. Upstream/vendor docs remain under `submodules/` an
 2. `docs/architecture/feature-audit.md`
 3. `docs/architecture/sdk-capability-matrix.md`
 4. `docs/architecture/proton-auth-hardening-plan.md`
-5. `docs/architecture/proton-auth-news-audit-2026-06-21.md`
-6. `docs/operations/live-canary-runbook.md`
-7. `docs/operations/tray-platform-release-checklist.md`
+5. `docs/architecture/proton-auth-news-audit-2026-06-22.md`
+6. `docs/architecture/proton-auth-news-audit-2026-06-21.md`
+7. `docs/operations/live-canary-runbook.md`
+8. `docs/operations/tray-platform-release-checklist.md`
 
 ## Structure
 

@@ -174,6 +174,7 @@ The tray binary also provides a small CLI when launched with arguments.
 | Tray GUI/manual platform behavior lacks automation. | Menu/status/autostart regressions may escape unit tests. | Add release checklist and, if feasible, platform smoke automation. |
 | Real SDK integration is opt-in but easy to confuse with mocked E2E. | Accidental auth attempts could create account risk. | Keep `PROTON_LFS_RUN_SDK_INTEGRATION` and `PROTON_LFS_LIVE_CANARY` gates; document them prominently. |
 | Bridge contract drift remains possible when schemas change. | New states/errors/required request fields may be misclassified or omitted if tests are bypassed. | Keep drive-cli schemas and root contract tests required for every bridge change. |
+| Official SDK upstream layout has moved past the pinned `js/sdk` package path. | A naive SDK submodule update would break `proton-drive-cli` dependency resolution before auth behavior is retested. | Migrate the package path/build scripts/import assumptions in a dedicated drive-cli-first slice, then update the root submodule pointer after full tests. |
 
 ## Audit Findings Fixed in This Pass
 
