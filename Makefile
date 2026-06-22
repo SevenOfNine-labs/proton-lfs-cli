@@ -229,6 +229,7 @@ test-integration-credentials: ## Run credential flow security tests
 test-integration-sdk: check-sdk-prereqs ## Run sdk backend integration tests (requires proton-drive-cli and pass-cli)
 	@mkdir -p $(GO_CACHE_DIR)
 	@eval "$$(./scripts/export-pass-env.sh)" && \
+		PROTON_LFS_RUN_SDK_INTEGRATION=1 \
 		GOCACHE=$(PWD)/$(GO_CACHE_DIR) $(GO) test -tags integration ./tests/integration/... -run SDK -v
 
 test-e2e-mock: build-adapter ## Mocked E2E pipeline (no real credentials)

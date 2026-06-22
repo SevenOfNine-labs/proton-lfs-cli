@@ -28,6 +28,7 @@ const (
 	ErrCodeCaptchaRequired      ErrorCode = "captcha_required"
 	ErrCodeTwoFactorRequired    ErrorCode = "two_factor_required"
 	ErrCodeDataPasswordRequired ErrorCode = "data_password_required"
+	ErrCodeKeyPasswordRequired  ErrorCode = "key_password_required"
 	ErrCodeKeyUnlockFailed      ErrorCode = "key_unlock_failed"
 	ErrCodeNotFound             ErrorCode = "not_found"
 	ErrCodePermissionDenied     ErrorCode = "permission_denied"
@@ -316,6 +317,8 @@ func mapAuthStateForTransfer(state *BridgeAuthStateResponse) error {
 		return nil
 	case "needs_data_password":
 		return newBackendErrorWithCode(401, "mailbox/data password required for this Proton account", nil, ErrCodeDataPasswordRequired)
+	case "needs_key_password":
+		return newBackendErrorWithCode(401, "stored browser-fork key password required for this Proton session", nil, ErrCodeKeyPasswordRequired)
 	case "login_available", "needs_login":
 		return newBackendError(401, "no ready Proton Drive session; run proton-drive login before Git LFS transfer", nil)
 	case "session_expired":
@@ -452,6 +455,8 @@ func mapBridgeError(err error, fallbackMessage string) error {
 		strings.Contains(msg, "2fa"),
 		strings.Contains(msg, "fido2"):
 		return newBackendErrorWithCode(401, "two-factor authentication required", err, ErrCodeTwoFactorRequired)
+	case strings.Contains(msg, "key password"):
+		return newBackendErrorWithCode(401, "stored browser-fork key password required for this Proton session", err, ErrCodeKeyPasswordRequired)
 	case strings.Contains(msg, "mailbox/data password"),
 		strings.Contains(msg, "data password"),
 		strings.Contains(msg, "key decryption"):
@@ -514,6 +519,8 @@ func mapStructuredBridgeError(bridgeErr *BridgeError, fallbackMessage string, or
 			message = "FIDO2 two-factor authentication required"
 		}
 		return newBackendErrorWithCode(401, message, original, ErrCodeTwoFactorRequired)
+	case errorCode == "KEY_PASSWORD_REQUIRED" || strings.Contains(lowerMsg, "key password"):
+		return newBackendErrorWithCode(401, "stored browser-fork key password required for this Proton session", original, ErrCodeKeyPasswordRequired)
 	case errorCode == "DATA_PASSWORD_REQUIRED" || strings.Contains(lowerMsg, "mailbox/data password") || strings.Contains(lowerMsg, "data password") || strings.Contains(lowerMsg, "key decryption"):
 		return newBackendErrorWithCode(401, "mailbox/data password required for this Proton account", original, ErrCodeDataPasswordRequired)
 	case strings.Contains(lowerMsg, "failed to decrypt") || strings.Contains(lowerMsg, "decrypt any keys"):

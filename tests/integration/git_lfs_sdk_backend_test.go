@@ -189,6 +189,10 @@ func sdkResolvedCredentials(t *testing.T) (string, string) {
 }
 
 func TestGitLFSCustomTransferSDKBackendRoundTrip(t *testing.T) {
+	if strings.TrimSpace(os.Getenv("PROTON_LFS_RUN_SDK_INTEGRATION")) != "1" {
+		t.Skip("sdk integration test skipped: set PROTON_LFS_RUN_SDK_INTEGRATION=1 or run make test-integration-sdk")
+	}
+
 	s := setupRepositoryForUpload(t)
 
 	driveCliBin := sdkDriveCliBin(t, s.root)

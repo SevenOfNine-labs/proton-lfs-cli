@@ -77,15 +77,26 @@ if (command === 'auth') {
 
 if (command === 'auth-state') {
   const state = process.env.MOCK_BRIDGE_AUTH_STATE || 'ready';
+  const hasSession = state !== 'needs_login' && state !== 'login_available';
+  const sessionValid = state === 'ready' || state === 'needs_data_password' || state === 'needs_key_password';
+  const keyPasswordPersisted = process.env.MOCK_BRIDGE_KEY_PASSWORD_PERSISTED === 'true' || state === 'needs_key_password';
+  const keyPasswordAvailable =
+    process.env.MOCK_BRIDGE_KEY_PASSWORD_AVAILABLE === 'true' ||
+    (keyPasswordPersisted && state !== 'needs_key_password');
   write({
     ok: true,
     payload: {
       state,
-      hasSession: state !== 'needs_login' && state !== 'login_available',
-      sessionValid: state === 'ready',
+      hasSession,
+      sessionValid,
       sessionExpired: state === 'session_expired',
-      sessionUidPresent: state !== 'needs_login' && state !== 'login_available',
-      passwordMode: Number(process.env.MOCK_BRIDGE_PASSWORD_MODE || 1),
+      sessionUidPresent: hasSession,
+      passwordMode: Number(process.env.MOCK_BRIDGE_PASSWORD_MODE || (state === 'needs_data_password' ? 2 : 1)),
+      authMode: process.env.MOCK_BRIDGE_AUTH_MODE || (state === 'needs_key_password' ? 'browser-fork' : undefined),
+      keyPasswordPersisted,
+      keyPasswordAvailable,
+      keyPasswordProvider: process.env.MOCK_BRIDGE_KEY_PASSWORD_PROVIDER || (keyPasswordPersisted ? 'git-credential' : undefined),
+      keyPasswordHost: process.env.MOCK_BRIDGE_KEY_PASSWORD_HOST || (keyPasswordPersisted ? 'proton-drive-key.proton-lfs-cli.local' : undefined),
       usernamePresent: false,
       hasExplicitLoginPassword: false,
       hasExplicitDataPassword: Boolean(request.dataPassword),

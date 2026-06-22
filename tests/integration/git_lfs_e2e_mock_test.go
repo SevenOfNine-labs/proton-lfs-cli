@@ -103,3 +103,48 @@ func TestE2EMockedPipeline(t *testing.T) {
 
 	t.Logf("E2E mocked pipeline: upload OID=%s, download verified, content matches", oid)
 }
+
+func TestE2EMockedPipelineBlocksMissingBrowserForkKeyPassword(t *testing.T) {
+	root := repoRoot(t)
+
+	mockBridge := os.Getenv("PROTON_DRIVE_CLI_BIN")
+	if mockBridge == "" {
+		mockBridge = filepath.Join(root, "tests", "testdata", "mock-proton-drive-cli.js")
+	}
+	if _, err := os.Stat(mockBridge); err != nil {
+		t.Skipf("mock bridge not found at %s: %v", mockBridge, err)
+	}
+
+	mockPassCLI := os.Getenv("PROTON_PASS_CLI_BIN")
+	if mockPassCLI == "" {
+		mockPassCLI = filepath.Join(root, "scripts", "mock-pass-cli.sh")
+	}
+	if _, err := os.Stat(mockPassCLI); err != nil {
+		t.Skipf("mock-pass-cli.sh not found at %s: %v", mockPassCLI, err)
+	}
+
+	mockStorageDir := filepath.Join(t.TempDir(), "mock-bridge-storage")
+	s := setupRepositoryForUpload(t)
+	sdkEnv := append(
+		s.env,
+		"PROTON_PASS_CLI_BIN="+mockPassCLI,
+		"PROTON_PASS_REF_ROOT=pass://Personal/Proton Git LFS",
+		"PASS_MOCK_USERNAME=integration-user@proton.test",
+		"PASS_MOCK_PASSWORD=integration-password",
+		"PROTON_DRIVE_CLI_BIN="+mockBridge,
+		"MOCK_BRIDGE_STORAGE_DIR="+mockStorageDir,
+		"MOCK_BRIDGE_AUTH_STATE=needs_key_password",
+	)
+
+	configureSDKCustomTransfer(t, s.repoPath, sdkEnv, s.gitBin, s.adapterPath, mockBridge)
+
+	out, err := runCmd(s.repoPath, sdkEnv, s.gitLFSBin, "push", "origin", "main")
+	if err == nil {
+		t.Fatalf("expected lfs push to fail when browser-fork key password is missing, output:\n%s", out)
+	}
+	logOut, _ := runCmd(s.repoPath, sdkEnv, s.gitLFSBin, "logs", "last")
+	combined := out + "\n" + logOut
+	if !containsAnyFold(combined, "key_password_required", "stored browser-fork key password", "missing its stored key password", "needs_key_password") {
+		t.Fatalf("expected missing key-password failure, got:\n%s", combined)
+	}
+}

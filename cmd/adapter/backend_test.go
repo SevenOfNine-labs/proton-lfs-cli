@@ -174,6 +174,7 @@ func TestMapBridgeError(t *testing.T) {
 		{"text rate limit", "rate limit exceeded", 429},
 		{"text two factor", "Two-factor authentication code required", 401},
 		{"text data password", "Mailbox/data password required for this two-password Proton account", 401},
+		{"text key password", "Browser-fork session is missing its stored key password", 401},
 		{"text key unlock", "Failed to decrypt any keys", 401},
 		{"concurrency limit", "bridge concurrency limit reached (10)", 503},
 		{"unknown error", "something unexpected", 502},
@@ -225,6 +226,16 @@ func TestMapStructuredBridgeErrorAuthStates(t *testing.T) {
 			},
 			wantCode:  401,
 			wantClass: ErrCodeDataPasswordRequired,
+		},
+		{
+			name: "key password required",
+			err: &BridgeError{
+				Code:    401,
+				Message: "Browser-fork session is missing its stored key password",
+				Details: `{"errorCode":"KEY_PASSWORD_REQUIRED"}`,
+			},
+			wantCode:  401,
+			wantClass: ErrCodeKeyPasswordRequired,
 		},
 		{
 			name: "key unlock failed",
@@ -347,6 +358,24 @@ func TestDriveCLIBackendInitializeMapsDataPasswordState(t *testing.T) {
 	}
 	if backendErr.Code != 401 || backendErr.ErrorCode != ErrCodeDataPasswordRequired {
 		t.Fatalf("expected data_password_required 401, got %+v", backendErr)
+	}
+}
+
+func TestDriveCLIBackendInitializeMapsKeyPasswordState(t *testing.T) {
+	bc := helperBridgeClient(t, "MOCK_BRIDGE_AUTH_STATE=needs_key_password")
+	backend := NewDriveCLIBackend(bc, CredentialProviderPassCLI)
+	session := &Session{Initialized: true, CreatedAt: time.Now()}
+
+	err := backend.Initialize(session)
+	var backendErr *BackendError
+	if !errors.As(err, &backendErr) {
+		t.Fatalf("expected BackendError, got %T", err)
+	}
+	if backendErr.Code != 401 || backendErr.ErrorCode != ErrCodeKeyPasswordRequired {
+		t.Fatalf("expected key_password_required 401, got %+v", backendErr)
+	}
+	if backend.authenticated {
+		t.Fatal("backend must not authenticate when key-password auth-state is not ready")
 	}
 }
 

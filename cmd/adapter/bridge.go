@@ -64,6 +64,11 @@ type BridgeAuthStateResponse struct {
 	SessionExpired          bool     `json:"sessionExpired"`
 	SessionUIDPresent       bool     `json:"sessionUidPresent"`
 	PasswordMode            int      `json:"passwordMode,omitempty"`
+	AuthMode                string   `json:"authMode,omitempty"`
+	KeyPasswordPersisted    bool     `json:"keyPasswordPersisted,omitempty"`
+	KeyPasswordAvailable    bool     `json:"keyPasswordAvailable,omitempty"`
+	KeyPasswordProvider     string   `json:"keyPasswordProvider,omitempty"`
+	KeyPasswordHost         string   `json:"keyPasswordHost,omitempty"`
 	UsernamePresent         bool     `json:"usernamePresent"`
 	HasExplicitLoginPass    bool     `json:"hasExplicitLoginPassword"`
 	HasExplicitDataPass     bool     `json:"hasExplicitDataPassword"`

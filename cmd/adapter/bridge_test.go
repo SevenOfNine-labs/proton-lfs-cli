@@ -96,12 +96,38 @@ func TestHelperProcess(_ *testing.T) {
 		if state == "" {
 			state = "ready"
 		}
+		hasSession := state != "needs_login" && state != "login_available"
+		sessionValid := state == "ready" || state == "needs_data_password" || state == "needs_key_password"
+		passwordMode := 1
+		if state == "needs_data_password" {
+			passwordMode = 2
+		}
+		authMode := os.Getenv("MOCK_BRIDGE_AUTH_MODE")
+		if authMode == "" && state == "needs_key_password" {
+			authMode = "browser-fork"
+		}
+		keyPasswordPersisted := os.Getenv("MOCK_BRIDGE_KEY_PASSWORD_PERSISTED") == "true" || state == "needs_key_password"
+		keyPasswordAvailable := os.Getenv("MOCK_BRIDGE_KEY_PASSWORD_AVAILABLE") == "true" || (keyPasswordPersisted && state != "needs_key_password")
+		keyPasswordProvider := os.Getenv("MOCK_BRIDGE_KEY_PASSWORD_PROVIDER")
+		if keyPasswordProvider == "" && keyPasswordPersisted {
+			keyPasswordProvider = "git-credential"
+		}
+		keyPasswordHost := os.Getenv("MOCK_BRIDGE_KEY_PASSWORD_HOST")
+		if keyPasswordHost == "" && keyPasswordPersisted {
+			keyPasswordHost = "proton-drive-key.proton-lfs-cli.local"
+		}
 		writeOKResponse(os.Stdout, map[string]any{
 			"state":                    state,
-			"hasSession":               state != "needs_login" && state != "login_available",
-			"sessionValid":             state == "ready",
+			"hasSession":               hasSession,
+			"sessionValid":             sessionValid,
 			"sessionExpired":           state == "session_expired",
-			"sessionUidPresent":        state != "needs_login" && state != "login_available",
+			"sessionUidPresent":        hasSession,
+			"passwordMode":             passwordMode,
+			"authMode":                 authMode,
+			"keyPasswordPersisted":     keyPasswordPersisted,
+			"keyPasswordAvailable":     keyPasswordAvailable,
+			"keyPasswordProvider":      keyPasswordProvider,
+			"keyPasswordHost":          keyPasswordHost,
 			"usernamePresent":          false,
 			"hasExplicitLoginPassword": false,
 			"hasExplicitDataPassword":  false,
@@ -328,6 +354,37 @@ func TestBridgeAuthState(t *testing.T) {
 	}
 	if state.State != "ready" {
 		t.Fatalf("expected ready auth state, got %q", state.State)
+	}
+	if state.WillAttemptNetwork {
+		t.Fatal("auth-state must remain offline-only")
+	}
+}
+
+func TestBridgeAuthStateKeyPasswordDiagnostics(t *testing.T) {
+	bc := helperBridgeClient(t, "MOCK_BRIDGE_AUTH_STATE=needs_key_password")
+	creds := OperationCredentials{CredentialProvider: CredentialProviderPassCLI}
+
+	state, err := bc.AuthState(creds)
+	if err != nil {
+		t.Fatalf("AuthState failed: %v", err)
+	}
+	if state.State != "needs_key_password" {
+		t.Fatalf("expected needs_key_password auth state, got %q", state.State)
+	}
+	if state.AuthMode != "browser-fork" {
+		t.Fatalf("expected browser-fork auth mode, got %q", state.AuthMode)
+	}
+	if !state.KeyPasswordPersisted {
+		t.Fatal("expected persisted key-password metadata")
+	}
+	if state.KeyPasswordAvailable {
+		t.Fatal("expected key password to be unavailable")
+	}
+	if state.KeyPasswordProvider != "git-credential" {
+		t.Fatalf("expected git-credential key-password provider, got %q", state.KeyPasswordProvider)
+	}
+	if state.KeyPasswordHost != "proton-drive-key.proton-lfs-cli.local" {
+		t.Fatalf("unexpected key-password host %q", state.KeyPasswordHost)
 	}
 	if state.WillAttemptNetwork {
 		t.Fatal("auth-state must remain offline-only")
