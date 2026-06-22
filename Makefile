@@ -68,7 +68,7 @@ install-deps: ## Install Go dependencies and JS dependencies (default: yarn via 
 
 build: build-adapter ## Build first-party binaries
 
-build-all: build-adapter build-tray build-lfs build-drive-cli ## Build adapter, tray app, Git LFS submodule, and proton-drive-cli
+build-all: check-submodules build-adapter build-tray build-lfs build-drive-cli ## Build adapter, tray app, Git LFS submodule, and proton-drive-cli
 
 build-adapter: ## Build the custom transfer adapter
 	@mkdir -p bin
@@ -81,7 +81,7 @@ build-tray: ## Build the system tray application (requires CGO)
 build-sea: build-drive-cli ## Build proton-drive-cli as a standalone Node.js SEA binary
 	@bash scripts/build-sea.sh
 
-build-bundle: build-adapter build-tray build-sea ## Build all components into dist/ for packaging
+build-bundle: check-submodules build-adapter build-tray build-sea ## Build all components into dist/ for packaging
 	@mkdir -p dist
 	@cp bin/git-lfs-proton-adapter dist/ 2>/dev/null || true
 	@cp bin/proton-lfs-tray dist/ 2>/dev/null || true
@@ -174,7 +174,9 @@ build-lfs: ## Build Git LFS submodule
 
 build-drive-cli: ## Build proton-drive-cli TypeScript bridge
 	@if [ ! -d $(DRIVE_CLI_DIR) ]; then \
-		echo "$(DRIVE_CLI_DIR) not found. Run: git submodule update --init --recursive"; \
+		echo "$(DRIVE_CLI_DIR) not found."; \
+		echo "Run the Local Bring-Up submodule commands in docs/operations/deployment.md,"; \
+		echo "then run: make check-submodules"; \
 		exit 1; \
 	fi
 	@if [ "$(JS_PM)" = "yarn" ]; then \
@@ -185,7 +187,7 @@ build-drive-cli: ## Build proton-drive-cli TypeScript bridge
 
 test: test-adapter test-tray ## Run core tests
 
-test-all: test-adapter test-tray test-lfs test-integration test-e2e-mock ## Run all test suites
+test-all: check-submodules test-adapter test-tray test-lfs test-integration test-e2e-mock ## Run all test suites
 
 test-adapter: ## Run adapter tests
 	@mkdir -p $(GO_CACHE_DIR)
@@ -226,7 +228,7 @@ test-integration-credentials: ## Run credential flow security tests
 	@mkdir -p $(GO_CACHE_DIR)
 	GOCACHE=$(PWD)/$(GO_CACHE_DIR) $(GO) test -tags integration ./tests/integration/... -run Credential -v
 
-test-integration-sdk: check-sdk-prereqs ## Run sdk backend integration tests (requires proton-drive-cli and pass-cli)
+test-integration-sdk: check-submodules check-sdk-prereqs ## Run sdk backend integration tests (requires proton-drive-cli and pass-cli)
 	@mkdir -p $(GO_CACHE_DIR)
 	@eval "$$(./scripts/export-pass-env.sh)" && \
 		PROTON_LFS_RUN_SDK_INTEGRATION=1 \
@@ -241,7 +243,7 @@ test-e2e-mock: build-adapter ## Mocked E2E pipeline (no real credentials)
 		PASS_MOCK_PASSWORD=integration-password \
 		GOCACHE=$(PWD)/$(GO_CACHE_DIR) $(GO) test -tags integration ./tests/integration/... -run E2EMocked -v
 
-live-canary-preflight: build-adapter build-drive-cli ## Offline gate before any real Proton canary
+live-canary-preflight: check-submodules build-adapter build-drive-cli ## Offline gate before any real Proton canary
 	@echo "Running offline live-canary preflight (no Proton login)..."
 	@mkdir -p $(GO_CACHE_DIR)
 	GOCACHE=$(PWD)/$(GO_CACHE_DIR) $(GO) test ./...

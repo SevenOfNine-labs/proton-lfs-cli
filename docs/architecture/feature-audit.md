@@ -28,6 +28,7 @@ Runtime behavior and tests remain authoritative.
 | Status reporting | Writes transfer state for tray/CLI display. | Stable | `internal/config/status.go`. | `internal/config/status_test.go`, tray status tests. |
 | Preferences | Stores selected credential provider and enabled state. | Stable | `internal/config/prefs.go`. | `internal/config/config_test.go`, tray CLI tests. |
 | Build/package automation | Builds Go adapter/tray, proton-drive-cli, Git LFS, SEA bundle, and app bundles. | Beta | `Makefile`, `scripts/*.sh`. | Build targets are exercised manually and in previous commits; not fully unit-tested. |
+| Submodule pin verification | Verifies root submodule pins and the nested Proton SDK gitlink without recursive SDK traversal. | Stable | `scripts/check-submodules.sh`, `Makefile`. | `make check-submodules`. |
 | Live canary workflow | Real Proton E2E with explicit acknowledgement. | Guarded | `Makefile`, `docs/operations/live-canary-runbook.md`. | Not run by default; requires `PROTON_LFS_LIVE_CANARY`. |
 
 ## Adapter Protocol Contract
@@ -141,6 +142,7 @@ The tray binary also provides a small CLI when launched with arguments.
 | Credential security | `tests/integration/credential_security_test.go`. | Partial; some checks skip without local session/pass-cli. |
 | Tray/helper CLI | `cmd/tray/*_test.go`. | Stable for CLI logic; GUI/manual behavior remains Beta. |
 | Shared config/status | `internal/config/*_test.go`. | Stable |
+| Submodule verification | `make check-submodules`. | Stable for root-owned pins; intentionally skips recursive SDK descent. |
 | Build/package scripts | `Makefile`, `scripts/*.sh`. | Partial; build targets are run manually/locally, scripts not fully unit-tested. |
 
 ## Formal Maturity Assessment
