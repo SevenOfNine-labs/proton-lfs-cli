@@ -119,6 +119,39 @@ proton-drive ls /
 Stop after this command regardless of success. Do not upload or download in
 the same canary session.
 
+## Browser-Fork Canary
+
+Use this only after the normal one-login and metadata-read canary path above is
+understood. It is for accounts that need the browser session-fork path, such as
+FIDO2-oriented accounts. The target runs exactly one
+`login --auth-mode browser-fork` command, then performs local `status` and
+offline `doctor --json` inspection. It does not upload, download, or start the
+Git LFS real E2E transfer.
+
+```bash
+PROTON_LFS_LIVE_CANARY=I_UNDERSTAND_THIS_TOUCHES_A_REAL_PROTON_ACCOUNT \
+LIVE_CANARY_DOCTOR_ARGS="--credential-provider git-credential" \
+LIVE_BROWSER_FORK_LOGIN_ARGS="--key-password-provider git-credential" \
+  make browser-fork-canary
+```
+
+If you want the derived browser-fork key password stored in Proton Pass instead
+of Git Credential Manager, make both the login args and credential environment
+explicit:
+
+```bash
+PROTON_LFS_LIVE_CANARY=I_UNDERSTAND_THIS_TOUCHES_A_REAL_PROTON_ACCOUNT \
+PROTON_CREDENTIAL_PROVIDER=pass-cli \
+PROTON_KEY_PASSWORD_PROVIDER=pass-cli \
+LIVE_CANARY_DOCTOR_ARGS="--credential-provider pass-cli" \
+LIVE_BROWSER_FORK_LOGIN_ARGS="--key-password-provider pass-cli" \
+  make browser-fork-canary
+```
+
+Stop after this target. Only run `make test-e2e-real` later, in a separate
+command, after recording that offline doctor reported `authMode=browser-fork`,
+`state=ready`, and `canAttemptTransfer=true`.
+
 ## Real E2E Guard
 
 The `test-e2e-real` target is guarded and refuses to run unless the explicit

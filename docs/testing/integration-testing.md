@@ -19,6 +19,7 @@ Integration tests validate Git LFS client behavior against the adapter runtime a
 | `make test-integration-credentials` | Credential flow security tests |
 | `make test-e2e-mock` | Mocked E2E pipeline (no real credentials) |
 | `make live-canary-preflight` | Offline gate before any real Proton canary |
+| `make browser-fork-canary` | Guarded one-login browser-fork canary; no transfer |
 | `make test-e2e-real` | Guarded real Proton Drive E2E; requires the live canary acknowledgement |
 
 ## Prerequisites
@@ -119,6 +120,11 @@ LIVE_CANARY_DOCTOR_ARGS="--credential-provider pass-cli" \
 The Go test also checks these gates directly before resolving credentials, so a
 direct `go test -tags integration ... -run E2EReal` invocation skips unless the
 same live-canary environment is present.
+
+`make browser-fork-canary` is a separate live-login path. It requires
+`PROTON_LFS_LIVE_CANARY`, `LIVE_CANARY_DOCTOR_ARGS`, and
+`LIVE_BROWSER_FORK_LOGIN_ARGS`, runs one `login --auth-mode browser-fork`, then
+only inspects local status and offline doctor readiness.
 
 ## High-Value Missing Tests
 
