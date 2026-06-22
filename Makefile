@@ -18,7 +18,7 @@ LIVE_CANARY_ACK_VALUE := I_UNDERSTAND_THIS_TOUCHES_A_REAL_PROTON_ACCOUNT
 	build build-adapter build-tray build-lfs build-drive-cli build-sea build-all build-bundle \
 	install uninstall \
 	test test-adapter test-tray test-lfs test-integration test-integration-timeout test-integration-stress test-integration-sdk test-e2e-mock test-e2e-real test-all \
-	live-canary-preflight pass-env check-live-canary-ack check-sdk-prereqs check-sdk-real-prereqs \
+	live-canary-preflight pass-env check-live-canary-ack check-live-canary-doctor-args check-sdk-prereqs check-sdk-real-prereqs \
 	fmt lint lint-go \
 	docs docs-lint \
 	clean status install-hooks
@@ -275,11 +275,21 @@ check-live-canary-ack: ## Refuse real Proton tests without explicit acknowledgem
 		echo "This target may touch a real Proton account and must never run by accident."; \
 		echo "Read docs/operations/live-canary-runbook.md first."; \
 		echo "Then run with:"; \
-		echo "  PROTON_LFS_LIVE_CANARY=$(LIVE_CANARY_ACK_VALUE) make test-e2e-real"; \
+		echo "  PROTON_LFS_LIVE_CANARY=$(LIVE_CANARY_ACK_VALUE) LIVE_CANARY_DOCTOR_ARGS='--credential-provider pass-cli' make test-e2e-real"; \
 		exit 2; \
 	fi
 
-test-e2e-real: check-live-canary-ack live-canary-preflight ## Real Proton Drive E2E (requires explicit live canary acknowledgement)
+check-live-canary-doctor-args: ## Require explicit offline doctor args for real Proton tests
+	@if [ -z "$${LIVE_CANARY_DOCTOR_ARGS:-}" ]; then \
+		echo "Refusing to run a real Proton canary without LIVE_CANARY_DOCTOR_ARGS."; \
+		echo "The offline doctor must pass with the exact credential-provider args"; \
+		echo "that will be used by the live canary."; \
+		echo "Example:"; \
+		echo "  LIVE_CANARY_DOCTOR_ARGS='--credential-provider pass-cli'"; \
+		exit 2; \
+	fi
+
+test-e2e-real: check-live-canary-ack check-live-canary-doctor-args live-canary-preflight ## Real Proton Drive E2E (requires explicit live canary acknowledgement)
 	@mkdir -p $(GO_CACHE_DIR)
 	@eval "$$(./scripts/export-pass-env.sh)" && \
 		GOCACHE=$(PWD)/$(GO_CACHE_DIR) $(GO) test -tags integration ./tests/integration/... -run E2E -v

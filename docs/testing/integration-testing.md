@@ -108,12 +108,17 @@ Do not run real-account tests directly. First follow
 `docs/operations/live-canary-runbook.md`.
 
 `make test-e2e-real` refuses to run unless this acknowledgement is set for the
-same command:
+same command and the offline doctor arguments are supplied:
 
 ```bash
 PROTON_LFS_LIVE_CANARY=I_UNDERSTAND_THIS_TOUCHES_A_REAL_PROTON_ACCOUNT \
+LIVE_CANARY_DOCTOR_ARGS="--credential-provider pass-cli" \
   make test-e2e-real
 ```
+
+The Go test also checks these gates directly before resolving credentials, so a
+direct `go test -tags integration ... -run E2EReal` invocation skips unless the
+same live-canary environment is present.
 
 ## High-Value Missing Tests
 

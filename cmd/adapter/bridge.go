@@ -498,16 +498,7 @@ func (bc *BridgeClient) BatchExists(creds OperationCredentials, oids []string) (
 	if err != nil {
 		return nil, err
 	}
-	var result map[string]bool
-	if len(resp.Payload) > 0 {
-		if err := json.Unmarshal(resp.Payload, &result); err != nil {
-			return nil, fmt.Errorf("failed to parse batch-exists response: %w", err)
-		}
-	}
-	if result == nil {
-		result = make(map[string]bool)
-	}
-	return result, nil
+	return parseBridgeBoolMapPayload("batch-exists", resp.Payload)
 }
 
 // BatchDelete runs `bridge batch-delete` for multiple OIDs.
@@ -518,16 +509,30 @@ func (bc *BridgeClient) BatchDelete(creds OperationCredentials, oids []string) (
 	if err != nil {
 		return nil, err
 	}
+	return parseBridgeBoolMapPayload("batch-delete", resp.Payload)
+}
+
+func parseBridgeBoolMapPayload(command string, payload json.RawMessage) (map[string]bool, error) {
 	var result map[string]bool
-	if len(resp.Payload) > 0 {
-		if err := json.Unmarshal(resp.Payload, &result); err != nil {
-			return nil, fmt.Errorf("failed to parse batch-delete response: %w", err)
+	if len(payload) > 0 {
+		if err := json.Unmarshal(payload, &result); err == nil {
+			if result == nil {
+				return map[string]bool{}, nil
+			}
+			return result, nil
+		}
+
+		var wrapped struct {
+			Results map[string]bool `json:"results"`
+		}
+		if err := json.Unmarshal(payload, &wrapped); err != nil {
+			return nil, fmt.Errorf("failed to parse %s response: %w", command, err)
+		}
+		if wrapped.Results != nil {
+			return wrapped.Results, nil
 		}
 	}
-	if result == nil {
-		result = make(map[string]bool)
-	}
-	return result, nil
+	return map[string]bool{}, nil
 }
 
 // resolveNodeBinary returns the path to the Node.js binary.

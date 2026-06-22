@@ -122,15 +122,34 @@ the same canary session.
 ## Real E2E Guard
 
 The `test-e2e-real` target is guarded and refuses to run unless the explicit
-acknowledgement is present:
+acknowledgement and the exact offline doctor arguments are present:
 
 ```bash
 PROTON_LFS_LIVE_CANARY=I_UNDERSTAND_THIS_TOUCHES_A_REAL_PROTON_ACCOUNT \
+LIVE_CANARY_DOCTOR_ARGS="--credential-provider pass-cli" \
   make test-e2e-real
 ```
 
+For a two-password account, use the same data credential provider arguments
+that passed preflight:
+
+```bash
+PROTON_LFS_LIVE_CANARY=I_UNDERSTAND_THIS_TOUCHES_A_REAL_PROTON_ACCOUNT \
+LIVE_CANARY_DOCTOR_ARGS="--credential-provider pass-cli --data-credential-provider pass-cli --require-data-password" \
+  PROTON_DATA_CREDENTIAL_PROVIDER=pass-cli \
+  make test-e2e-real
+```
+
+The test creates one tiny `.canary` LFS object under a unique
+`LFS/canary/proton-lfs-cli/<timestamp>` storage base unless
+`PROTON_LFS_CANARY_STORAGE_BASE` is set. It attempts a final bridge delete for
+that single OID after verification, logs only the OID prefix, and treats cleanup
+failure as evidence to inspect rather than a reason to retry live immediately.
+
 Do not run this target until the one-login canary and one metadata read have
-succeeded and the result has been recorded.
+succeeded and the result has been recorded. Direct `go test` invocations are
+also gated and skip before credential resolution unless the same environment is
+present.
 
 ## Evidence To Record
 

@@ -202,7 +202,7 @@ func TestHelperProcess(_ *testing.T) {
 				result[s] = true
 			}
 		}
-		writeOKResponse(os.Stdout, result)
+		writeOKResponse(os.Stdout, map[string]any{"results": result})
 	case "batch-delete":
 		oids, _ := req["oids"].([]any)
 		result := make(map[string]bool)
@@ -211,7 +211,7 @@ func TestHelperProcess(_ *testing.T) {
 				result[s] = true
 			}
 		}
-		writeOKResponse(os.Stdout, result)
+		writeOKResponse(os.Stdout, map[string]any{"results": result})
 	default:
 		writeErrorResponse(os.Stdout, 400, "unknown command: "+command)
 		os.Exit(1)
@@ -659,6 +659,32 @@ func TestBridgeBatchDelete(t *testing.T) {
 	}
 	if !result[validOID] {
 		t.Fatal("expected oid to be deleted")
+	}
+}
+
+func TestParseBridgeBoolMapPayload(t *testing.T) {
+	rawMap, err := parseBridgeBoolMapPayload("batch-exists", json.RawMessage(`{"`+validOID+`":true}`))
+	if err != nil {
+		t.Fatalf("raw map parse failed: %v", err)
+	}
+	if !rawMap[validOID] {
+		t.Fatal("expected raw map oid result")
+	}
+
+	wrapped, err := parseBridgeBoolMapPayload("batch-delete", json.RawMessage(`{"results":{"`+validOID+`":true}}`))
+	if err != nil {
+		t.Fatalf("wrapped results parse failed: %v", err)
+	}
+	if !wrapped[validOID] {
+		t.Fatal("expected wrapped oid result")
+	}
+
+	empty, err := parseBridgeBoolMapPayload("batch-delete", nil)
+	if err != nil {
+		t.Fatalf("empty payload parse failed: %v", err)
+	}
+	if len(empty) != 0 {
+		t.Fatalf("expected empty result map, got %v", empty)
 	}
 }
 

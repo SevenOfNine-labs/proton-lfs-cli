@@ -4,20 +4,32 @@ package integration
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 )
 
+const liveCanaryAckValue = "I_UNDERSTAND_THIS_TOUCHES_A_REAL_PROTON_ACCOUNT"
+
 // requireRealE2EPrereqs skips the test unless the environment is configured for
 // real Proton Drive E2E: pass-cli resolves real credentials and proton-drive-cli is built.
-func requireRealE2EPrereqs(t *testing.T) (root string) {
+func requireRealE2EPrereqs(t *testing.T) (root, storageBase string) {
 	t.Helper()
 
 	root = repoRoot(t)
+
+	if strings.TrimSpace(os.Getenv("PROTON_LFS_LIVE_CANARY")) != liveCanaryAckValue {
+		t.Skip("real E2E test skipped: set the exact PROTON_LFS_LIVE_CANARY acknowledgement")
+	}
+	doctorArgs := strings.TrimSpace(os.Getenv("LIVE_CANARY_DOCTOR_ARGS"))
+	if doctorArgs == "" {
+		t.Skip("real E2E test skipped: LIVE_CANARY_DOCTOR_ARGS is required")
+	}
 
 	// Verify proton-drive-cli is built.
 	driveCliBin := strings.TrimSpace(os.Getenv("PROTON_DRIVE_CLI_BIN"))
@@ -28,35 +40,73 @@ func requireRealE2EPrereqs(t *testing.T) (root string) {
 		t.Skipf("real E2E test skipped: proton-drive-cli not built at %s (run: make build-drive-cli)", driveCliBin)
 	}
 
+	requireLiveCanaryDoctor(t, driveCliBin, doctorArgs)
+
 	// Verify pass-cli can resolve real credentials (will skip if not logged in).
 	sdkResolvedCredentials(t)
 
-	return root
+	storageBase = strings.Trim(strings.TrimSpace(os.Getenv("PROTON_LFS_CANARY_STORAGE_BASE")), "/")
+	if storageBase == "" {
+		storageBase = fmt.Sprintf(
+			"LFS/canary/proton-lfs-cli/%s-%d",
+			time.Now().UTC().Format("20060102T150405Z"),
+			os.Getpid(),
+		)
+	}
+
+	return root, storageBase
+}
+
+func requireLiveCanaryDoctor(t *testing.T, driveCliBin, doctorArgs string) {
+	t.Helper()
+
+	nodeBin := strings.TrimSpace(os.Getenv("NODE_BIN"))
+	if nodeBin == "" {
+		nodeBin = "node"
+	}
+
+	// LIVE_CANARY_DOCTOR_ARGS is operator-supplied shell-style text in the
+	// Makefile path. The supported canary flags do not contain spaces, so
+	// Fields keeps the direct Go-test path simple and injection-free.
+	args := append([]string{driveCliBin, "doctor", "--json"}, strings.Fields(doctorArgs)...)
+	cmd := exec.Command(nodeBin, args...)
+	cmd.Env = os.Environ()
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Skipf("real E2E test skipped: offline doctor failed: %v [%s]", err, redactBridgeOutput(string(out)))
+	}
+
+	var report struct {
+		CanAttemptLiveCanary bool `json:"canAttemptLiveCanary"`
+		AuthState            struct {
+			State string `json:"state"`
+		} `json:"authState"`
+	}
+	if err := json.Unmarshal(out, &report); err != nil {
+		t.Skipf("real E2E test skipped: offline doctor returned invalid JSON: %v [%s]", err, redactBridgeOutput(string(out)))
+	}
+	if !report.CanAttemptLiveCanary {
+		t.Skipf("real E2E test skipped: offline doctor blocked live canary (authState=%s)", report.AuthState.State)
+	}
 }
 
 // TestE2ERealProtonDrivePipeline exercises the full Git LFS pipeline through
-// Proton Drive: commit a test image, push via the adapter, clone into a fresh
-// repo, pull, and verify byte-for-byte fidelity.
+// Proton Drive: commit one tiny canary object, push via the adapter, clone into
+// a fresh repo, pull, verify byte-for-byte fidelity, and attempt cleanup.
 //
 // Prerequisites:
-//   - pass-cli logged in with valid Proton credentials
+//   - PROTON_LFS_LIVE_CANARY is set to the exact acknowledgement
+//   - LIVE_CANARY_DOCTOR_ARGS is set and make live-canary-preflight passes
+//   - pass-cli logged in with disposable Proton credentials
 //   - proton-drive-cli built (make build-drive-cli)
-//   - Proton Drive has a top-level folder named "LFS"
 func TestE2ERealProtonDrivePipeline(t *testing.T) {
-	root := requireRealE2EPrereqs(t)
+	root, storageBase := requireRealE2EPrereqs(t)
 
-	// Read the test image and append a timestamp nonce to create unique content.
-	// This avoids "file already exists" errors on Proton Drive when re-running.
-	testImagePath := filepath.Join(root, "tests", "testdata", "test-image.png")
-	imageBytes, err := os.ReadFile(testImagePath)
-	if err != nil {
-		t.Fatalf("failed to read test image: %v", err)
-	}
-	if len(imageBytes) == 0 {
-		t.Fatal("test image is empty")
-	}
-	nonce := []byte(fmt.Sprintf("\n# e2e-pipeline-nonce:%d", time.Now().UnixNano()))
-	originalBytes := append(imageBytes, nonce...)
+	originalBytes := []byte(fmt.Sprintf(
+		"proton-lfs-cli-live-canary\ncreated=%s\nnonce=%d\n",
+		time.Now().UTC().Format(time.RFC3339),
+		time.Now().UnixNano(),
+	))
 
 	// Build adapter.
 	adapterPath := buildAdapter(t, root)
@@ -76,7 +126,8 @@ func TestE2ERealProtonDrivePipeline(t *testing.T) {
 	driveCliBin := sdkDriveCliBin(t, root)
 
 	// Build credential env.
-	sdkEnv := sdkCredentialEnv(t, env)
+	sdkEnv := append(sdkCredentialEnv(t, env), "LFS_STORAGE_BASE="+storageBase)
+	t.Logf("real canary storage base: %s", storageBase)
 
 	// Set up source repository.
 	base := t.TempDir()
@@ -98,17 +149,16 @@ func TestE2ERealProtonDrivePipeline(t *testing.T) {
 	mustRun(t, repoPath, sdkEnv, gitLFSBin, "install", "--local")
 	configureSDKCustomTransfer(t, repoPath, sdkEnv, gitBin, adapterPath, driveCliBin)
 
-	// Track PNG files with LFS.
-	mustRun(t, repoPath, sdkEnv, gitLFSBin, "track", "*.png")
+	// Track only the one tiny canary object with LFS.
+	mustRun(t, repoPath, sdkEnv, gitLFSBin, "track", "*.canary")
 
-	// Copy test image into the repo.
-	imageDest := filepath.Join(repoPath, "test-image.png")
-	if err := os.WriteFile(imageDest, originalBytes, 0o644); err != nil {
-		t.Fatalf("failed to write test image to repo: %v", err)
+	canaryDest := filepath.Join(repoPath, "proton-lfs.canary")
+	if err := os.WriteFile(canaryDest, originalBytes, 0o600); err != nil {
+		t.Fatalf("failed to write canary object to repo: %v", err)
 	}
 
-	mustRun(t, repoPath, sdkEnv, gitBin, "add", ".gitattributes", "test-image.png")
-	mustRun(t, repoPath, sdkEnv, gitBin, "commit", "-m", "add test image via LFS")
+	mustRun(t, repoPath, sdkEnv, gitBin, "add", ".gitattributes", "proton-lfs.canary")
+	mustRun(t, repoPath, sdkEnv, gitBin, "commit", "-m", "add tiny live canary via LFS")
 
 	// Verify LFS is tracking the file.
 	lsFilesOutput := mustRun(t, repoPath, sdkEnv, gitLFSBin, "ls-files", "-l")
@@ -120,6 +170,7 @@ func TestE2ERealProtonDrivePipeline(t *testing.T) {
 	if len(oid) != 64 {
 		t.Fatalf("expected 64-char oid, got: %q", oid)
 	}
+	defer cleanupRealCanaryObject(t, sdkEnv, driveCliBin, oid, storageBase)
 
 	// Push commits and LFS objects to Proton Drive.
 	mustRun(t, repoPath, sdkEnv, gitBin, "push", "origin", "main")
@@ -128,7 +179,7 @@ func TestE2ERealProtonDrivePipeline(t *testing.T) {
 		t.Fatalf("unexpected error in lfs push output:\n%s", lfsPushOutput)
 	}
 
-	t.Logf("upload complete: OID=%s, size=%d bytes", oid, len(originalBytes))
+	t.Logf("upload complete: oid-prefix=%s, size=%d bytes", oid[:12], len(originalBytes))
 
 	// Clone into a fresh directory, skipping LFS smudge.
 	cloneBase := t.TempDir()
@@ -147,14 +198,75 @@ func TestE2ERealProtonDrivePipeline(t *testing.T) {
 	}
 
 	// Verify downloaded content matches the original byte-for-byte.
-	downloadedPath := filepath.Join(clonePath, "test-image.png")
+	downloadedPath := filepath.Join(clonePath, "proton-lfs.canary")
 	downloadedBytes, err := os.ReadFile(downloadedPath)
 	if err != nil {
-		t.Fatalf("failed to read pulled test image: %v", err)
+		t.Fatalf("failed to read pulled canary object: %v", err)
 	}
 	if !bytes.Equal(downloadedBytes, originalBytes) {
 		t.Fatalf("content mismatch: original=%d bytes, downloaded=%d bytes", len(originalBytes), len(downloadedBytes))
 	}
 
-	t.Logf("E2E real pipeline: upload OID=%s, download verified, %d bytes match", oid, len(originalBytes))
+	t.Logf("E2E real pipeline: oid-prefix=%s, download verified, %d bytes match", oid[:12], len(originalBytes))
+}
+
+func cleanupRealCanaryObject(t *testing.T, env []string, driveCliBin, oid, storageBase string) {
+	t.Helper()
+
+	nodeBin := strings.TrimSpace(os.Getenv("NODE_BIN"))
+	if nodeBin == "" {
+		nodeBin = "node"
+	}
+	if _, err := exec.LookPath(nodeBin); err != nil && !strings.Contains(nodeBin, string(os.PathSeparator)) {
+		t.Logf("canary cleanup skipped: node binary unavailable: %v", err)
+		return
+	}
+
+	request := map[string]any{
+		"oid":                oid,
+		"storageBase":        storageBase,
+		"credentialProvider": envValue(env, "PROTON_CREDENTIAL_PROVIDER", "pass-cli"),
+		"allowLogin":         false,
+	}
+	if provider := envValue(env, "PROTON_DATA_CREDENTIAL_PROVIDER", ""); provider != "" {
+		request["dataCredentialProvider"] = provider
+		request["dataCredentialHost"] = envValue(env, "PROTON_DATA_CREDENTIAL_HOST", "proton-data.proton-lfs-cli.local")
+	}
+
+	body, err := json.Marshal(request)
+	if err != nil {
+		t.Logf("canary cleanup skipped: request marshal failed: %v", err)
+		return
+	}
+
+	cmd := exec.Command(nodeBin, driveCliBin, "bridge", "delete")
+	cmd.Env = env
+	cmd.Stdin = bytes.NewReader(body)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Logf("canary cleanup warning: oid-prefix=%s delete failed: %v [%s]", oid[:12], err, redactBridgeOutput(string(out)))
+		return
+	}
+	t.Logf("canary cleanup attempted: oid-prefix=%s", oid[:12])
+}
+
+func envValue(env []string, key, fallback string) string {
+	prefix := key + "="
+	for i := len(env) - 1; i >= 0; i-- {
+		if strings.HasPrefix(env[i], prefix) {
+			return strings.TrimSpace(strings.TrimPrefix(env[i], prefix))
+		}
+	}
+	return fallback
+}
+
+func redactBridgeOutput(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return ""
+	}
+	if len(trimmed) > 240 {
+		trimmed = trimmed[:240] + "...[truncated]"
+	}
+	return strings.ReplaceAll(trimmed, "\n", " ")
 }
