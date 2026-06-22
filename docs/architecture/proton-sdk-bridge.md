@@ -40,8 +40,10 @@ command-specific parser.
 - `delete`: Delete a file by OID.
 - `list`: List files in a Proton Drive folder.
 - `refresh`: Refresh an existing session token.
-- `batch-exists`: Check multiple OIDs.
-- `batch-delete`: Delete multiple OIDs.
+- `batch-exists`: Check multiple OIDs. Internal helper only; not used by the
+  Git LFS custom transfer loop.
+- `batch-delete`: Delete multiple OIDs. Internal cleanup/maintenance helper
+  only; not used by the Git LFS custom transfer loop.
 
 ## Security Considerations
 

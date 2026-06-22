@@ -491,6 +491,8 @@ func (bc *BridgeClient) Exists(creds OperationCredentials, oid string) (bool, er
 }
 
 // BatchExists runs `bridge batch-exists` for multiple OIDs.
+// It is an internal maintenance/helper surface, not part of the Git LFS custom
+// transfer loop, which remains single-object per protocol message.
 func (bc *BridgeClient) BatchExists(creds OperationCredentials, oids []string) (map[string]bool, error) {
 	req := buildCredentials(creds, bc.storageBase, bc.appVersion, false)
 	req["oids"] = oids
@@ -502,6 +504,8 @@ func (bc *BridgeClient) BatchExists(creds OperationCredentials, oids []string) (
 }
 
 // BatchDelete runs `bridge batch-delete` for multiple OIDs.
+// It is an internal maintenance/helper surface, not part of the Git LFS custom
+// transfer loop, which remains single-object per protocol message.
 func (bc *BridgeClient) BatchDelete(creds OperationCredentials, oids []string) (map[string]bool, error) {
 	req := buildCredentials(creds, bc.storageBase, bc.appVersion, false)
 	req["oids"] = oids

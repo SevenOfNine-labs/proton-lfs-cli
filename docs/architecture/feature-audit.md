@@ -78,8 +78,8 @@ provider selectors and operation metadata to `proton-drive-cli`.
 | `Upload` | `upload` | `oid`, local `path`, selectors, `allowLogin=false`. | No | Beta |
 | `Download` | `download` | `oid`, `outputPath`, selectors, `allowLogin=false`. | No | Beta |
 | `Exists` | `exists` | `oid`, selectors, `allowLogin=false`. | No | Beta |
-| `BatchExists` | `batch-exists` | `oids`, selectors, `allowLogin=false`. | No | Beta; not yet used by main adapter loop. |
-| `BatchDelete` | `batch-delete` | `oids`, selectors, `allowLogin=false`. | No | Beta; helper method only. |
+| `BatchExists` | `batch-exists` | `oids`, selectors, `allowLogin=false`. | No | Internal helper only; not used by the Git LFS transfer loop. |
+| `BatchDelete` | `batch-delete` | `oids`, selectors, `allowLogin=false`. | No | Internal helper only; cleanup/maintenance surface. |
 | `Authenticate` | `auth` | Selectors and storage base. | Yes if drive-cli resolves credentials. | Legacy/helper; transfer path now gates with `auth-state`. |
 
 ### Auth-State Gate
@@ -162,9 +162,9 @@ The tray binary also provides a small CLI when launched with arguments.
 | No default real Proton transfer canary. | Mocked bridge can miss SDK/API changes. | Keep guarded; run with disposable account only after offline doctor and explicit acknowledgement. |
 | No formal JSON schema files for bridge requests/responses. | Type drift between Go and TypeScript could sneak in. | Add checked-in JSON schemas or generated contract tests comparing both sides. |
 | Root docs index still references some legacy/missing docs. | New contributors can follow stale paths. | Do a separate docs cleanup pass to align `docs/README.md` with current files. |
-| `BatchExists`/`BatchDelete` methods are not used by main adapter flow. | Untested production value; possible dead surface. | Either wire into batch optimization or mark as internal helper only. |
+| `BatchExists`/`BatchDelete` are internal helper surfaces. | They can be mistaken for production Git LFS protocol features. | Keep them tested as bridge maintenance helpers and out of the transfer loop. |
 | Adapter progress is post-transfer, not streaming. | Poor UX for large objects and timeouts. | Add streaming progress from backend operations where SDK supports it. |
-| Resume/retry is not implemented. | Interrupted transfers restart. | Define retry policy and safe idempotency semantics. |
+| Resume is not implemented. | Interrupted transfers restart after transient retry attempts are exhausted. | Keep retry/idempotency semantics explicit and add resume only if SDK support is available. |
 | Tray GUI/manual platform behavior lacks automation. | Menu/status/autostart regressions may escape unit tests. | Add release checklist and, if feasible, platform smoke automation. |
 | Real SDK integration is opt-in but easy to confuse with mocked E2E. | Accidental auth attempts could create account risk. | Keep `PROTON_LFS_RUN_SDK_INTEGRATION` and `PROTON_LFS_LIVE_CANARY` gates; document them prominently. |
 | Status/error taxonomy is split between drive-cli and root. | New errors may be misclassified. | Add a shared contract table/schema and tests for every bridge `ErrorCode`. |
