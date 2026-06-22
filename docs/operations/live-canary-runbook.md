@@ -153,6 +153,8 @@ LIVE_BROWSER_FORK_LOGIN_ARGS="--key-password-provider pass-cli" \
 Stop after this target. The target parses the offline doctor JSON and requires
 `authMode=browser-fork`, `state=ready`, and `canAttemptTransfer=true`. Only run
 `make test-e2e-real` later, in a separate command, after recording that result.
+The browser-fork helper rejects any `LIVE_BROWSER_FORK_LOGIN_ARGS` value that
+tries to set `--auth-mode`; the canary always forces browser-fork itself.
 
 ## Real E2E Guard
 

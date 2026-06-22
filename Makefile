@@ -302,23 +302,7 @@ check-browser-fork-canary-args: ## Require explicit browser-fork login args
 	fi
 
 browser-fork-canary: check-live-canary-ack check-live-canary-doctor-args check-browser-fork-canary-args live-canary-preflight ## One guarded browser-fork login canary; no transfer
-	@echo "Running guarded browser-fork canary."
-	@echo "This runs exactly one browser-fork login command, then local inspection only."
-	$(NODE) "$(PWD)/$(DRIVE_CLI_DIR)/dist/index.js" login --auth-mode browser-fork $$LIVE_BROWSER_FORK_LOGIN_ARGS
-	@echo "Inspecting saved local session..."
-	$(NODE) "$(PWD)/$(DRIVE_CLI_DIR)/dist/index.js" status
-	@echo "Running offline doctor after browser-fork login..."
-	@if ! DOCTOR_OUTPUT="$$( $(NODE) "$(PWD)/$(DRIVE_CLI_DIR)/dist/index.js" doctor --json $$LIVE_CANARY_DOCTOR_ARGS )"; then \
-		echo "$$DOCTOR_OUTPUT"; \
-		echo "Offline doctor failed after browser-fork login."; \
-		exit 2; \
-	fi; \
-	echo "$$DOCTOR_OUTPUT"; \
-	if ! printf '%s\n' "$$DOCTOR_OUTPUT" | $(GO) run ./scripts/check_doctor_readiness.go --require-auth-mode browser-fork --require-state ready --require-transfer; then \
-		echo "Offline doctor did not mark transfers ready after browser-fork login."; \
-		exit 2; \
-	fi
-	@echo "Browser-fork canary inspection passed. No transfer was attempted."
+	@NODE_BIN="$(NODE)" GO_BIN="$(GO)" DRIVE_CLI_BIN="$(PWD)/$(DRIVE_CLI_DIR)/dist/index.js" ./scripts/browser-fork-canary.sh
 
 test-e2e-real: check-live-canary-ack check-live-canary-doctor-args live-canary-preflight ## Real Proton Drive E2E (requires explicit live canary acknowledgement)
 	@mkdir -p $(GO_CACHE_DIR)

@@ -128,7 +128,8 @@ doctor output.
 `LIVE_BROWSER_FORK_LOGIN_ARGS`, runs one `login --auth-mode browser-fork`, then
 only inspects local status and offline doctor readiness. Its post-login doctor
 inspection requires `authMode=browser-fork`, `state=ready`, and
-`canAttemptTransfer=true`.
+`canAttemptTransfer=true`, and its script tests prove that no transfer command
+is attempted in this path.
 
 ## High-Value Missing Tests
 

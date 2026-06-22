@@ -88,4 +88,6 @@ make test-integration-sdk
 Real Proton canaries remain disabled by default. The guarded path starts with
 `make live-canary-preflight`, requires `LIVE_CANARY_DOCTOR_ARGS`, and refuses
 to run unless `PROTON_LFS_LIVE_CANARY` matches the exact acknowledgement in the
-Makefile.
+Makefile. The separate `make browser-fork-canary` path runs one forced
+browser-fork login only, then local status and offline doctor inspection before
+stopping without a transfer.
