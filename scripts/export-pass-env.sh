@@ -28,6 +28,10 @@ SKIP_CHECK="false"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --pass-cli)
+      if [[ $# -lt 2 || "${2:-}" == --* ]]; then
+        echo "--pass-cli requires a binary path" >&2
+        exit 2
+      fi
       PASS_CLI_BIN="$2"
       shift 2
       ;;

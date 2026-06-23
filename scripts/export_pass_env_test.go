@@ -58,6 +58,16 @@ func TestExportPassEnvRejectsLegacyAccountRefs(t *testing.T) {
 	}
 }
 
+func TestExportPassEnvRejectsMissingPassCliValue(t *testing.T) {
+	out, err := runExportPassEnv(t, "--pass-cli")
+	if err == nil {
+		t.Fatalf("expected missing pass-cli value to fail:\n%s", out)
+	}
+	if !strings.Contains(out, "--pass-cli requires a binary path") {
+		t.Fatalf("expected missing pass-cli value error, got:\n%s", out)
+	}
+}
+
 func runExportPassEnv(t *testing.T, args ...string) (string, error) {
 	t.Helper()
 
