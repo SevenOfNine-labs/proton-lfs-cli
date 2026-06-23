@@ -54,7 +54,7 @@ The adapter is invoked by Git LFS, not directly by end users.
 | `--backend local\|sdk` | `PROTON_LFS_BACKEND` | Select local store or Proton SDK bridge backend. | Stable |
 | `--local-store-dir` | `PROTON_LFS_LOCAL_STORE_DIR` | Local object store path. | Stable |
 | `--drive-cli-bin` | `PROTON_DRIVE_CLI_BIN` | Path to `proton-drive-cli` entry point. | Stable |
-| `--credential-provider` | `PROTON_CREDENTIAL_PROVIDER` | Login credential provider selector passed to drive-cli. | Stable |
+| `--credential-provider` | `PROTON_CREDENTIAL_PROVIDER` | Legacy compatibility option; ignored by transfer bridge requests. | Deprecated/no-op |
 | `--data-credential-provider` | `PROTON_DATA_CREDENTIAL_PROVIDER` | Optional mailbox/data password provider selector. | Stable |
 | `--data-credential-host` | `PROTON_DATA_CREDENTIAL_HOST` | Optional mailbox/data password host/key. | Stable |
 | `--allow-mock-transfers` | `ADAPTER_ALLOW_MOCK_TRANSFERS` | Legacy simulation mode for tests only. | Guarded |
@@ -67,8 +67,10 @@ The adapter is invoked by Git LFS, not directly by end users.
 
 ## SDK Bridge Boundary
 
-The root adapter never resolves Proton account passwords itself. It sends
-provider selectors and operation metadata to `proton-drive-cli`.
+The root adapter never resolves Proton account passwords itself and never sends
+account login selectors to `proton-drive-cli` transfer commands. Account login
+must already exist as a browser-fork session. The adapter only sends local
+mailbox/data-password selectors and operation metadata.
 proton-drive-cli owns the per-command request-field matrix in
 `schemas/bridge/v1/request-field-rules.json`; root contract tests verify every
 root bridge request shape remains allowed and includes newly required fields.
@@ -77,14 +79,13 @@ root bridge request shape remains allowed and includes newly required fields.
 
 | Root method | Bridge command | Request additions | Login allowed? | Status |
 | --- | --- | --- | --- | --- |
-| `AuthState` | `auth-state` | Credential/data provider selectors, storage base, app version. | No; local-only. | Stable |
-| `InitLFSStorage` | `init` | Storage base, selectors, `allowLogin=false`. | No | Beta |
-| `Upload` | `upload` | `oid`, local `path`, selectors, `allowLogin=false`. | No | Beta |
-| `Download` | `download` | `oid`, `outputPath`, selectors, `allowLogin=false`. | No | Beta |
-| `Exists` | `exists` | `oid`, selectors, `allowLogin=false`. | No | Beta; upload dedup fails closed on non-404 errors. |
-| `batchExists` | `batch-exists` | `oids`, selectors, `allowLogin=false`. | No | Private maintenance helper only; not accepted as a Git LFS transfer event. |
-| `batchDelete` | `batch-delete` | `oids`, selectors, `allowLogin=false`. | No | Private cleanup/maintenance helper only; not accepted as a Git LFS transfer event. |
-| `Authenticate` | `auth` | Selectors and storage base. | Yes if drive-cli resolves credentials. | Legacy/helper; transfer path now gates with `auth-state`. |
+| `AuthState` | `auth-state` | Data provider selectors, storage base, app version. | No; local-only. | Stable |
+| `InitLFSStorage` | `init` | Storage base and optional data selectors. | No | Beta |
+| `Upload` | `upload` | `oid`, local `path`, storage base, optional data selectors. | No | Beta |
+| `Download` | `download` | `oid`, `outputPath`, storage base, optional data selectors. | No | Beta |
+| `Exists` | `exists` | `oid`, storage base, optional data selectors. | No | Beta; upload dedup fails closed on non-404 errors. |
+| `batchExists` | `batch-exists` | `oids`, storage base, optional data selectors. | No | Private maintenance helper only; not accepted as a Git LFS transfer event. |
+| `batchDelete` | `batch-delete` | `oids`, storage base, optional data selectors. | No | Private cleanup/maintenance helper only; not accepted as a Git LFS transfer event. |
 
 ### Auth-State Gate
 
@@ -94,7 +95,7 @@ proceed only when the state is `ready`.
 | Bridge state | Root classification | Transfer behavior |
 | --- | --- | --- |
 | `ready` | OK | Continue to `init`, upload/download. |
-| `needs_login`, `login_available` | `auth_required` 401 | Refuse transfer; user must login outside Git LFS transfer. |
+| `needs_login` | `auth_required` 401 | Refuse transfer; user must login outside Git LFS transfer. |
 | `needs_data_password` | `data_password_required` 401 | Refuse transfer; configure mailbox/data provider or explicit safe source. |
 | `needs_key_password` | `key_password_required` 401 | Refuse transfer; rerun browser login or provide explicit data source. |
 | `session_expired` | `auth_required` 401 | Refuse transfer; refresh/login outside transfer. |
@@ -108,12 +109,12 @@ The tray binary also provides a small CLI when launched with arguments.
 
 | Command/action | Behavior | Status | Tests |
 | --- | --- | --- | --- |
-| `proton-lfs-cli login` | Verify stored credentials, prompt/store if missing, run `proton-drive-cli login --credential-provider`. | Beta | `cmd/tray/cli_test.go`. |
+| `proton-lfs-cli login` | Run browser-fork-only `proton-drive-cli login --key-password-provider <provider>`. | Beta | `cmd/tray/cli_test.go`. |
 | `proton-lfs-cli logout` | Delegate to `proton-drive-cli logout`. | Beta | `cmd/tray/cli_test.go`. |
 | `proton-lfs-cli register` | Configure global Git LFS custom transfer for Proton. | Stable | `cmd/tray/cli_test.go`, `custom_transfer_args_test.go`. |
 | `proton-lfs-cli status` | Print session, LFS registration, provider, transfer status, and retryability/temporary failure hints. | Stable | `cmd/tray/status_test.go`, `cmd/tray/cli_test.go`. |
-| `proton-lfs-cli config [provider]` | Show or set preferred credential provider. | Stable | `cmd/tray/cli_test.go`. |
-| Tray Connect | Verify credentials, open terminal for setup if missing, otherwise login silently. | Beta | `cmd/tray/cli_test.go`, `cmd/tray/setup_test.go`. |
+| `proton-lfs-cli config [provider]` | Show or set preferred browser-fork key-password provider. | Stable | `cmd/tray/cli_test.go`. |
+| Tray Connect | Run browser-fork-only login with the configured key-password provider. | Beta | `cmd/tray/cli_test.go`, `cmd/tray/setup_test.go`. |
 | Tray status watcher | Poll transfer status and session/LFS registration; display retryability/temporary failure hints; refresh session every 15 minutes. | Beta | `cmd/tray/status_test.go`. |
 | Autostart | macOS LaunchAgent and Linux desktop autostart. | Beta | `cmd/tray/setup_test.go`; packaging/manual validation still needed. |
 

@@ -234,10 +234,8 @@ func cleanupRealCanaryObject(t *testing.T, env []string, driveCliBin, oid, stora
 	}
 
 	request := map[string]any{
-		"oid":                oid,
-		"storageBase":        storageBase,
-		"credentialProvider": envValue(env, "PROTON_CREDENTIAL_PROVIDER", "pass-cli"),
-		"allowLogin":         false,
+		"oid":         oid,
+		"storageBase": storageBase,
 	}
 	if provider := envValue(env, "PROTON_DATA_CREDENTIAL_PROVIDER", ""); provider != "" {
 		request["dataCredentialProvider"] = provider

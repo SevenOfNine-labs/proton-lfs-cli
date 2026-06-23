@@ -62,22 +62,9 @@ function storagePath(oid) {
   return path.join(STORAGE_DIR, prefix, second, String(oid));
 }
 
-if (command === 'auth') {
-  if (request.username === 'bad-user') {
-    write({ ok: false, code: 401, error: 'invalid credentials' }, 1);
-  }
-  write({
-    ok: true,
-    payload: {
-      authenticated: true,
-      username: request.username
-    }
-  });
-}
-
 if (command === 'auth-state') {
   const state = process.env.MOCK_BRIDGE_AUTH_STATE || 'ready';
-  const hasSession = state !== 'needs_login' && state !== 'login_available';
+  const hasSession = state !== 'needs_login';
   const sessionValid = state === 'ready' || state === 'needs_data_password' || state === 'needs_key_password';
   const keyPasswordPersisted = process.env.MOCK_BRIDGE_KEY_PASSWORD_PERSISTED === 'true' || state === 'needs_key_password';
   const keyPasswordAvailable =
@@ -97,13 +84,9 @@ if (command === 'auth-state') {
       keyPasswordAvailable,
       keyPasswordProvider: process.env.MOCK_BRIDGE_KEY_PASSWORD_PROVIDER || (keyPasswordPersisted ? 'git-credential' : undefined),
       keyPasswordHost: process.env.MOCK_BRIDGE_KEY_PASSWORD_HOST || (keyPasswordPersisted ? 'proton-drive-key.proton-lfs-cli.local' : undefined),
-      usernamePresent: false,
-      hasExplicitLoginPassword: false,
       hasExplicitDataPassword: Boolean(request.dataPassword),
-      loginCredentialProvider: request.credentialProvider,
       dataCredentialProvider: request.dataCredentialProvider,
       dataCredentialHost: request.dataCredentialHost,
-      allowLogin: Boolean(request.credentialProvider),
       willAttemptNetwork: false,
       errors: [],
       actions: []

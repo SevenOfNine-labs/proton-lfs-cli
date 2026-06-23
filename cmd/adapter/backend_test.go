@@ -23,7 +23,7 @@ func TestDriveCLIBackendRoundTrip(t *testing.T) {
 
 	// Use exists=false so upload doesn't skip via dedup
 	bc := helperBridgeClient(t, "MOCK_BRIDGE_EXISTS_RESULT=false", "MOCK_BRIDGE_DOWNLOAD_CONTENT="+string(payload))
-	backend := NewDriveCLIBackend(bc, CredentialProviderPassCLI)
+	backend := NewDriveCLIBackend(bc)
 	session := &Session{Initialized: true, CreatedAt: time.Now()}
 
 	// Initialize (offline auth-state + init)
@@ -67,7 +67,7 @@ func TestDriveCLIBackendRoundTrip(t *testing.T) {
 
 func TestDriveCLIBackendInitializeWithEmptyProvider(t *testing.T) {
 	bc := helperBridgeClient(t)
-	backend := NewDriveCLIBackend(bc, "")
+	backend := NewDriveCLIBackend(bc)
 	session := &Session{Initialized: true, CreatedAt: time.Now()}
 
 	// With empty provider, a ready local session can initialize without
@@ -81,7 +81,7 @@ func TestDriveCLIBackendInitializeWithEmptyProvider(t *testing.T) {
 func TestDriveCLIBackendInitializeUsesOfflineGateBeforeInit(t *testing.T) {
 	logPath := filepath.Join(t.TempDir(), "bridge-commands.log")
 	bc := helperBridgeClient(t, "MOCK_BRIDGE_COMMAND_LOG="+logPath)
-	backend := NewDriveCLIBackend(bc, CredentialProviderPassCLI)
+	backend := NewDriveCLIBackend(bc)
 	session := &Session{Initialized: true, CreatedAt: time.Now()}
 
 	if err := backend.Initialize(session); err != nil {
@@ -94,8 +94,11 @@ func TestDriveCLIBackendInitializeUsesOfflineGateBeforeInit(t *testing.T) {
 	if _, ok := commands[0].Request["allowLogin"]; ok {
 		t.Fatalf("auth-state request should not include allowLogin, got %v", commands[0].Request)
 	}
-	if commands[1].Request["allowLogin"] != false {
-		t.Fatalf("init request allowLogin = %v, want false", commands[1].Request["allowLogin"])
+	if _, ok := commands[1].Request["allowLogin"]; ok {
+		t.Fatalf("init request should not include allowLogin, got %v", commands[1].Request)
+	}
+	if _, ok := commands[1].Request["credentialProvider"]; ok {
+		t.Fatalf("init request should not include credentialProvider, got %v", commands[1].Request)
 	}
 }
 
@@ -105,7 +108,6 @@ func TestDriveCLIBackendInitializeBlocksAllNonReadyStatesBeforeInitOrAuth(t *tes
 		code      int
 		errorCode ErrorCode
 	}{
-		{state: "login_available", code: 401, errorCode: ErrCodeAuthRequired},
 		{state: "needs_login", code: 401, errorCode: ErrCodeAuthRequired},
 		{state: "needs_data_password", code: 401, errorCode: ErrCodeDataPasswordRequired},
 		{state: "needs_key_password", code: 401, errorCode: ErrCodeKeyPasswordRequired},
@@ -121,7 +123,7 @@ func TestDriveCLIBackendInitializeBlocksAllNonReadyStatesBeforeInitOrAuth(t *tes
 				"MOCK_BRIDGE_AUTH_STATE="+tc.state,
 				"MOCK_BRIDGE_COMMAND_LOG="+logPath,
 			)
-			backend := NewDriveCLIBackend(bc, CredentialProviderPassCLI)
+			backend := NewDriveCLIBackend(bc)
 			session := &Session{Initialized: true, CreatedAt: time.Now()}
 
 			err := backend.Initialize(session)
@@ -149,7 +151,7 @@ func TestDriveCLIBackendUploadMapsNotFoundError(t *testing.T) {
 		"MOCK_BRIDGE_ERROR=not found",
 		"MOCK_BRIDGE_ERROR_CODE=404",
 	)
-	backend := NewDriveCLIBackend(bc, CredentialProviderPassCLI)
+	backend := NewDriveCLIBackend(bc)
 	backend.authenticated = true
 
 	session := &Session{Initialized: true, Token: "direct-bridge"}
@@ -166,7 +168,7 @@ func TestDriveCLIBackendDownloadMapsAuthErrorAndCleansOutput(t *testing.T) {
 		"MOCK_BRIDGE_ERROR=unauthorized",
 		"MOCK_BRIDGE_ERROR_CODE=401",
 	)
-	backend := NewDriveCLIBackend(bc, CredentialProviderPassCLI)
+	backend := NewDriveCLIBackend(bc)
 	backend.authenticated = true
 
 	session := &Session{Initialized: true, Token: "direct-bridge"}
@@ -190,7 +192,7 @@ func TestDriveCLIBackendUploadDedup(t *testing.T) {
 
 	// Mock bridge says exists=true, so upload should be skipped
 	bc := helperBridgeClient(t)
-	backend := NewDriveCLIBackend(bc, CredentialProviderPassCLI)
+	backend := NewDriveCLIBackend(bc)
 	backend.authenticated = true
 
 	session := &Session{Initialized: true, Token: "direct-bridge"}
@@ -221,7 +223,7 @@ func TestDriveCLIBackendUploadFailsClosedWhenExistsCheckFails(t *testing.T) {
 		"MOCK_BRIDGE_ERROR=drive service is unavailable",
 		"MOCK_BRIDGE_ERROR_CODE=503",
 	)
-	backend := NewDriveCLIBackend(bc, CredentialProviderPassCLI)
+	backend := NewDriveCLIBackend(bc)
 	backend.authenticated = true
 
 	session := &Session{Initialized: true, Token: "direct-bridge"}
@@ -245,8 +247,7 @@ func TestDriveCLIBackendUploadFailsClosedWhenExistsCheckFails(t *testing.T) {
 func TestDriveCLIBackendGitCredentialMode(t *testing.T) {
 	bc := helperBridgeClient(t)
 	backend := &DriveCLIBackend{
-		bridge:             bc,
-		credentialProvider: CredentialProviderGitCredential,
+		bridge: bc,
 	}
 
 	session := &Session{Initialized: true, CreatedAt: time.Now()}
@@ -379,7 +380,7 @@ func TestMapBridgeErrorNil(t *testing.T) {
 
 func TestDriveCLIBackendUploadNotAuthenticated(t *testing.T) {
 	bc := helperBridgeClient(t)
-	backend := NewDriveCLIBackend(bc, CredentialProviderPassCLI)
+	backend := NewDriveCLIBackend(bc)
 	// NOT authenticated
 
 	session := &Session{Initialized: true, Token: "direct-bridge"}
@@ -392,7 +393,7 @@ func TestDriveCLIBackendUploadNotAuthenticated(t *testing.T) {
 
 func TestDriveCLIBackendDownloadNotAuthenticated(t *testing.T) {
 	bc := helperBridgeClient(t)
-	backend := NewDriveCLIBackend(bc, CredentialProviderPassCLI)
+	backend := NewDriveCLIBackend(bc)
 	// NOT authenticated
 
 	session := &Session{Initialized: true, Token: "direct-bridge"}
@@ -408,7 +409,7 @@ func TestDriveCLIBackendInitializeCaptchaError(t *testing.T) {
 		"MOCK_BRIDGE_ERROR=captcha verification required",
 		"MOCK_BRIDGE_ERROR_CODE=407",
 	)
-	backend := NewDriveCLIBackend(bc, CredentialProviderPassCLI)
+	backend := NewDriveCLIBackend(bc)
 	session := &Session{Initialized: true, CreatedAt: time.Now()}
 	err := backend.Initialize(session)
 	code, _ := backendErrorDetails(err)
@@ -422,7 +423,7 @@ func TestDriveCLIBackendInitializeRateLimitError(t *testing.T) {
 		"MOCK_BRIDGE_ERROR=rate limited by proton api",
 		"MOCK_BRIDGE_ERROR_CODE=429",
 	)
-	backend := NewDriveCLIBackend(bc, CredentialProviderPassCLI)
+	backend := NewDriveCLIBackend(bc)
 	session := &Session{Initialized: true, CreatedAt: time.Now()}
 	err := backend.Initialize(session)
 	code, _ := backendErrorDetails(err)
@@ -431,9 +432,9 @@ func TestDriveCLIBackendInitializeRateLimitError(t *testing.T) {
 	}
 }
 
-func TestDriveCLIBackendInitializeBlocksLoginAvailableState(t *testing.T) {
-	bc := helperBridgeClient(t, "MOCK_BRIDGE_AUTH_STATE=login_available")
-	backend := NewDriveCLIBackend(bc, CredentialProviderPassCLI)
+func TestDriveCLIBackendInitializeBlocksNeedsLoginState(t *testing.T) {
+	bc := helperBridgeClient(t, "MOCK_BRIDGE_AUTH_STATE=needs_login")
+	backend := NewDriveCLIBackend(bc)
 	session := &Session{Initialized: true, CreatedAt: time.Now()}
 
 	err := backend.Initialize(session)
@@ -451,7 +452,7 @@ func TestDriveCLIBackendInitializeBlocksLoginAvailableState(t *testing.T) {
 
 func TestDriveCLIBackendInitializeMapsDataPasswordState(t *testing.T) {
 	bc := helperBridgeClient(t, "MOCK_BRIDGE_AUTH_STATE=needs_data_password")
-	backend := NewDriveCLIBackend(bc, CredentialProviderPassCLI)
+	backend := NewDriveCLIBackend(bc)
 	session := &Session{Initialized: true, CreatedAt: time.Now()}
 
 	err := backend.Initialize(session)
@@ -466,7 +467,7 @@ func TestDriveCLIBackendInitializeMapsDataPasswordState(t *testing.T) {
 
 func TestDriveCLIBackendInitializeMapsKeyPasswordState(t *testing.T) {
 	bc := helperBridgeClient(t, "MOCK_BRIDGE_AUTH_STATE=needs_key_password")
-	backend := NewDriveCLIBackend(bc, CredentialProviderPassCLI)
+	backend := NewDriveCLIBackend(bc)
 	session := &Session{Initialized: true, CreatedAt: time.Now()}
 
 	err := backend.Initialize(session)

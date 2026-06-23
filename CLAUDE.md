@@ -32,9 +32,8 @@ The project has four main components:
 
 2. **System Tray App** (`cmd/tray/`): Cross-platform menu bar application
    - `main.go`: Entry point, `--version` flag, PATH augmentation for macOS
-   - `menu.go`: Menu structure, credential provider toggle, LFS registration, native notifications
-   - `connect.go`: "Connect to Proton" flow (unified for all credential providers)
-   - `credentials.go`: Credential verify helper (delegates to proton-drive-cli)
+   - `menu.go`: Menu structure, key-password provider toggle, LFS registration, native notifications
+   - `connect.go`: "Connect to Proton" browser-fork login flow
    - `cli.go`: CLI subcommand handlers (login, logout, status, config, register)
    - `status.go`: Polls status.json every 5s, updates icon/tooltip/checkmarks
    - `setup.go`: Binary discovery, autostart (macOS LaunchAgent / Linux .desktop)
@@ -101,54 +100,46 @@ The adapter supports two backends controlled by `PROTON_LFS_BACKEND`:
 
 2. **sdk**: Proton Drive integration via proton-drive-cli subprocess
    - Go adapter spawns `node proton-drive-cli bridge <command>` directly
-   - Requires Proton credentials (resolved via pass-cli or git-credential)
+   - Requires an existing browser-fork Proton Drive session
    - Configurable via `--drive-cli-bin` flag or `PROTON_DRIVE_CLI_BIN` env var
 
-## Credential Resolution
+## Browser-Fork Auth
 
-The adapter supports two credential providers controlled by `PROTON_CREDENTIAL_PROVIDER`. The Go adapter does **not** resolve credentials itself — it sends `{ "credentialProvider": "<name>" }` to proton-drive-cli, which handles all credential resolution internally.
+Account login is browser-fork-only and happens in `proton-drive-cli login`
+before Git LFS transfers. The Go adapter never sends account username/password
+fields, `credentialProvider`, or `allowLogin` to bridge transfer commands.
+`PROTON_CREDENTIAL_PROVIDER` is retained only as a legacy tray/helper
+key-password provider preference.
 
 ### pass-cli (default)
 
-`proton-drive-cli` searches all Proton Pass vaults for a login item with a `proton.me` URL.
+`proton-drive-cli` can store the browser-fork key password in Proton Pass.
 
 ```bash
-PROTON_CREDENTIAL_PROVIDER=pass-cli    # Default
+PROTON_KEY_PASSWORD_PROVIDER=pass-cli
 PROTON_PASS_CLI_BIN=pass-cli           # Binary path (respected by proton-drive-cli)
 ```
 
 **Setup:**
 ```bash
-pass-cli login                    # Authenticate with Proton Pass (browser OAuth)
-proton-drive credential store --provider pass-cli   # Or create entry manually
-proton-drive credential verify --provider pass-cli  # Verify entry exists
+pass-cli login
+proton-drive login --key-password-provider pass-cli
 ```
 
 ### git-credential
 
-Uses Git Credential Manager (GCM) to resolve credentials from macOS Keychain, Windows Credential Manager, or Linux Secret Service:
+Uses Git Credential Manager (GCM), macOS Keychain, Windows Credential Manager,
+or Linux Secret Service to store the browser-fork key password:
 
 ```bash
-PROTON_CREDENTIAL_PROVIDER=git-credential
-# Or CLI flag: --credential-provider git-credential
-```
-
-**Setup:**
-```bash
-proton-drive credential store -u your.email@proton.me
-proton-drive credential verify
-```
-
-**Standalone CLI commands** also accept `--credential-provider`:
-```bash
-proton-drive ls / --credential-provider git
-proton-drive upload ./file.pdf /Documents --credential-provider pass-cli
+PROTON_KEY_PASSWORD_PROVIDER=git-credential
+proton-drive login --key-password-provider git-credential
 ```
 
 ## proton-drive-cli Bridge
 
 The `proton-drive-cli` submodule (`submodules/proton-drive-cli/`) provides:
-- Complete SRP authentication flow (`src/auth/`)
+- Browser-fork authentication and session management (`src/auth/`)
 - Session management with token refresh
 - File upload/download with E2E encryption (`src/drive/`)
 - OpenPGP crypto operations (`src/crypto/`)
@@ -201,9 +192,9 @@ Workspace structure:
 ## Security Notes
 
 - Never commit credentials to `.env` (use `.env.example` patterns)
-- Credentials resolve via pass-cli (vault search) or git-credential (`git credential fill`)
-- Credential flow: Go adapter sends `{ credentialProvider: "<name>" }` → proton-drive-cli resolves credentials internally (never through the Go adapter)
-- Credentials are passed via stdin to subprocesses (never command-line args)
+- Account login is browser-fork-only and must happen outside Git LFS transfer commands
+- Transfer bridge requests never contain account username/password fields, `credentialProvider`, or `allowLogin`
+- Optional mailbox/data-password selectors are passed via stdin to subprocesses (never command-line args)
 - Environment allowlist filters subprocess env (only PATH, HOME, NODE_*, MOCK_BRIDGE_*, etc.)
 - OID validation: `/^[a-f0-9]{64}$/i` before subprocess spawn
 - Path traversal prevention: reject paths containing `..`

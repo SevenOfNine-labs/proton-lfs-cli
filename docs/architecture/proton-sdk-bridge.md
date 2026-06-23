@@ -5,20 +5,22 @@ Bridge implementation: the Go adapter (`cmd/adapter/bridge.go`) spawns `proton-d
 ## Architecture
 
 ```
-Go Adapter → proton-drive-cli subprocess (JSON stdin/stdout, provider selector fields) → Proton API
-                    ↓
-        pass-cli or git-credential
-    (resolved internally by proton-drive-cli)
+Go Adapter -> proton-drive-cli subprocess (JSON stdin/stdout)
+             account session must already exist from browser-fork login
 ```
 
-The adapter's `BridgeClient` spawns `proton-drive-cli bridge <command>` as a subprocess, passing JSON via stdin and reading JSON from stdout. The Go adapter sends only provider selector fields, such as `credentialProvider` and optional `dataCredentialProvider`/`dataCredentialHost` for two-password accounts. proton-drive-cli resolves actual credentials internally. Credentials are never passed via command-line arguments.
+The adapter's `BridgeClient` spawns `proton-drive-cli bridge <command>` as a
+subprocess, passing JSON via stdin and reading JSON from stdout. The Go adapter
+never sends account username/password fields, login credential selectors, or
+login permission flags. It may send optional `dataCredentialProvider` and
+`dataCredentialHost` selectors for a separate mailbox/data password unlock.
 
 ## Subprocess Communication Protocol
 
 The adapter (`cmd/adapter/bridge.go`) communicates with `proton-drive-cli` using:
 
 1. **Spawn**: `node <proton-drive-cli-path> bridge <command>`
-2. **Stdin**: JSON payload with credentials and operation parameters
+2. **Stdin**: JSON payload with local unlock selectors and operation parameters
 3. **Stdout**: JSON response envelope `{ ok: true/false, payload: {...}, error: "...", code: 400-500 }`
 4. **Stderr**: Diagnostic logs (not parsed for responses)
 
@@ -33,7 +35,6 @@ malformed `exists` and batch helper payloads instead of inferring success.
 
 ## Bridge Commands
 
-- `auth`: Authenticate with Proton API using provided credentials.
 - `auth-state`: Inspect local auth/session readiness without network or
   credential-provider resolution.
 - `init`: Ensure the configured LFS storage directory exists.
@@ -50,7 +51,8 @@ malformed `exists` and batch helper payloads instead of inferring success.
 
 ## Security Considerations
 
-- Credentials passed via stdin (not visible in `ps` output)
+- No account credentials are accepted by bridge transfer commands
+- Local unlock selectors are passed via stdin (not visible in `ps` output)
 - OID validation: strict 64-character hex regex before subprocess spawn
 - Path traversal prevention: reject paths containing `..`
 - Subprocess pool: maximum 10 concurrent operations

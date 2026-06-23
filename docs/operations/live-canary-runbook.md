@@ -27,14 +27,14 @@ make live-canary-preflight
 If a local credential-store check is needed, run:
 
 ```bash
-LIVE_CANARY_DOCTOR_ARGS="--credential-provider git-credential" \
+LIVE_CANARY_DOCTOR_ARGS="--key-password-provider git-credential" \
   make live-canary-preflight
 ```
 
 For a two-password account, include the separate data credential:
 
 ```bash
-LIVE_CANARY_DOCTOR_ARGS="--credential-provider git-credential --data-credential-provider git-credential --require-data-password" \
+LIVE_CANARY_DOCTOR_ARGS="--key-password-provider git-credential --data-credential-provider git-credential --require-data-password" \
   make live-canary-preflight
 ```
 
@@ -42,7 +42,7 @@ The preflight is offline by default. It runs root Go tests, the mocked auth
 safety gate, the doctor tests, TypeScript lint, and a build freshness check.
 When `LIVE_CANARY_DOCTOR_ARGS` is set, it also parses `doctor --json` with the
 root structured readiness checker and requires `canAttemptLiveCanary=true`.
-It does not perform Proton SRP login or token refresh.
+It does not perform Proton login, token refresh, upload, or download.
 
 ## Account Rules
 
@@ -52,8 +52,8 @@ It does not perform Proton SRP login or token refresh.
 - Do not run from CI.
 - Do not run multiple terminals, tray refresh, or LFS transfers in parallel.
 - Do not set `PROTON_DATA_PASSWORD` or `PROTON_SECOND_FACTOR_CODE`.
-- Store login and mailbox/data passwords only through `git-credential` or
-  `pass-cli`.
+- Store browser-fork key-password and mailbox/data-password entries only through
+  `git-credential` or `pass-cli`.
 
 ## Hard Stop Conditions
 
@@ -63,7 +63,7 @@ Stop immediately if any of these appear:
 - HTTP 429 or Proton anti-abuse/rate-limit code.
 - FIDO2-only challenge.
 - Unexpected second login prompt.
-- More than one SRP login attempt in logs.
+- More than one browser-fork login attempt in logs.
 - Key unlock failure.
 - Missing or wrong mailbox/data password.
 - Any log line containing a raw password, token, or TOTP code.
@@ -82,13 +82,13 @@ export PROTON_LFS_LIVE_CANARY=I_UNDERSTAND_THIS_TOUCHES_A_REAL_PROTON_ACCOUNT
 Run exactly one interactive login:
 
 ```bash
-proton-drive login --credential-provider git-credential
+proton-drive login --key-password-provider git-credential
 ```
 
 For Proton Pass:
 
 ```bash
-proton-drive login --credential-provider pass-cli
+proton-drive login --key-password-provider pass-cli
 ```
 
 If the account requires TOTP, complete the single prompt. If the prompt fails,
@@ -100,7 +100,7 @@ After login, inspect only local state:
 
 ```bash
 proton-drive status
-proton-drive doctor --credential-provider git-credential
+proton-drive doctor --key-password-provider git-credential
 ```
 
 Expected local properties:
@@ -126,13 +126,13 @@ the same canary session.
 Use this only after the normal one-login and metadata-read canary path above is
 understood. It is for accounts that need the browser session-fork path, such as
 FIDO2-oriented accounts. The target runs exactly one
-`login --auth-mode browser-fork` command, then performs local `status` and
+`login` command with explicit `--key-password-provider`, then performs local `status` and
 offline `doctor --json` inspection. It does not upload, download, or start the
 Git LFS real E2E transfer.
 
 ```bash
 PROTON_LFS_LIVE_CANARY=I_UNDERSTAND_THIS_TOUCHES_A_REAL_PROTON_ACCOUNT \
-LIVE_CANARY_DOCTOR_ARGS="--credential-provider git-credential" \
+LIVE_CANARY_DOCTOR_ARGS="--key-password-provider git-credential" \
 LIVE_BROWSER_FORK_LOGIN_ARGS="--key-password-provider git-credential" \
   make browser-fork-canary
 ```
@@ -145,7 +145,7 @@ explicit:
 PROTON_LFS_LIVE_CANARY=I_UNDERSTAND_THIS_TOUCHES_A_REAL_PROTON_ACCOUNT \
 PROTON_CREDENTIAL_PROVIDER=pass-cli \
 PROTON_KEY_PASSWORD_PROVIDER=pass-cli \
-LIVE_CANARY_DOCTOR_ARGS="--credential-provider pass-cli" \
+LIVE_CANARY_DOCTOR_ARGS="--key-password-provider pass-cli" \
 LIVE_BROWSER_FORK_LOGIN_ARGS="--key-password-provider pass-cli" \
   make browser-fork-canary
 ```
@@ -154,7 +154,7 @@ Stop after this target. The target parses the offline doctor JSON and requires
 `authMode=browser-fork`, `state=ready`, and `canAttemptTransfer=true`. Only run
 `make test-e2e-real` later, in a separate command, after recording that result.
 The browser-fork helper rejects any `LIVE_BROWSER_FORK_LOGIN_ARGS` value that
-tries to set `--auth-mode`; the canary always forces browser-fork itself.
+tries to set `--auth-mode`; login is browser-fork-only.
 
 ## Real E2E Guard
 
@@ -163,7 +163,7 @@ acknowledgement and the exact offline doctor arguments are present:
 
 ```bash
 PROTON_LFS_LIVE_CANARY=I_UNDERSTAND_THIS_TOUCHES_A_REAL_PROTON_ACCOUNT \
-LIVE_CANARY_DOCTOR_ARGS="--credential-provider pass-cli" \
+LIVE_CANARY_DOCTOR_ARGS="--key-password-provider pass-cli" \
   make test-e2e-real
 ```
 
@@ -175,7 +175,7 @@ that passed preflight:
 
 ```bash
 PROTON_LFS_LIVE_CANARY=I_UNDERSTAND_THIS_TOUCHES_A_REAL_PROTON_ACCOUNT \
-LIVE_CANARY_DOCTOR_ARGS="--credential-provider pass-cli --data-credential-provider pass-cli --require-data-password" \
+LIVE_CANARY_DOCTOR_ARGS="--key-password-provider pass-cli --data-credential-provider pass-cli --require-data-password" \
   PROTON_DATA_CREDENTIAL_PROVIDER=pass-cli \
   make test-e2e-real
 ```

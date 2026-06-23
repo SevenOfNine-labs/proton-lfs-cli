@@ -18,7 +18,9 @@ Date: 2026-06-22
 - Command-specific bridge request-field rules are versioned in
   `proton-drive-cli` and root tests verify the adapter request shapes against
   them.
-- Credential providers (`pass-cli`, `git-credential`) are handled by proton-drive-cli's `src/credentials/` module.
+- Browser-fork login stores its derived key password through proton-drive-cli's
+  key-password provider (`pass-cli` or `git-credential`). Git LFS transfers do
+  not receive account credential selectors.
 - Security hardening: OID validation, path traversal prevention, subprocess pool (max 10), per-operation timeout (5 min).
 - Security tests: command injection, rate limiting, credential flow, session file permissions.
 - Submodule pins are checked with `make check-submodules` instead of relying on
@@ -44,10 +46,8 @@ Date: 2026-06-22
 ## Architecture
 
 ```
-Go Adapter → proton-drive-cli subprocess (stdin/stdout JSON, provider selector fields) → Proton API
-                    ↓
-        pass-cli or git-credential
-    (resolved internally by proton-drive-cli)
+Go Adapter -> proton-drive-cli subprocess (stdin/stdout JSON)
+             pre-existing browser-fork session only
 ```
 
 - **No .NET SDK or Node.js HTTP bridge required.** The Go adapter spawns `proton-drive-cli bridge <command>` directly.

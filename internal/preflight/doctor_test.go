@@ -8,7 +8,6 @@ import (
 
 var testAuthStates = []string{
 	"ready",
-	"login_available",
 	"needs_login",
 	"needs_data_password",
 	"needs_key_password",
@@ -44,23 +43,27 @@ func boolJSON(value bool) string {
 	return "false"
 }
 
-func TestValidateDoctorReadinessAllowsLiveCanaryLoginAvailable(t *testing.T) {
+func TestValidateDoctorReadinessAllowsReadyBrowserForkLiveCanary(t *testing.T) {
 	readiness, err := ValidateDoctorReadiness(
-		doctorJSON("login_available", false, true, ""),
+		doctorJSON("ready", true, true, `"authMode":"browser-fork"`),
 		testAuthStates,
-		DoctorReadinessRequirements{RequireLiveCanary: true},
+		DoctorReadinessRequirements{
+			RequireLiveCanary: true,
+			RequireState:      "ready",
+			RequireAuthMode:   "browser-fork",
+		},
 	)
 	if err != nil {
 		t.Fatalf("ValidateDoctorReadiness returned error: %v", err)
 	}
-	if readiness.AuthState.State != "login_available" {
-		t.Fatalf("state = %q, want login_available", readiness.AuthState.State)
+	if readiness.AuthState.State != "ready" {
+		t.Fatalf("state = %q, want ready", readiness.AuthState.State)
 	}
 }
 
 func TestValidateDoctorReadinessAllowsReadyTransfer(t *testing.T) {
 	readiness, err := ValidateDoctorReadiness(
-		doctorJSON("ready", true, true, `"authMode":"srp"`),
+		doctorJSON("ready", true, true, `"authMode":"browser-fork"`),
 		testAuthStates,
 		DoctorReadinessRequirements{
 			RequireTransfer: true,
@@ -142,7 +145,7 @@ func TestValidateDoctorReadinessRejectsUnknownAuthState(t *testing.T) {
 
 func TestValidateDoctorReadinessRequiresBrowserForkReadyTransfer(t *testing.T) {
 	_, err := ValidateDoctorReadiness(
-		doctorJSON("ready", true, true, `"authMode":"srp"`),
+		doctorJSON("ready", true, true, `"authMode":"legacy"`),
 		testAuthStates,
 		DoctorReadinessRequirements{
 			RequireTransfer: true,
@@ -174,7 +177,7 @@ func TestLoadBridgeAuthStatesFromSubmoduleSchema(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadBridgeAuthStates returned error: %v", err)
 	}
-	for _, want := range []string{"ready", "login_available", "needs_key_password"} {
+	for _, want := range []string{"ready", "needs_login", "needs_key_password"} {
 		found := false
 		for _, got := range states {
 			if got == want {

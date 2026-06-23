@@ -54,7 +54,7 @@ real SDK tests. Two-password accounts should use a separate mailbox/data
 password provider entry:
 
 ```bash
-git config lfs.customtransfer.proton.args "--backend=sdk --credential-provider git-credential --data-credential-provider git-credential"
+git config lfs.customtransfer.proton.args "--backend=sdk --data-credential-provider git-credential"
 ```
 
 ## Personal Account Practical Steps
@@ -113,7 +113,7 @@ same command and the offline doctor arguments are supplied:
 
 ```bash
 PROTON_LFS_LIVE_CANARY=I_UNDERSTAND_THIS_TOUCHES_A_REAL_PROTON_ACCOUNT \
-LIVE_CANARY_DOCTOR_ARGS="--credential-provider pass-cli" \
+LIVE_CANARY_DOCTOR_ARGS="--key-password-provider pass-cli" \
   make test-e2e-real
 ```
 
@@ -125,7 +125,7 @@ doctor output.
 
 `make browser-fork-canary` is a separate live-login path. It requires
 `PROTON_LFS_LIVE_CANARY`, `LIVE_CANARY_DOCTOR_ARGS`, and
-`LIVE_BROWSER_FORK_LOGIN_ARGS`, runs one `login --auth-mode browser-fork`, then
+`LIVE_BROWSER_FORK_LOGIN_ARGS`, runs one browser-fork-only `login`, then
 only inspects local status and offline doctor readiness. Its post-login doctor
 inspection requires `authMode=browser-fork`, `state=ready`, and
 `canAttemptTransfer=true`, and its script tests prove that no transfer command

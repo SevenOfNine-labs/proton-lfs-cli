@@ -16,7 +16,7 @@ func TestBuildProtonTransferArgsPassCLI(t *testing.T) {
 
 func TestBuildProtonTransferArgsGitCredential(t *testing.T) {
 	got := buildProtonTransferArgs(config.CredentialProviderGitCredential, "/tmp/proton-drive-cli")
-	want := "--backend sdk --credential-provider git-credential --drive-cli-bin /tmp/proton-drive-cli"
+	want := "--backend sdk --drive-cli-bin /tmp/proton-drive-cli"
 	if got != want {
 		t.Fatalf("expected %q, got %q", want, got)
 	}
@@ -27,7 +27,7 @@ func TestBuildProtonTransferArgsQuotesDriveCLIPath(t *testing.T) {
 		config.CredentialProviderGitCredential,
 		"/Applications/Proton Drive CLI/proton-drive-cli",
 	)
-	want := "--backend sdk --credential-provider git-credential --drive-cli-bin '/Applications/Proton Drive CLI/proton-drive-cli'"
+	want := "--backend sdk --drive-cli-bin '/Applications/Proton Drive CLI/proton-drive-cli'"
 	if got != want {
 		t.Fatalf("expected %q, got %q", want, got)
 	}

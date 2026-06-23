@@ -139,11 +139,9 @@ func backendErrorDetails(err error) (int, string) {
 	return 500, "transfer backend error"
 }
 
-// OperationCredentials holds per-request credential provider info sent
-// alongside bridge commands. The provider name is passed to proton-drive-cli
-// which resolves credentials locally (git-credential, pass-cli, etc.).
+// OperationCredentials holds per-request local unlock selectors sent alongside
+// bridge commands. Account authentication is never represented here.
 type OperationCredentials struct {
-	CredentialProvider     string
 	DataCredentialProvider string
 	DataCredentialHost     string
 }
@@ -262,11 +260,10 @@ func (b *LocalStoreBackend) objectPath(oid string) string {
 }
 
 // DriveCLIBackend communicates directly with proton-drive-cli via subprocess.
-// Credential resolution is fully delegated to proton-drive-cli — the Go adapter
-// only passes the provider name (git-credential, pass-cli, etc.).
+// Account authentication is browser-fork-only and must happen before Git LFS
+// transfers. The Go adapter only passes local data-password selectors.
 type DriveCLIBackend struct {
 	bridge                 *BridgeClient
-	credentialProvider     string
 	dataCredentialProvider string
 	dataCredentialHost     string
 	authenticated          bool
@@ -278,16 +275,13 @@ type DriveCLIBackendOptions struct {
 }
 
 // NewDriveCLIBackend creates a backend that delegates to proton-drive-cli.
-// The credentialProvider name is forwarded to proton-drive-cli which resolves
-// credentials locally.
-func NewDriveCLIBackend(bridge *BridgeClient, credentialProvider string, opts ...DriveCLIBackendOptions) *DriveCLIBackend {
+func NewDriveCLIBackend(bridge *BridgeClient, opts ...DriveCLIBackendOptions) *DriveCLIBackend {
 	var options DriveCLIBackendOptions
 	if len(opts) > 0 {
 		options = opts[0]
 	}
 	return &DriveCLIBackend{
 		bridge:                 bridge,
-		credentialProvider:     credentialProvider,
 		dataCredentialProvider: options.DataCredentialProvider,
 		dataCredentialHost:     options.DataCredentialHost,
 	}
@@ -295,7 +289,6 @@ func NewDriveCLIBackend(bridge *BridgeClient, credentialProvider string, opts ..
 
 func (b *DriveCLIBackend) operationCredentials() OperationCredentials {
 	return OperationCredentials{
-		CredentialProvider:     b.credentialProvider,
 		DataCredentialProvider: b.dataCredentialProvider,
 		DataCredentialHost:     b.dataCredentialHost,
 	}
@@ -340,7 +333,7 @@ func mapAuthStateForTransfer(state *BridgeAuthStateResponse) error {
 		return newBackendErrorWithCode(401, "mailbox/data password required for this Proton account", nil, ErrCodeDataPasswordRequired)
 	case "needs_key_password":
 		return newBackendErrorWithCode(401, "stored browser-fork key password required for this Proton session", nil, ErrCodeKeyPasswordRequired)
-	case "login_available", "needs_login":
+	case "needs_login":
 		return newBackendError(401, "no ready Proton Drive session; run proton-drive login before Git LFS transfer", nil)
 	case "session_expired":
 		return newBackendError(401, "Proton Drive session is expired; refresh or login before Git LFS transfer", nil)

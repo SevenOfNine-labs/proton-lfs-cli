@@ -81,7 +81,7 @@ func TestBrowserForkCanaryRejectsPostLoginDoctorMismatch(t *testing.T) {
 		"ok": true,
 		"canAttemptTransfer": true,
 		"canAttemptLiveCanary": true,
-		"authState": {"state": "ready", "authMode": "srp"}
+			"authState": {"state": "ready", "authMode": "legacy"}
 	}`)
 
 	out, err := runBrowserForkScript(t, env)
@@ -119,7 +119,7 @@ func newBrowserForkScriptEnv(t *testing.T, doctorJSON string) browserForkScriptE
 		logPath: logPath,
 		vars: []string{
 			"PROTON_LFS_LIVE_CANARY=" + browserForkCanaryAck,
-			"LIVE_CANARY_DOCTOR_ARGS=--credential-provider pass-cli",
+			"LIVE_CANARY_DOCTOR_ARGS=--key-password-provider pass-cli",
 			"LIVE_BROWSER_FORK_LOGIN_ARGS=--key-password-provider git-credential",
 			"NODE_BIN=" + fakeNodePath,
 			"DRIVE_CLI_BIN=" + filepath.Join(tempDir, "fake-drive-cli.js"),
@@ -137,8 +137,8 @@ cmd="${2:-}"
 
 case "${cmd}" in
   login)
-    if [[ "${3:-}" != "--auth-mode" || "${4:-}" != "browser-fork" ]]; then
-      echo "bad login auth mode" >&2
+    if [[ "${3:-}" != "--key-password-provider" || "${4:-}" != "git-credential" ]]; then
+      echo "bad login key-password provider" >&2
       exit 7
     fi
     echo "login ok"

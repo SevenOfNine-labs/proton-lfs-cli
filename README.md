@@ -91,7 +91,7 @@ data credential provider:
 
 ```bash
 git config lfs.customtransfer.proton.args \
-  "--backend=sdk --credential-provider git-credential --data-credential-provider git-credential"
+  "--backend=sdk --data-credential-provider git-credential"
 ```
 
 If your Node binary is managed in shell startup (for example `nvm` in `~/.zshrc`), pass it explicitly:

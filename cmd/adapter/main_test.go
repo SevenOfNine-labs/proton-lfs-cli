@@ -729,7 +729,7 @@ func TestPrintUsageContainsAllSections(t *testing.T) {
 		"DESCRIPTION",
 		"PROTOCOL COMPLIANCE",
 		"BACKENDS",
-		"CREDENTIAL PROVIDERS",
+		"AUTH AND LOCAL UNLOCK",
 		"SECURITY",
 		"FLAGS",
 		"ENVIRONMENT VARIABLES",

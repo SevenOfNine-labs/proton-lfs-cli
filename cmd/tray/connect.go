@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -11,18 +10,10 @@ import (
 )
 
 const authRateLimitCooldown = time.Hour
-const trayAuthModeEnv = "PROTON_LFS_TRAY_AUTH_MODE"
-
-type trayAuthMode string
-
-const (
-	trayAuthModeBrowserFork trayAuthMode = "browser-fork"
-	trayAuthModeSRP         trayAuthMode = "srp"
-)
 
 // connectToProton runs the tray Connect flow.
-// Browser-fork authentication is the default and does not resolve stored account
-// passwords. Direct SRP remains available only through a developer env override.
+// Browser-fork authentication is the only account login path. The tray never
+// resolves stored account passwords or invokes direct SRP login.
 func connectToProton() {
 	if remaining, blocked := activeAuthRateLimit(time.Now()); blocked {
 		trayLog.Printf("connect: auth rate limit active; skipping login for %s", formatCooldown(remaining))
@@ -40,13 +31,11 @@ func connectToProton() {
 
 	prefs := config.LoadPrefs()
 	provider := prefs.CredentialProvider
-	trayLog.Printf("connect: credential provider = %s", provider)
-	authMode := resolveTrayAuthMode()
-	trayLog.Printf("connect: auth mode = %s", authMode)
+	trayLog.Printf("connect: key-password provider = %s", provider)
 	traceID := newAuthTraceID()
 	trayLog.Printf("connect: auth trace id = %s", traceID)
 
-	loginArgs, ok := buildTrayLoginArgs(authMode, provider, driveCLI, traceID)
+	loginArgs, ok := buildTrayLoginArgs(provider)
 	if !ok {
 		return
 	}
@@ -70,54 +59,9 @@ func connectToProton() {
 	}()
 }
 
-func buildTrayLoginArgs(authMode trayAuthMode, provider string, driveCLI string, traceID string) ([]string, bool) {
-	switch authMode {
-	case trayAuthModeBrowserFork:
-		trayLog.Print("connect: starting browser-fork login")
-		return []string{
-			"--auth-mode", "browser-fork",
-			"--key-password-provider", provider,
-		}, true
-	case trayAuthModeSRP:
-		trayLog.Print("connect: SRP login enabled by developer override")
-		if !credentialVerifyWithTrace(provider, traceID) {
-			if !shouldOpenInteractiveCredentialStore(provider) {
-				trayLog.Print("connect: pass-cli credentials not found; refusing interactive credential prompt")
-				trayLog.Print("connect: create or update a Proton Pass login item with URL https://proton.me")
-				sendNotification("Proton Pass item not found")
-				return nil, false
-			}
-			trayLog.Print("connect: credentials not found, opening terminal for interactive store")
-			script := fmt.Sprintf("'%s' credential store --provider %s; echo; printf 'Press Enter to close... ' && read", driveCLI, provider)
-			cmd := terminalCommand(script)
-			if cmd != nil {
-				_ = cmd.Start()
-			}
-			sendNotification("Complete setup in Terminal")
-			return nil, false
-		}
-		trayLog.Print("connect: credentials verified, starting SRP login")
-		return []string{"--credential-provider", provider}, true
-	default:
-		trayLog.Printf("connect: unsupported auth mode %q", authMode)
-		sendNotification("Unsupported auth mode")
-		return nil, false
-	}
-}
-
-func resolveTrayAuthMode() trayAuthMode {
-	switch strings.ToLower(strings.TrimSpace(os.Getenv(trayAuthModeEnv))) {
-	case "", "browser", "browser-fork", "web":
-		return trayAuthModeBrowserFork
-	case "srp":
-		return trayAuthModeSRP
-	default:
-		return trayAuthModeBrowserFork
-	}
-}
-
-func shouldOpenInteractiveCredentialStore(provider string) bool {
-	return provider != config.CredentialProviderPassCLI
+func buildTrayLoginArgs(provider string) ([]string, bool) {
+	trayLog.Print("connect: starting browser-fork login")
+	return []string{"--key-password-provider", provider}, true
 }
 
 func protonDriveLoginWithTrace(driveCLI string, provider string, traceID string, args ...string) ([]byte, error) {

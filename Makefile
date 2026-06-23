@@ -280,17 +280,17 @@ check-live-canary-ack: ## Refuse real Proton tests without explicit acknowledgem
 		echo "This target may touch a real Proton account and must never run by accident."; \
 		echo "Read docs/operations/live-canary-runbook.md first."; \
 		echo "Then run with:"; \
-		echo "  PROTON_LFS_LIVE_CANARY=$(LIVE_CANARY_ACK_VALUE) LIVE_CANARY_DOCTOR_ARGS='--credential-provider pass-cli' make test-e2e-real"; \
+		echo "  PROTON_LFS_LIVE_CANARY=$(LIVE_CANARY_ACK_VALUE) LIVE_CANARY_DOCTOR_ARGS='--key-password-provider pass-cli' make test-e2e-real"; \
 		exit 2; \
 	fi
 
 check-live-canary-doctor-args: ## Require explicit offline doctor args for real Proton tests
 	@if [ -z "$${LIVE_CANARY_DOCTOR_ARGS:-}" ]; then \
 		echo "Refusing to run a real Proton canary without LIVE_CANARY_DOCTOR_ARGS."; \
-		echo "The offline doctor must pass with the exact credential-provider args"; \
+		echo "The offline doctor must pass with the exact key-password provider args"; \
 		echo "that will be used by the live canary."; \
 		echo "Example:"; \
-		echo "  LIVE_CANARY_DOCTOR_ARGS='--credential-provider pass-cli'"; \
+		echo "  LIVE_CANARY_DOCTOR_ARGS='--key-password-provider pass-cli'"; \
 		exit 2; \
 	fi
 

@@ -20,15 +20,6 @@ func setupTrayLogForTest(t *testing.T) {
 	})
 }
 
-func TestShouldOpenInteractiveCredentialStore(t *testing.T) {
-	if shouldOpenInteractiveCredentialStore(config.CredentialProviderPassCLI) {
-		t.Fatal("pass-cli connect must not open an interactive credential prompt")
-	}
-	if !shouldOpenInteractiveCredentialStore(config.CredentialProviderGitCredential) {
-		t.Fatal("git-credential connect should keep interactive credential setup")
-	}
-}
-
 func TestWithAuthTraceEnv(t *testing.T) {
 	env := withAuthTraceEnv([]string{"EXISTING=1"}, "trace-123")
 	joined := strings.Join(env, "\n")
@@ -50,44 +41,23 @@ func TestWithAuthTraceEnvSkipsEmptyTraceID(t *testing.T) {
 	}
 }
 
-func TestResolveTrayAuthModeDefaultsToBrowserFork(t *testing.T) {
-	t.Setenv(trayAuthModeEnv, "")
-	if got := resolveTrayAuthMode(); got != trayAuthModeBrowserFork {
-		t.Fatalf("expected browser-fork default, got %q", got)
-	}
-
-	t.Setenv(trayAuthModeEnv, "unexpected")
-	if got := resolveTrayAuthMode(); got != trayAuthModeBrowserFork {
-		t.Fatalf("expected invalid env value to fall back to browser-fork, got %q", got)
-	}
-}
-
-func TestResolveTrayAuthModeAllowsExplicitSRPOverride(t *testing.T) {
-	t.Setenv(trayAuthModeEnv, "srp")
-
-	if got := resolveTrayAuthMode(); got != trayAuthModeSRP {
-		t.Fatalf("expected srp override, got %q", got)
-	}
-}
-
-func TestBuildTrayLoginArgsBrowserForkSkipsPasswordCredentialLookup(t *testing.T) {
+func TestBuildTrayLoginArgsUsesBrowserForkKeyPasswordProviderOnly(t *testing.T) {
 	setupTrayLogForTest(t)
-	args, ok := buildTrayLoginArgs(
-		trayAuthModeBrowserFork,
-		config.CredentialProviderPassCLI,
-		"/bin/false",
-		"trace-test",
-	)
+	args, ok := buildTrayLoginArgs(config.CredentialProviderPassCLI)
 	if !ok {
-		t.Fatal("expected browser-fork args to be built")
+		t.Fatal("expected login args to be built")
 	}
 
-	want := []string{
-		"--auth-mode", "browser-fork",
-		"--key-password-provider", config.CredentialProviderPassCLI,
-	}
+	want := []string{"--key-password-provider", config.CredentialProviderPassCLI}
 	if !reflect.DeepEqual(args, want) {
-		t.Fatalf("unexpected browser-fork login args:\n got: %#v\nwant: %#v", args, want)
+		t.Fatalf("unexpected login args:\n got: %#v\nwant: %#v", args, want)
+	}
+	for _, forbidden := range []string{"--auth-mode", "--credential-provider"} {
+		for _, arg := range args {
+			if arg == forbidden {
+				t.Fatalf("login args must not contain %s: %#v", forbidden, args)
+			}
+		}
 	}
 }
 

@@ -8,8 +8,7 @@ import (
 func TestDriveCLIBackendGitCredentialModeInitialize(t *testing.T) {
 	bc := helperBridgeClient(t)
 	backend := &DriveCLIBackend{
-		bridge:             bc,
-		credentialProvider: CredentialProviderGitCredential,
+		bridge: bc,
 	}
 
 	session := &Session{Initialized: true, CreatedAt: time.Now()}
@@ -26,17 +25,13 @@ func TestDriveCLIBackendGitCredentialModeInitialize(t *testing.T) {
 	}
 }
 
-func TestDriveCLIBackendGitCredentialModeOperationCredentials(t *testing.T) {
+func TestDriveCLIBackendDataCredentialModeOperationCredentials(t *testing.T) {
 	backend := &DriveCLIBackend{
-		credentialProvider:     CredentialProviderGitCredential,
 		dataCredentialProvider: CredentialProviderGitCredential,
 		dataCredentialHost:     DefaultDataCredentialHost,
 	}
 
 	creds := backend.operationCredentials()
-	if creds.CredentialProvider != CredentialProviderGitCredential {
-		t.Errorf("expected credentialProvider=%q, got %q", CredentialProviderGitCredential, creds.CredentialProvider)
-	}
 	if creds.DataCredentialProvider != CredentialProviderGitCredential {
 		t.Errorf("expected dataCredentialProvider=%q, got %q", CredentialProviderGitCredential, creds.DataCredentialProvider)
 	}
@@ -61,8 +56,8 @@ func TestCredentialProviderConstants(t *testing.T) {
 }
 
 func TestDriveCLIBackendEmptyProvider(t *testing.T) {
-	// Without credentialProvider set, auth is delegated to proton-drive-cli
-	// which will attempt resolution itself (mock bridge returns ok)
+	// Account authentication is session-only; initialization succeeds when the
+	// offline auth-state reports ready.
 	bc := helperBridgeClient(t)
 	backend := &DriveCLIBackend{
 		bridge: bc,
@@ -76,10 +71,9 @@ func TestDriveCLIBackendEmptyProvider(t *testing.T) {
 }
 
 func TestBuildCredentialsGitCredentialMode(t *testing.T) {
-	creds := OperationCredentials{CredentialProvider: CredentialProviderGitCredential}
-	m := buildCredentials(creds, "LFS", "v1")
-	if m["credentialProvider"] != CredentialProviderGitCredential {
-		t.Errorf("expected credentialProvider='git-credential', got %v", m)
+	m := buildCredentials(OperationCredentials{}, "LFS", "v1")
+	if _, ok := m["credentialProvider"]; ok {
+		t.Errorf("credentialProvider must not be sent to bridge, got %v", m)
 	}
 	if m["storageBase"] != "LFS" {
 		t.Errorf("expected storageBase=LFS, got %v", m["storageBase"])

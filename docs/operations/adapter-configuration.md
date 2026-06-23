@@ -9,17 +9,28 @@ Source of truth in code: `cmd/adapter/config_constants.go`.
 | `PROTON_LFS_BACKEND` | `local` | Adapter backend (`local`, `sdk`) |
 | `ADAPTER_ALLOW_MOCK_TRANSFERS` | `false` | Enables mock transfer mode |
 | `PROTON_LFS_LOCAL_STORE_DIR` | empty | Local backend object root |
-| `PROTON_CREDENTIAL_PROVIDER` | `pass-cli` | Credential provider: `pass-cli` (default) or `git-credential` |
+| `PROTON_CREDENTIAL_PROVIDER` | `pass-cli` | Legacy compatibility setting; ignored by transfer bridge requests |
 | `PROTON_DATA_CREDENTIAL_PROVIDER` | empty | Optional separate provider for a two-password account mailbox/data password |
 | `PROTON_DATA_CREDENTIAL_HOST` | `proton-data.proton-lfs-cli.local` | Credential host/key for the mailbox/data password entry |
 | `PROTON_PASS_CLI_BIN` | `pass-cli` | Proton Pass CLI binary path (passed through to proton-drive-cli) |
 | `PROTON_DRIVE_CLI_BIN` | `submodules/proton-drive-cli/dist/index.js` | Path to proton-drive-cli entry point |
 
-The Go adapter does **not** resolve credentials itself. It sends non-secret selectors such as `{ "credentialProvider": "<name>", "dataCredentialProvider": "<name>", "dataCredentialHost": "<host>" }` to proton-drive-cli, which handles credential resolution internally. Password values are never passed as command-line arguments.
+The Go adapter does **not** resolve Proton account credentials and never sends
+account username/password selectors to proton-drive-cli. Account login is
+browser-fork-only and must be completed outside Git LFS transfers with
+`proton-drive login --key-password-provider <provider>`. Transfer bridge
+requests send only local unlock selectors such as
+`{ "dataCredentialProvider": "<name>", "dataCredentialHost": "<host>" }` for
+two-password accounts.
 
 ### pass-cli (default)
 
-`proton-drive-cli` searches all Proton Pass vaults for a login item with a `proton.me` URL. For a separate mailbox/data password, create a second login item whose URL is `https://proton-data.proton-lfs-cli.local`, then enable `PROTON_DATA_CREDENTIAL_PROVIDER=pass-cli` or pass `--data-credential-provider pass-cli`.
+For browser-fork login, use `proton-drive login --key-password-provider pass-cli`
+to store the derived session key password in Proton Pass. For a separate
+mailbox/data password, create a second login item whose URL is
+`https://proton-data.proton-lfs-cli.local`, then enable
+`PROTON_DATA_CREDENTIAL_PROVIDER=pass-cli` or pass
+`--data-credential-provider pass-cli`.
 
 The tray Connect action does not prompt for Proton username/password when
 `pass-cli` lookup fails. Fix the Proton Pass item instead: it must be a login
@@ -30,21 +41,23 @@ The `PROTON_PASS_CLI_BIN` env var is forwarded to the subprocess via the env all
 
 ### git-credential
 
-When `PROTON_CREDENTIAL_PROVIDER=git-credential`, proton-drive-cli resolves credentials via `git credential fill`.
+When `PROTON_KEY_PASSWORD_PROVIDER=git-credential` or
+`--key-password-provider git-credential` is used, proton-drive-cli stores the
+browser-fork key password via `git credential approve`.
 
 For two-password accounts, store the mailbox/data password under the separate data host:
 
 ```bash
 printf "protocol=https\nhost=proton-data.proton-lfs-cli.local\nusername=user@proton.me\npassword=<mailbox-data-password>\n\n" | git credential approve
-git config lfs.customtransfer.proton.args "--backend sdk --credential-provider git-credential --data-credential-provider git-credential"
+git config lfs.customtransfer.proton.args "--backend sdk --data-credential-provider git-credential"
 ```
 
-If no data credential provider is configured, two-password accounts fail with `DATA_PASSWORD_REQUIRED`. The adapter intentionally does not reuse the login password and does not keep retrying account login.
+If no data credential provider is configured, two-password accounts fail with `DATA_PASSWORD_REQUIRED`. The adapter intentionally does not reuse account-login material and does not attempt account login from transfers.
 
 Before attempting a real login or SDK transfer, run:
 
 ```bash
-proton-drive doctor --credential-provider git-credential --data-credential-provider git-credential
+proton-drive doctor --key-password-provider git-credential --data-credential-provider git-credential
 ```
 
 This preflight is offline: it checks local credential entries, session-file

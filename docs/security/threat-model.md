@@ -36,17 +36,18 @@
 
 **Mitigations**:
 
-- Credentials passed via stdin JSON to subprocess (not visible in `ps aux`)
-- Credential flow: Go adapter sends non-secret provider selectors (`credentialProvider`, optional `dataCredentialProvider`, optional `dataCredentialHost`) → proton-drive-cli resolves pass-cli or git-credential internally (memory only)
+- Account credentials are not accepted by Git LFS transfer commands
+- Local unlock selectors are passed via stdin JSON to subprocess (not visible in `ps aux`)
+- Credential flow: browser-fork login stores a UID-scoped key-password entry via proton-drive-cli; Go transfers send only optional mailbox/data-password selectors (`dataCredentialProvider`, `dataCredentialHost`)
 - **No HTTP layer** — credentials never traverse network connections, even localhost
 - **Passwords are never persisted to disk** — `saveSession()` strips `mailboxPassword` before writing
-- **Passwords are never accepted via CLI flags** — only resolved via pass-cli or git-credential
+- **Passwords are never accepted via transfer CLI flags** — browser login and local unlock storage are handled by proton-drive-cli
 - Two-password accounts use a distinct mailbox/data password credential entry; the login password is not reused as a fallback
 - Session file (`~/.proton-drive-cli/session.json`) contains only revocable tokens (sessionId, accessToken, refreshToken)
 - Session directory `0700`, session file `0600` (owner-only)
 - Error messages sanitized — no credential values in responses or logs
 - Usernames are not logged (prevents email leak to log files)
-- Credential resolution delegated entirely to proton-drive-cli — the Go adapter never sees raw credentials
+- Account-login credential resolution is absent from the Go adapter and transfer bridge
 
 **Tests**: `tests/integration/credential_security_test.go`
 
@@ -96,7 +97,7 @@
 **Mitigations**:
 
 - All Proton API calls use HTTPS (TLS)
-- SRP authentication — password never sent to server
+- Browser-fork login is the only account-login path; Git LFS transfers reuse the saved session
 - E2E encryption — file contents encrypted client-side before upload
 - No localhost HTTP service — Go adapter communicates with proton-drive-cli via subprocess stdin/stdout (no network exposure)
 
@@ -121,9 +122,13 @@
 
 - `execFile` used (not `exec`) — prevents shell injection in the git binary path
 - 10-second timeout prevents hanging on interactive credential helpers
-- Credentials flow: git credential helper -> proton-drive-cli (memory only) -> Proton API
+- Browser-fork key-password flow: git credential helper -> proton-drive-cli
+  key-password store. Git LFS transfers never request account credentials from
+  the helper.
 - `git credential approve/reject` used for proper credential lifecycle management
-- When `credentialProvider=git-credential` is used, credentials are resolved entirely within proton-drive-cli — they never pass through the Go adapter
+- When `--key-password-provider git-credential` is used, the browser-fork key
+  password is stored entirely within proton-drive-cli's key-password flow; it
+  never passes through the Go adapter.
 - When `dataCredentialProvider=git-credential` is used, the mailbox/data password is resolved from a separate host/key (`proton-data.proton-lfs-cli.local` by default)
 - The Go adapter skips pass-cli resolution entirely in git-credential mode, eliminating that attack surface
 

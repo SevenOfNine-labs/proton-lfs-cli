@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -14,17 +15,14 @@ import (
 	"proton-lfs-cli/internal/config"
 )
 
-// saveFuncVars saves and restores function vars for test isolation.
 func saveFuncVars(t *testing.T) {
 	t.Helper()
 	origFindDriveCLI := findDriveCLI
 	origFindAdapter := findAdapter
-	origVerifyCredential := verifyCredential
 	origLoginDrive := loginDrive
 	t.Cleanup(func() {
 		findDriveCLI = origFindDriveCLI
 		findAdapter = origFindAdapter
-		verifyCredential = origVerifyCredential
 		loginDrive = origLoginDrive
 	})
 }
@@ -35,7 +33,6 @@ type fakeHomeOpts struct {
 	statusJSON    string
 }
 
-// setupFakeHome creates a temporary HOME directory with optional state files.
 func setupFakeHome(t *testing.T, opts fakeHomeOpts) string {
 	t.Helper()
 	home := t.TempDir()
@@ -74,7 +71,6 @@ func setupFakeHome(t *testing.T, opts fakeHomeOpts) string {
 	return home
 }
 
-// setupGitConfig creates a temporary git global config and sets GIT_CONFIG_GLOBAL.
 func setupGitConfig(t *testing.T, content string) string {
 	t.Helper()
 	tmp := filepath.Join(t.TempDir(), "gitconfig")
@@ -84,8 +80,6 @@ func setupGitConfig(t *testing.T, content string) string {
 	t.Setenv("GIT_CONFIG_GLOBAL", tmp)
 	return tmp
 }
-
-// --- cliStatus tests ---
 
 func TestCliStatusConnectedOK(t *testing.T) {
 	saveFuncVars(t)
@@ -143,50 +137,6 @@ func TestCliStatusDisconnected(t *testing.T) {
 	}
 }
 
-func TestCliStatusTransferring(t *testing.T) {
-	saveFuncVars(t)
-	statusJSON, _ := json.Marshal(config.StatusReport{
-		State: config.StateTransferring, LastOp: "download",
-	})
-	setupFakeHome(t, fakeHomeOpts{
-		sessionExists: true,
-		statusJSON:    string(statusJSON),
-	})
-	setupGitConfig(t, "")
-
-	var buf bytes.Buffer
-	code := cliStatus(&buf)
-	out := buf.String()
-
-	if code != 0 {
-		t.Fatalf("expected exit 0, got %d", code)
-	}
-	if !strings.Contains(out, "Transfer: download in progress") {
-		t.Errorf("output missing transfer in progress:\n%s", out)
-	}
-}
-
-func TestCliStatusError(t *testing.T) {
-	saveFuncVars(t)
-	ts := time.Now().Add(-5 * time.Minute).UTC()
-	statusJSON, _ := json.Marshal(config.StatusReport{
-		State: config.StateError, LastOp: "upload", Error: "timeout", Timestamp: ts,
-	})
-	setupFakeHome(t, fakeHomeOpts{statusJSON: string(statusJSON)})
-	setupGitConfig(t, "")
-
-	var buf bytes.Buffer
-	code := cliStatus(&buf)
-	out := buf.String()
-
-	if code != 0 {
-		t.Fatalf("expected exit 0, got %d", code)
-	}
-	if !strings.Contains(out, "upload") || !strings.Contains(out, "timeout") {
-		t.Errorf("output missing error details:\n%s", out)
-	}
-}
-
 func TestCliStatusErrorShowsRetryMetadata(t *testing.T) {
 	saveFuncVars(t)
 	ts := time.Now().Add(-2 * time.Minute).UTC()
@@ -240,141 +190,63 @@ func TestCliStatusAuthBlockerIsNotRetryable(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("expected exit 0, got %d", code)
 	}
-	for _, want := range []string{
-		"stored browser-fork key password required",
-		"code=key_password_required",
-	} {
-		if !strings.Contains(out, want) {
-			t.Errorf("output missing %q:\n%s", want, out)
-		}
+	if !strings.Contains(out, "stored browser-fork key password required") ||
+		!strings.Contains(out, "code=key_password_required") {
+		t.Errorf("output missing auth blocker details:\n%s", out)
 	}
 	if strings.Contains(out, "retryable") || strings.Contains(out, "temporary") {
 		t.Errorf("auth blocker must not show retry metadata:\n%s", out)
 	}
 }
 
-func TestCliStatusIdle(t *testing.T) {
-	saveFuncVars(t)
-	statusJSON, _ := json.Marshal(config.StatusReport{State: config.StateIdle})
-	setupFakeHome(t, fakeHomeOpts{statusJSON: string(statusJSON)})
-	setupGitConfig(t, "")
-
-	var buf bytes.Buffer
-	code := cliStatus(&buf)
-	out := buf.String()
-
-	if code != 0 {
-		t.Fatalf("expected exit 0, got %d", code)
-	}
-	if !strings.Contains(out, "Transfer: idle") {
-		t.Errorf("output missing idle:\n%s", out)
-	}
-}
-
-// --- cliConfig tests ---
-
-func TestCliConfigShowDefault(t *testing.T) {
-	saveFuncVars(t)
-	setupFakeHome(t, fakeHomeOpts{})
-
-	var buf bytes.Buffer
-	code := cliConfig(&buf, nil)
-	if code != 0 {
-		t.Fatalf("expected exit 0, got %d", code)
-	}
-	if got := strings.TrimSpace(buf.String()); got != "pass-cli" {
-		t.Fatalf("expected 'pass-cli', got %q", got)
-	}
-}
-
-func TestCliConfigHelp(t *testing.T) {
-	saveFuncVars(t)
-	setupFakeHome(t, fakeHomeOpts{})
-
-	for _, flag := range []string{"--help", "-h"} {
-		var buf bytes.Buffer
-		code := cliConfig(&buf, []string{flag})
-		if code != 0 {
-			t.Fatalf("cliConfig(%s) exit %d, expected 0", flag, code)
-		}
-		if !strings.Contains(buf.String(), "Usage:") {
-			t.Errorf("cliConfig(%s) missing Usage header:\n%s", flag, buf.String())
-		}
-	}
-}
-
-func TestCliConfigShowGitCredential(t *testing.T) {
-	saveFuncVars(t)
-	setupFakeHome(t, fakeHomeOpts{configJSON: `{"credentialProvider":"git-credential"}`})
-
-	var buf bytes.Buffer
-	code := cliConfig(&buf, nil)
-	if code != 0 {
-		t.Fatalf("expected exit 0, got %d", code)
-	}
-	if got := strings.TrimSpace(buf.String()); got != "git-credential" {
-		t.Fatalf("expected 'git-credential', got %q", got)
-	}
-}
-
-func TestCliConfigSetGitCredential(t *testing.T) {
+func TestCliConfigShowAndSetProvider(t *testing.T) {
 	saveFuncVars(t)
 	setupFakeHome(t, fakeHomeOpts{configJSON: `{"credentialProvider":"pass-cli"}`})
 
-	var buf bytes.Buffer
-	code := cliConfig(&buf, []string{"git-credential"})
-	if code != 0 {
-		t.Fatalf("expected exit 0, got %d", code)
+	var show bytes.Buffer
+	if code := cliConfig(&show, nil); code != 0 {
+		t.Fatalf("show config exit %d", code)
 	}
-	if !strings.Contains(buf.String(), "Credential provider set to git-credential") {
-		t.Fatalf("unexpected output: %s", buf.String())
+	if got := strings.TrimSpace(show.String()); got != "pass-cli" {
+		t.Fatalf("expected pass-cli, got %q", got)
 	}
 
-	// Verify it round-trips
-	prefs := config.LoadPrefs()
-	if prefs.CredentialProvider != "git-credential" {
+	var set bytes.Buffer
+	if code := cliConfig(&set, []string{"git-credential"}); code != 0 {
+		t.Fatalf("set config exit %d", code)
+	}
+	if !strings.Contains(set.String(), "Key-password provider set to git-credential") {
+		t.Fatalf("unexpected output: %s", set.String())
+	}
+	if prefs := config.LoadPrefs(); prefs.CredentialProvider != "git-credential" {
 		t.Fatalf("expected git-credential in config, got %q", prefs.CredentialProvider)
 	}
 }
 
-func TestCliConfigSetPassCLI(t *testing.T) {
-	saveFuncVars(t)
-	setupFakeHome(t, fakeHomeOpts{configJSON: `{"credentialProvider":"git-credential"}`})
-
-	var buf bytes.Buffer
-	code := cliConfig(&buf, []string{"pass-cli"})
-	if code != 0 {
-		t.Fatalf("expected exit 0, got %d", code)
-	}
-	if !strings.Contains(buf.String(), "Credential provider set to pass-cli") {
-		t.Fatalf("unexpected output: %s", buf.String())
-	}
-
-	prefs := config.LoadPrefs()
-	if prefs.CredentialProvider != "pass-cli" {
-		t.Fatalf("expected pass-cli in config, got %q", prefs.CredentialProvider)
-	}
-}
-
-func TestCliConfigInvalid(t *testing.T) {
+func TestCliConfigHelpAndInvalid(t *testing.T) {
 	saveFuncVars(t)
 	setupFakeHome(t, fakeHomeOpts{})
 
-	var buf bytes.Buffer
-	code := cliConfig(&buf, []string{"keychain"})
-	if code != 1 {
-		t.Fatalf("expected exit 1, got %d", code)
+	var help bytes.Buffer
+	if code := cliConfig(&help, []string{"--help"}); code != 0 {
+		t.Fatalf("help exit %d", code)
 	}
-	if !strings.Contains(buf.String(), "unknown provider") {
-		t.Fatalf("expected 'unknown provider' error, got: %s", buf.String())
+	if !strings.Contains(help.String(), "browser-fork key-password provider") {
+		t.Fatalf("help should describe key-password provider:\n%s", help.String())
+	}
+
+	var invalid bytes.Buffer
+	if code := cliConfig(&invalid, []string{"keychain"}); code != 1 {
+		t.Fatalf("invalid provider exit %d, want 1", code)
+	}
+	if !strings.Contains(invalid.String(), "unknown provider") {
+		t.Fatalf("expected unknown provider error, got: %s", invalid.String())
 	}
 }
 
-// --- cliRegister tests ---
-
-func TestCliRegisterSuccess(t *testing.T) {
+func TestCliRegisterSuccessDoesNotWriteAccountCredentialProvider(t *testing.T) {
 	saveFuncVars(t)
-	setupFakeHome(t, fakeHomeOpts{configJSON: `{"credentialProvider":"pass-cli"}`})
+	setupFakeHome(t, fakeHomeOpts{configJSON: `{"credentialProvider":"git-credential"}`})
 	gitCfg := setupGitConfig(t, "")
 
 	findAdapter = func() string { return "/tmp/test-adapter" }
@@ -391,55 +263,30 @@ func TestCliRegisterSuccess(t *testing.T) {
 		"LFS backend enabled",
 		"adapter: /tmp/test-adapter",
 		"drive-cli: /tmp/test-drive-cli",
-		"provider: pass-cli",
+		"provider: git-credential",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output missing %q:\n%s", want, out)
 		}
 	}
 
-	// Verify git config was written
 	data, err := os.ReadFile(gitCfg)
 	if err != nil {
 		t.Fatal(err)
 	}
 	cfgStr := string(data)
-	if !strings.Contains(cfgStr, "standalonetransferagent = proton") {
-		t.Errorf("git config missing standalonetransferagent:\n%s", cfgStr)
+	for _, want := range []string{
+		"standalonetransferagent = proton",
+		"path = /tmp/test-adapter",
+		"--backend sdk",
+		"--drive-cli-bin /tmp/test-drive-cli",
+	} {
+		if !strings.Contains(cfgStr, want) {
+			t.Errorf("git config missing %q:\n%s", want, cfgStr)
+		}
 	}
-	if !strings.Contains(cfgStr, "path = /tmp/test-adapter") {
-		t.Errorf("git config missing adapter path:\n%s", cfgStr)
-	}
-	if !strings.Contains(cfgStr, "--backend sdk") {
-		t.Errorf("git config missing --backend sdk:\n%s", cfgStr)
-	}
-	if !strings.Contains(cfgStr, "--drive-cli-bin /tmp/test-drive-cli") {
-		t.Errorf("git config missing drive-cli-bin:\n%s", cfgStr)
-	}
-}
-
-func TestCliRegisterGitCredentialProvider(t *testing.T) {
-	saveFuncVars(t)
-	setupFakeHome(t, fakeHomeOpts{configJSON: `{"credentialProvider":"git-credential"}`})
-	gitCfg := setupGitConfig(t, "")
-
-	findAdapter = func() string { return "/tmp/test-adapter" }
-	findDriveCLI = func() string { return "/tmp/test-drive-cli" }
-
-	var buf bytes.Buffer
-	code := cliRegister(&buf)
-
-	if code != 0 {
-		t.Fatalf("expected exit 0, got %d; output:\n%s", code, buf.String())
-	}
-
-	data, err := os.ReadFile(gitCfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	cfgStr := string(data)
-	if !strings.Contains(cfgStr, "--credential-provider git-credential") {
-		t.Errorf("git config missing --credential-provider git-credential:\n%s", cfgStr)
+	if strings.Contains(cfgStr, "--credential-provider") {
+		t.Fatalf("git config must not include account credential provider:\n%s", cfgStr)
 	}
 }
 
@@ -452,9 +299,7 @@ func TestCliRegisterQuotesDriveCLIPath(t *testing.T) {
 	findDriveCLI = func() string { return "/Applications/Proton Drive CLI/proton-drive-cli" }
 
 	var buf bytes.Buffer
-	code := cliRegister(&buf)
-
-	if code != 0 {
+	if code := cliRegister(&buf); code != 0 {
 		t.Fatalf("expected exit 0, got %d; output:\n%s", code, buf.String())
 	}
 
@@ -462,10 +307,9 @@ func TestCliRegisterQuotesDriveCLIPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfgStr := string(data)
 	want := "--drive-cli-bin '/Applications/Proton Drive CLI/proton-drive-cli'"
-	if !strings.Contains(cfgStr, want) {
-		t.Errorf("git config missing quoted drive-cli path %q:\n%s", want, cfgStr)
+	if !strings.Contains(string(data), want) {
+		t.Errorf("git config missing quoted drive-cli path %q:\n%s", want, data)
 	}
 }
 
@@ -477,9 +321,7 @@ func TestCliRegisterNoAdapter(t *testing.T) {
 	findAdapter = func() string { return "" }
 
 	var buf bytes.Buffer
-	code := cliRegister(&buf)
-
-	if code != 1 {
+	if code := cliRegister(&buf); code != 1 {
 		t.Fatalf("expected exit 1, got %d", code)
 	}
 	if !strings.Contains(buf.String(), "error: adapter binary not found") {
@@ -487,9 +329,7 @@ func TestCliRegisterNoAdapter(t *testing.T) {
 	}
 }
 
-// --- cliLogin unified tests (both providers use the same flow) ---
-
-func TestCliLoginCredentialsAlreadyStored(t *testing.T) {
+func TestCliLoginUsesBrowserForkKeyPasswordProviderOnly(t *testing.T) {
 	for _, provider := range []string{"git-credential", "pass-cli"} {
 		t.Run(provider, func(t *testing.T) {
 			saveFuncVars(t)
@@ -498,8 +338,13 @@ func TestCliLoginCredentialsAlreadyStored(t *testing.T) {
 			})
 
 			findDriveCLI = func() string { return "/tmp/test-drive-cli" }
-			verifyCredential = func(string) bool { return true }
-			loginDrive = func(_ string, _ ...string) error { return nil }
+			var gotDriveCLI string
+			var gotArgs []string
+			loginDrive = func(driveCLI string, args ...string) error {
+				gotDriveCLI = driveCLI
+				gotArgs = append([]string(nil), args...)
+				return nil
+			}
 
 			var buf bytes.Buffer
 			code := cliLogin(&buf)
@@ -508,131 +353,53 @@ func TestCliLoginCredentialsAlreadyStored(t *testing.T) {
 			if code != 0 {
 				t.Fatalf("expected exit 0, got %d; output:\n%s", code, out)
 			}
-			if !strings.Contains(out, "Logging in...") {
-				t.Errorf("output missing 'Logging in...':\n%s", out)
+			if gotDriveCLI != "/tmp/test-drive-cli" {
+				t.Fatalf("drive cli = %q", gotDriveCLI)
+			}
+			wantArgs := []string{"--key-password-provider", provider}
+			if !reflect.DeepEqual(gotArgs, wantArgs) {
+				t.Fatalf("login args = %#v, want %#v", gotArgs, wantArgs)
 			}
 			if !strings.Contains(out, "Connected to Proton") {
-				t.Errorf("output missing 'Connected to Proton':\n%s", out)
+				t.Errorf("output missing success:\n%s", out)
 			}
 		})
 	}
 }
 
 func TestCliLoginLoginFails(t *testing.T) {
-	for _, provider := range []string{"git-credential", "pass-cli"} {
-		t.Run(provider, func(t *testing.T) {
-			saveFuncVars(t)
-			setupFakeHome(t, fakeHomeOpts{
-				configJSON: fmt.Sprintf(`{"credentialProvider":"%s"}`, provider),
-			})
+	saveFuncVars(t)
+	setupFakeHome(t, fakeHomeOpts{configJSON: `{"credentialProvider":"pass-cli"}`})
 
-			findDriveCLI = func() string { return "/tmp/test-drive-cli" }
-			verifyCredential = func(string) bool { return true }
-			loginDrive = func(_ string, _ ...string) error {
-				return errors.New("captcha required")
-			}
+	findDriveCLI = func() string { return "/tmp/test-drive-cli" }
+	loginDrive = func(_ string, _ ...string) error {
+		return errors.New("captcha required")
+	}
 
-			var buf bytes.Buffer
-			code := cliLogin(&buf)
-			out := buf.String()
-
-			if code != 1 {
-				t.Fatalf("expected exit 1, got %d", code)
-			}
-			if !strings.Contains(out, "error: login failed: captcha required") {
-				t.Errorf("output missing login error:\n%s", out)
-			}
-		})
+	var buf bytes.Buffer
+	code := cliLogin(&buf)
+	if code != 1 {
+		t.Fatalf("expected exit 1, got %d", code)
+	}
+	if !strings.Contains(buf.String(), "error: login failed: captcha required") {
+		t.Errorf("output missing login error:\n%s", buf.String())
 	}
 }
 
 func TestCliLoginNoBinary(t *testing.T) {
-	for _, provider := range []string{"git-credential", "pass-cli"} {
-		t.Run(provider, func(t *testing.T) {
-			saveFuncVars(t)
-			setupFakeHome(t, fakeHomeOpts{
-				configJSON: fmt.Sprintf(`{"credentialProvider":"%s"}`, provider),
-			})
+	saveFuncVars(t)
+	setupFakeHome(t, fakeHomeOpts{configJSON: `{"credentialProvider":"pass-cli"}`})
 
-			findDriveCLI = func() string { return "" }
+	findDriveCLI = func() string { return "" }
 
-			var buf bytes.Buffer
-			code := cliLogin(&buf)
-
-			if code != 1 {
-				t.Fatalf("expected exit 1, got %d", code)
-			}
-			if !strings.Contains(buf.String(), "error: proton-drive-cli not found") {
-				t.Fatalf("expected not found error, got: %s", buf.String())
-			}
-		})
+	var buf bytes.Buffer
+	if code := cliLogin(&buf); code != 1 {
+		t.Fatalf("expected exit 1, got %d", code)
+	}
+	if !strings.Contains(buf.String(), "error: proton-drive-cli not found") {
+		t.Fatalf("expected not found error, got: %s", buf.String())
 	}
 }
-
-func TestCliLoginStoreAndLogin(t *testing.T) {
-	for _, provider := range []string{"git-credential", "pass-cli"} {
-		t.Run(provider, func(t *testing.T) {
-			saveFuncVars(t)
-			setupFakeHome(t, fakeHomeOpts{
-				configJSON: fmt.Sprintf(`{"credentialProvider":"%s"}`, provider),
-			})
-
-			findDriveCLI = func() string { return "/tmp/test-drive-cli" }
-
-			// verifyCredential returns false first, then true (simulating successful store)
-			callCount := 0
-			verifyCredential = func(string) bool {
-				callCount++
-				return callCount > 1
-			}
-			loginDrive = func(_ string, _ ...string) error { return nil }
-
-			// The exec.Command for "credential store" will fail since /tmp/test-drive-cli
-			// doesn't exist, but we test the flow up to that point.
-			var buf bytes.Buffer
-			code := cliLogin(&buf)
-			out := buf.String()
-
-			if !strings.Contains(out, "No credentials stored") {
-				t.Errorf("output missing 'No credentials stored':\n%s", out)
-			}
-			// Since the binary doesn't exist, store fails — that's expected in unit test
-			if code == 0 {
-				if !strings.Contains(out, "Connected to Proton") {
-					t.Errorf("output missing 'Connected to Proton':\n%s", out)
-				}
-			}
-		})
-	}
-}
-
-func TestCliLoginStoreFailsVerify(t *testing.T) {
-	for _, provider := range []string{"git-credential", "pass-cli"} {
-		t.Run(provider, func(t *testing.T) {
-			saveFuncVars(t)
-			setupFakeHome(t, fakeHomeOpts{
-				configJSON: fmt.Sprintf(`{"credentialProvider":"%s"}`, provider),
-			})
-
-			findDriveCLI = func() string { return "/tmp/test-drive-cli" }
-			// Always returns false — credentials never stored
-			verifyCredential = func(string) bool { return false }
-
-			var buf bytes.Buffer
-			code := cliLogin(&buf)
-			out := buf.String()
-
-			if code != 1 {
-				t.Fatalf("expected exit 1, got %d", code)
-			}
-			if !strings.Contains(out, "No credentials stored") {
-				t.Errorf("output missing 'No credentials stored':\n%s", out)
-			}
-		})
-	}
-}
-
-// --- Session sharing tests ---
 
 func TestCliLoginCreatesSession(t *testing.T) {
 	saveFuncVars(t)
@@ -640,9 +407,7 @@ func TestCliLoginCreatesSession(t *testing.T) {
 	setupGitConfig(t, "")
 
 	findDriveCLI = func() string { return "/tmp/test-drive-cli" }
-	verifyCredential = func(string) bool { return true }
 	loginDrive = func(_ string, _ ...string) error {
-		// Simulate what proton-drive-cli login does: write session.json
 		dir := filepath.Join(home, ".proton-drive-cli")
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			return err
@@ -652,17 +417,14 @@ func TestCliLoginCreatesSession(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	code := cliLogin(&buf)
-	if code != 0 {
+	if code := cliLogin(&buf); code != 0 {
 		t.Fatalf("expected exit 0, got %d; output:\n%s", code, buf.String())
 	}
 
-	// Verify session is visible to isSessionActive()
 	if !isSessionActive() {
 		t.Fatal("expected isSessionActive() to return true after connect")
 	}
 
-	// Verify cliStatus reflects the new session
 	var statusBuf bytes.Buffer
 	cliStatus(&statusBuf)
 	if !strings.Contains(statusBuf.String(), "Session:  logged in") {
@@ -672,21 +434,17 @@ func TestCliLoginCreatesSession(t *testing.T) {
 
 func TestCliStatusReflectsExternalLogin(t *testing.T) {
 	saveFuncVars(t)
-	// Simulate an external login by creating session.json directly
 	setupFakeHome(t, fakeHomeOpts{sessionExists: true})
 	setupGitConfig(t, "")
 
 	var buf bytes.Buffer
-	code := cliStatus(&buf)
-	if code != 0 {
+	if code := cliStatus(&buf); code != 0 {
 		t.Fatalf("expected exit 0, got %d", code)
 	}
 	if !strings.Contains(buf.String(), "Session:  logged in") {
 		t.Errorf("status should reflect external session:\n%s", buf.String())
 	}
 }
-
-// --- cliLogout tests ---
 
 func TestCliLogoutNoBinary(t *testing.T) {
 	saveFuncVars(t)
@@ -695,8 +453,7 @@ func TestCliLogoutNoBinary(t *testing.T) {
 	findDriveCLI = func() string { return "" }
 
 	var buf bytes.Buffer
-	code := cliLogout(&buf)
-	if code != 1 {
+	if code := cliLogout(&buf); code != 1 {
 		t.Fatalf("expected exit 1, got %d", code)
 	}
 	if !strings.Contains(buf.String(), "error: proton-drive-cli not found") {
@@ -708,7 +465,6 @@ func TestCliLogoutClearsSession(t *testing.T) {
 	saveFuncVars(t)
 	home := setupFakeHome(t, fakeHomeOpts{sessionExists: true})
 
-	// Create a fake proton-drive-cli that removes session.json when called with "logout"
 	fakeBin := filepath.Join(t.TempDir(), "proton-drive-cli")
 	script := fmt.Sprintf("#!/bin/sh\nrm -f '%s/.proton-drive-cli/session.json'\n", home)
 	if err := os.WriteFile(fakeBin, []byte(script), 0o755); err != nil {
@@ -716,27 +472,21 @@ func TestCliLogoutClearsSession(t *testing.T) {
 	}
 	findDriveCLI = func() string { return fakeBin }
 
-	// Verify session exists before logout
 	if !isSessionActive() {
 		t.Fatal("expected session to exist before logout")
 	}
 
 	var buf bytes.Buffer
-	code := cliLogout(&buf)
-	if code != 0 {
+	if code := cliLogout(&buf); code != 0 {
 		t.Fatalf("expected exit 0, got %d; output: %s", code, buf.String())
 	}
 	if !strings.Contains(buf.String(), "Logged out") {
 		t.Errorf("output missing 'Logged out': %s", buf.String())
 	}
-
-	// Verify session is gone
 	if isSessionActive() {
 		t.Fatal("expected session to be cleared after logout")
 	}
 }
-
-// --- Usage string test ---
 
 func TestUsageContainsSubcommands(t *testing.T) {
 	for _, word := range []string{

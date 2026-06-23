@@ -108,20 +108,15 @@ func stringSet(values []string) map[string]struct{} {
 func TestBridgeContractRequestFieldsAreKnown(t *testing.T) {
 	schema := readBridgeContract[contractSchema](t, "request.schema.json")
 	expected := sortedStrings([]string{
-		"username",
-		"password",
 		"dataPassword",
 		"dataCredentialProvider",
 		"dataCredentialHost",
-		"secondFactorCode",
 		"appVersion",
 		"oid",
 		"path",
 		"outputPath",
 		"folder",
 		"storageBase",
-		"credentialProvider",
-		"allowLogin",
 		"oids",
 	})
 
@@ -131,27 +126,24 @@ func TestBridgeContractRequestFieldsAreKnown(t *testing.T) {
 func TestBridgeContractRequestFieldRulesCoverRootRequests(t *testing.T) {
 	contract := readBridgeContract[bridgeRequestFieldRulesContract](t, "request-field-rules.json")
 	baseCredentialFields := []string{
-		"credentialProvider",
 		"dataCredentialProvider",
 		"dataCredentialHost",
 		"storageBase",
 		"appVersion",
 	}
-	transferCredentialFields := append(append([]string(nil), baseCredentialFields...), "allowLogin")
 
 	cases := []struct {
 		command string
 		fields  []string
 	}{
-		{command: "auth", fields: baseCredentialFields},
 		{command: "auth-state", fields: baseCredentialFields},
-		{command: "init", fields: transferCredentialFields},
-		{command: "upload", fields: append(append([]string(nil), transferCredentialFields...), "oid", "path")},
-		{command: "download", fields: append(append([]string(nil), transferCredentialFields...), "oid", "outputPath")},
-		{command: "exists", fields: append(append([]string(nil), transferCredentialFields...), "oid")},
-		{command: "delete", fields: append(append([]string(nil), transferCredentialFields...), "oid")},
-		{command: "batch-exists", fields: append(append([]string(nil), transferCredentialFields...), "oids")},
-		{command: "batch-delete", fields: append(append([]string(nil), transferCredentialFields...), "oids")},
+		{command: "init", fields: baseCredentialFields},
+		{command: "upload", fields: append(append([]string(nil), baseCredentialFields...), "oid", "path")},
+		{command: "download", fields: append(append([]string(nil), baseCredentialFields...), "oid", "outputPath")},
+		{command: "exists", fields: append(append([]string(nil), baseCredentialFields...), "oid")},
+		{command: "delete", fields: append(append([]string(nil), baseCredentialFields...), "oid")},
+		{command: "batch-exists", fields: append(append([]string(nil), baseCredentialFields...), "oids")},
+		{command: "batch-delete", fields: append(append([]string(nil), baseCredentialFields...), "oids")},
 	}
 
 	for _, tc := range cases {
@@ -202,7 +194,6 @@ func TestBridgeContractAuthStatesAreClassifiedForTransfer(t *testing.T) {
 		ok        bool
 	}{
 		"ready":               {ok: true},
-		"login_available":     {code: 401, errorCode: ErrCodeAuthRequired},
 		"needs_login":         {code: 401, errorCode: ErrCodeAuthRequired},
 		"needs_data_password": {code: 401, errorCode: ErrCodeDataPasswordRequired},
 		"needs_key_password":  {code: 401, errorCode: ErrCodeKeyPasswordRequired},

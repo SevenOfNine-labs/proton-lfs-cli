@@ -48,7 +48,7 @@ login_args=("${SPLIT_CANARY_ARGS[@]}")
 for token in "${login_args[@]}"; do
   case "${token}" in
     --auth-mode | --auth-mode=*)
-      fail "LIVE_BROWSER_FORK_LOGIN_ARGS must not set --auth-mode; this canary always forces browser-fork."
+      fail "LIVE_BROWSER_FORK_LOGIN_ARGS must not set --auth-mode; login is browser-fork-only."
       ;;
   esac
 done
@@ -57,7 +57,7 @@ cd "${ROOT_DIR}"
 
 echo "Running guarded browser-fork canary."
 echo "This runs exactly one browser-fork login command, then local inspection only."
-"${NODE_BIN}" "${DRIVE_CLI_BIN}" login --auth-mode browser-fork "${login_args[@]}"
+"${NODE_BIN}" "${DRIVE_CLI_BIN}" login "${login_args[@]}"
 
 echo "Inspecting saved local session..."
 "${NODE_BIN}" "${DRIVE_CLI_BIN}" status

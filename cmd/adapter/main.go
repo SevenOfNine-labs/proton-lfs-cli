@@ -60,7 +60,6 @@ type Adapter struct {
 	localStoreDir          string
 	backendKind            string
 	backend                TransferBackend
-	credentialProvider     string
 	dataCredentialProvider string
 	dataCredentialHost     string
 }
@@ -792,26 +791,24 @@ BACKENDS
             Objects stored at: /LFS/<oid[0:2]>/<oid[2:4]>/<oid>
             Upload deduplication via existence check before transfer.
 
-CREDENTIAL PROVIDERS (sdk backend only)
-    pass-cli (default)
-            Credentials resolved by proton-drive-cli via Proton Pass CLI.
-            Setup: pass-cli login && proton-drive credential store --provider pass-cli
-    git-credential
-            Credentials resolved by proton-drive-cli via git credential fill.
-            Setup: proton-drive credential store -u <email>
-    mailbox/data password
-            Optional separate provider for two-password Proton accounts.
-            Configure --data-credential-provider and store the mailbox
-            password in a distinct secure credential entry. It is never
-            passed as a command-line argument.
+	AUTH AND LOCAL UNLOCK (sdk backend only)
+	    Account login is browser-fork-only and must be completed before Git LFS
+	    transfers. Transfer commands first run offline bridge auth-state and
+	    refuse every non-ready state.
+
+	    mailbox/data password
+	            Optional separate provider for two-password Proton accounts.
+	            Configure --data-credential-provider and store the mailbox
+	            password in a distinct secure credential entry. It is never
+	            passed as a command-line argument.
 
 SECURITY
     - SHA-256 verification on upload and download
     - OID validation: /^[a-f0-9]{64}$/i
     - Path traversal prevention (.. segments, null bytes rejected)
-    - Credentials passed via stdin JSON (not visible in ps)
-    - Credential buffers zeroed on terminate
-    - Subprocess environment filtered via allowlist
+	    - No account username/password is accepted by transfer commands
+	    - Local data-password selectors passed via stdin JSON (not visible in ps)
+	    - Subprocess environment filtered via allowlist
     - Subprocess concurrency limit: 10 max, 5-min timeout
 
 FLAGS
@@ -822,8 +819,8 @@ FLAGS
 ENVIRONMENT VARIABLES
     PROTON_LFS_BACKEND             Backend: local or sdk (default: local)
     PROTON_LFS_LOCAL_STORE_DIR     Local store directory
-    PROTON_CREDENTIAL_PROVIDER     Credential provider: pass-cli or git-credential
-    PROTON_DATA_CREDENTIAL_PROVIDER Optional mailbox/data password provider
+	    PROTON_CREDENTIAL_PROVIDER     Legacy no-op for transfer commands
+	    PROTON_DATA_CREDENTIAL_PROVIDER Optional mailbox/data password provider
     PROTON_DATA_CREDENTIAL_HOST    Host/key for data password entry
     PROTON_DRIVE_CLI_BIN           proton-drive-cli path
     NODE_BIN                       Node.js binary path
@@ -842,14 +839,9 @@ EXAMPLES
     git config lfs.customtransfer.proton.args  "--backend sdk"
     git config lfs.standalonetransferagent     proton
 
-    # Proton Drive with git-credential
-    git config lfs.customtransfer.proton.path  ./bin/git-lfs-proton-adapter
-    git config lfs.customtransfer.proton.args  "--backend sdk --credential-provider git-credential"
-    git config lfs.standalonetransferagent     proton
-
-    # Two-password Proton account with separate mailbox password entry
-    git config lfs.customtransfer.proton.args \
-      "--backend sdk --credential-provider git-credential --data-credential-provider git-credential"
+	    # Two-password Proton account with separate mailbox password entry
+	    git config lfs.customtransfer.proton.args \
+	      "--backend sdk --data-credential-provider git-credential"
 `)
 }
 
@@ -864,7 +856,7 @@ func main() {
 	allowMockTransfers := flag.Bool("allow-mock-transfers", envBoolOrDefault(EnvAllowMockTransfers, false), "Allow mock upload/download behavior (simulation only)")
 	localStoreDir := flag.String("local-store-dir", envTrim(EnvLocalStoreDir), "Local object store directory used for standalone transfers")
 	defaultCredProvider := envOrDefault(EnvCredentialProvider, DefaultCredentialProvider)
-	credentialProvider := flag.String("credential-provider", defaultCredProvider, "Credential provider: pass-cli (default) or git-credential")
+	_ = flag.String("credential-provider", defaultCredProvider, "Legacy compatibility option; ignored by transfer commands")
 	dataCredentialProvider := flag.String("data-credential-provider", envTrim(EnvDataCredentialProvider), "Optional mailbox/data password credential provider: pass-cli or git-credential")
 	dataCredentialHost := flag.String("data-credential-host", envOrDefault(EnvDataCredentialHost, DefaultDataCredentialHost), "Credential host/key for mailbox/data password provider")
 	debug := flag.Bool("debug", false, "Enable debug logging")
@@ -885,10 +877,6 @@ func main() {
 	if adapter.backendKind == "" {
 		adapter.backendKind = BackendLocal
 	}
-	adapter.credentialProvider = strings.ToLower(strings.TrimSpace(*credentialProvider))
-	if adapter.credentialProvider == "" {
-		adapter.credentialProvider = DefaultCredentialProvider
-	}
 	adapter.dataCredentialProvider = strings.ToLower(strings.TrimSpace(*dataCredentialProvider))
 	adapter.dataCredentialHost = strings.TrimSpace(*dataCredentialHost)
 
@@ -902,7 +890,7 @@ func main() {
 			AppVersion:  envTrim(EnvAppVersion),
 		}
 		bridge := NewBridgeClient(bridgeCfg)
-		adapter.backend = NewDriveCLIBackend(bridge, adapter.credentialProvider, DriveCLIBackendOptions{
+		adapter.backend = NewDriveCLIBackend(bridge, DriveCLIBackendOptions{
 			DataCredentialProvider: adapter.dataCredentialProvider,
 			DataCredentialHost:     adapter.dataCredentialHost,
 		})

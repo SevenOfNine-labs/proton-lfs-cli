@@ -3,17 +3,12 @@ package main
 import (
 	"regexp"
 	"strings"
-
-	"proton-lfs-cli/internal/config"
 )
 
 var shellWordRe = regexp.MustCompile(`^[A-Za-z0-9_@/.-]+$`)
 
-func buildProtonTransferArgs(provider, driveCLIPath string) string {
+func buildProtonTransferArgs(_ string, driveCLIPath string) string {
 	args := []string{"--backend", "sdk"}
-	if provider == config.CredentialProviderGitCredential {
-		args = append(args, "--credential-provider", "git-credential")
-	}
 	if driveCLIPath != "" {
 		args = append(args, "--drive-cli-bin", driveCLIPath)
 	}

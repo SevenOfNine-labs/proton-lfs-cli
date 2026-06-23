@@ -46,7 +46,7 @@ a separate mailbox/data password credential provider instead of using secret
 environment variables:
 
 ```bash
-git config lfs.customtransfer.proton.args "--backend=sdk --credential-provider git-credential --data-credential-provider git-credential"
+git config lfs.customtransfer.proton.args "--backend=sdk --data-credential-provider git-credential"
 ```
 
 If `node` is not visible to non-interactive shells, pass an explicit binary path:
