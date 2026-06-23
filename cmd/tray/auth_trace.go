@@ -3,8 +3,15 @@ package main
 import (
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 	"time"
+)
+
+var (
+	bearerLogPattern        = regexp.MustCompile(`(?i)\b(Bearer\s+)[A-Za-z0-9._~+/=-]+`)
+	jsonSecretPattern       = regexp.MustCompile(`(?i)("?(?:access|refresh|session|password|secret|token|uid)[A-Za-z0-9_-]*"?\s*:\s*")[^"]+(")`)
+	assignmentSecretPattern = regexp.MustCompile(`(?i)\b((?:access|refresh|session|password|secret|token)[A-Za-z0-9_-]*=)[^&\s]+`)
 )
 
 func newAuthTraceID() string {
@@ -26,5 +33,11 @@ func logSubprocessOutput(prefix string, out []byte) {
 	if text == "" {
 		return
 	}
-	trayLog.Printf("%s output:\n%s", prefix, text)
+	trayLog.Printf("%s output:\n%s", prefix, redactSubprocessOutput(text))
+}
+
+func redactSubprocessOutput(text string) string {
+	text = bearerLogPattern.ReplaceAllString(text, `${1}[redacted]`)
+	text = jsonSecretPattern.ReplaceAllString(text, `${1}[redacted]${2}`)
+	return assignmentSecretPattern.ReplaceAllString(text, `${1}[redacted]`)
 }

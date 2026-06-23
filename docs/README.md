@@ -12,6 +12,7 @@ Project-owned docs live here. Upstream/vendor docs remain under `submodules/` an
 6. `docs/architecture/proton-auth-news-audit-2026-06-21.md`
 7. `docs/operations/live-canary-runbook.md`
 8. `docs/operations/tray-platform-release-checklist.md`
+9. `docs/architecture/tray-ux-plan.md`
 
 ## Structure
 

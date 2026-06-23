@@ -75,6 +75,9 @@ func cliStatus(w io.Writer) int {
 	} else {
 		_, _ = fmt.Fprintf(w, "Transfer: %s\n", transferStatusText(report))
 	}
+	readiness := inspectAuthReadiness(timeNow())
+	_, _ = fmt.Fprintf(w, "Readiness: %s\n", strings.TrimPrefix(readiness.statusTitle, "Status: "))
+	_, _ = fmt.Fprintf(w, "Refresh:  %s\n", strings.TrimPrefix(readiness.refreshTitle, "Refresh: "))
 	return 0
 }
 

@@ -115,7 +115,7 @@ The tray binary also provides a small CLI when launched with arguments.
 | `proton-lfs-cli status` | Print session, LFS registration, provider, transfer status, and retryability/temporary failure hints. | Stable | `cmd/tray/status_test.go`, `cmd/tray/cli_test.go`. |
 | `proton-lfs-cli config [provider]` | Show or set preferred browser-fork key-password provider. | Stable | `cmd/tray/cli_test.go`. |
 | Tray Connect | Run browser-fork-only login with the configured key-password provider. | Beta | `cmd/tray/cli_test.go`, `cmd/tray/setup_test.go`. |
-| Tray status watcher | Poll transfer status and session/LFS registration; display retryability/temporary failure hints; refresh session every 15 minutes. | Beta | `cmd/tray/status_test.go`. |
+| Tray status watcher | Poll transfer status and session/LFS registration; display retryability/temporary failure hints; schedule visible token refresh from saved token expiry. | Beta | `cmd/tray/status_test.go`. |
 | Autostart | macOS LaunchAgent and Linux desktop autostart. | Beta | `cmd/tray/setup_test.go`; packaging/manual validation still needed. |
 
 ## Storage and Runtime Files
@@ -161,7 +161,7 @@ The tray binary also provides a small CLI when launched with arguments.
 | Browser-fork session handling across repos | Experimental to Beta | Key-password storage and transfer gating are covered; real browser canary still pending. |
 | Credential-provider delegation | Stable | Root never handles secrets; drive-cli provider contracts are tested. |
 | Two-password account handling | Beta | Data password separation is tested; needs real two-password canary. |
-| Tray UX | Beta | CLI logic tested; visual/menu/platform behavior needs manual release checklist. |
+| Tray UX | Beta | Status-first menu plan is documented in `docs/architecture/tray-ux-plan.md`; visual/platform behavior still needs manual release checklist. |
 | Packaging/install | Beta | Scripts exist; cross-platform validation is manual. |
 
 ## Known Gaps and Required Follow-ups

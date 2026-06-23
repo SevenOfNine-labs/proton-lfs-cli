@@ -25,10 +25,28 @@ var (
 
 // Menu items that get updated dynamically.
 var (
-	mCredGit  *systray.MenuItem
-	mCredPass *systray.MenuItem
-	mConnect  *systray.MenuItem
-	mRegister *systray.MenuItem
+	mStatus       *systray.MenuItem
+	mSession      *systray.MenuItem
+	mTransfers    *systray.MenuItem
+	mRefresh      *systray.MenuItem
+	mPrimaryAuth  *systray.MenuItem
+	mDataPassword *systray.MenuItem
+	mRecheck      *systray.MenuItem
+	mCredGit      *systray.MenuItem
+	mCredPass     *systray.MenuItem
+	mRegister     *systray.MenuItem
+	mOpenLogs     *systray.MenuItem
+	mDoctor       *systray.MenuItem
+
+	currentAuthAction authMenuAction
+)
+
+type authMenuAction string
+
+const (
+	authActionConnect    authMenuAction = "connect"
+	authActionDisconnect authMenuAction = "disconnect"
+	authActionNone       authMenuAction = "none"
 )
 
 func init() {
@@ -48,25 +66,42 @@ func setupMenu() {
 
 	systray.AddSeparator()
 
-	mCredMenu := systray.AddMenuItem("Credential Store", "Choose where your Proton credentials are stored")
-	mCredGit = mCredMenu.AddSubMenuItem("Git Credential Manager", "macOS Keychain, Windows Credential Manager, or Linux Secret Service")
-	mCredPass = mCredMenu.AddSubMenuItem("Proton Pass", "Proton Pass CLI (pass-cli) for encrypted credential storage")
+	mStatus = systray.AddMenuItem("Status: Checking...", "Current Proton LFS readiness")
+	mSession = systray.AddMenuItem("Session: Checking...", "Current Proton session state")
+	mTransfers = systray.AddMenuItem("Transfers: Checking...", "Current Git LFS transfer readiness")
+	mRefresh = systray.AddMenuItem("Refresh: Checking...", "Current session refresh health")
+	mStatus.Disable()
+	mSession.Disable()
+	mTransfers.Disable()
+	mRefresh.Disable()
+
+	systray.AddSeparator()
+
+	mPrimaryAuth = systray.AddMenuItem("Connect to Proton...", "Start browser sign-in")
+	mDataPassword = systray.AddMenuItem("Configure Data Password...", "Open mailbox/data password setup instructions")
+	mRecheck = systray.AddMenuItem("Recheck Status", "Refresh tray readiness state")
+
+	systray.AddSeparator()
+
+	mCredPass = systray.AddMenuItemCheckbox("Use Proton Pass", "Store browser-fork key password in Proton Pass CLI", false)
+	mCredGit = systray.AddMenuItemCheckbox("Use Git Credential Manager", "Store browser-fork key password in the OS credential manager", false)
 
 	prefs := config.LoadPrefs()
 	applyCredCheckmarks(prefs.CredentialProvider)
 
 	systray.AddSeparator()
 
-	mConnect = systray.AddMenuItemCheckbox("Connect to Proton\u2026", "Store credentials and authenticate with Proton", false)
 	mRegister = systray.AddMenuItemCheckbox("Enable LFS Backend", "Configure Git to route LFS transfers through Proton Drive", false)
 
 	systray.AddSeparator()
 
+	mOpenLogs = systray.AddMenuItem("Open Logs", "Open a terminal tailing Proton LFS tray logs")
+	mDoctor = systray.AddMenuItem("Run Doctor...", "Open offline Proton Drive doctor checks")
 	mAutoStart := systray.AddMenuItemCheckbox("Start at System Login", "Automatically launch the tray app when you log in to your computer", isAutoStartEnabled())
 
 	systray.AddSeparator()
 
-	mQuit := systray.AddMenuItem("Quit", "Quit Proton LFS tray")
+	mQuit := systray.AddMenuItem("Quit Proton LFS", "Quit Proton LFS tray")
 
 	// Event loop
 	go func() {
@@ -76,10 +111,18 @@ func setupMenu() {
 				switchCredentialProvider(config.CredentialProviderGitCredential)
 			case <-mCredPass.ClickedCh:
 				switchCredentialProvider(config.CredentialProviderPassCLI)
-			case <-mConnect.ClickedCh:
-				connectToProton()
+			case <-mPrimaryAuth.ClickedCh:
+				handlePrimaryAuthAction()
+			case <-mDataPassword.ClickedCh:
+				openDataPasswordGuide()
+			case <-mRecheck.ClickedCh:
+				recheckStatus()
 			case <-mRegister.ClickedCh:
 				registerGitLFS()
+			case <-mOpenLogs.ClickedCh:
+				openLogs()
+			case <-mDoctor.ClickedCh:
+				runDoctor()
 			case <-mAutoStart.ClickedCh:
 				toggleAutoStart(mAutoStart)
 			case <-mQuit.ClickedCh:
@@ -90,19 +133,20 @@ func setupMenu() {
 	}()
 }
 
-// applyConnectStatus updates the Connect menu item checkmark and title.
-func applyConnectStatus(connected bool) {
-	if connected {
-		mConnect.SetTitle("Connected to Proton")
-		mConnect.Check()
-	} else {
-		mConnect.SetTitle("Connect to Proton\u2026")
-		mConnect.Uncheck()
+func handlePrimaryAuthAction() {
+	switch currentAuthAction {
+	case authActionConnect:
+		connectToProton()
+	case authActionDisconnect:
+		disconnectFromProton()
 	}
 }
 
 // applyRegisterStatus updates the Register menu item checkmark and title.
 func applyRegisterStatus(enabled bool) {
+	if mRegister == nil {
+		return
+	}
 	if enabled {
 		mRegister.SetTitle("LFS Backend Enabled")
 		mRegister.Check()
@@ -113,6 +157,9 @@ func applyRegisterStatus(enabled bool) {
 }
 
 func applyCredCheckmarks(provider string) {
+	if mCredGit == nil || mCredPass == nil {
+		return
+	}
 	if provider == config.CredentialProviderGitCredential {
 		mCredGit.Check()
 		mCredPass.Uncheck()
@@ -142,7 +189,7 @@ func registerGitLFS() {
 
 	prefs := config.LoadPrefs()
 	driveCLIPath := discoverDriveCLIBinary()
-	args := buildProtonTransferArgs(prefs.CredentialProvider, driveCLIPath)
+	args := buildProtonTransferArgsFromPrefs(prefs, driveCLIPath)
 	if err := exec.Command("git", "config", "--global", "lfs.customtransfer.proton.args", args).Run(); err != nil {
 		sendNotification("Error: git config failed")
 		return
@@ -173,6 +220,96 @@ func isSessionActive() bool {
 	}
 	_, err := os.Stat(sf)
 	return err == nil
+}
+
+func disconnectFromProton() {
+	driveCLI := discoverDriveCLIBinary()
+	if driveCLI == "" {
+		trayLog.Print("disconnect: proton-drive-cli binary not found")
+		sendNotification("Error: CLI not found")
+		return
+	}
+	go func() {
+		cmd := exec.Command(driveCLI, "logout")
+		out, err := cmd.CombinedOutput()
+		logSubprocessOutput("disconnect", out)
+		if err != nil {
+			trayLog.Printf("disconnect: logout failed: %v", err)
+			sendNotification("Disconnect failed")
+			return
+		}
+		trayLog.Print("disconnect: logout succeeded")
+		sendNotification("Disconnected from Proton")
+		applyLoginStatus()
+	}()
+}
+
+func recheckStatus() {
+	applyStatus()
+	applyLoginStatus()
+	applyLFSStatus()
+	maybeRefreshSession()
+}
+
+func openLogs() {
+	logPath := trayLogPath()
+	cmd := terminalCommand(fmt.Sprintf("tail -n 200 -f %s", shellQuoteArg(logPath)))
+	if cmd == nil || cmd.Start() != nil {
+		sendNotification("Logs: " + logPath)
+	}
+}
+
+func runDoctor() {
+	driveCLI := discoverDriveCLIBinary()
+	if driveCLI == "" {
+		sendNotification("Error: CLI not found")
+		return
+	}
+	prefs := config.LoadPrefs()
+	args := []string{
+		shellQuoteArg(driveCLI),
+		"doctor",
+		"--key-password-provider",
+		shellQuoteArg(prefs.CredentialProvider),
+	}
+	if prefs.DataCredentialProvider != "" {
+		args = append(args,
+			"--data-credential-provider",
+			shellQuoteArg(prefs.DataCredentialProvider),
+			"--data-credential-host",
+			shellQuoteArg(resolveDataCredentialHost(prefs)),
+		)
+	}
+	cmd := terminalCommand(strings.Join(args, " ") + "; echo; echo 'Press Enter to close...'; read -r")
+	if cmd == nil || cmd.Start() != nil {
+		sendNotification("Doctor could not open terminal")
+	}
+}
+
+func openDataPasswordGuide() {
+	host := config.DefaultDataCredentialHost
+	script := strings.Join([]string{
+		"echo 'Proton LFS data-password setup'",
+		"echo",
+		fmt.Sprintf("echo 'Store the Proton mailbox/data password under https://%s.'", host),
+		"echo 'Then set PROTON_DATA_CREDENTIAL_PROVIDER or update Git LFS args with --data-credential-provider.'",
+		"echo",
+		"echo 'Recommended provider: pass-cli'",
+		"echo",
+		"echo 'Press Enter to close...'",
+		"read -r",
+	}, "; ")
+	cmd := terminalCommand(script)
+	if cmd == nil || cmd.Start() != nil {
+		sendNotification("Configure data password in your credential provider")
+	}
+}
+
+func resolveDataCredentialHost(prefs config.Preferences) string {
+	if strings.TrimSpace(prefs.DataCredentialHost) != "" {
+		return strings.TrimSpace(prefs.DataCredentialHost)
+	}
+	return config.DefaultDataCredentialHost
 }
 
 // sendNotification shows a native macOS notification banner, or falls back

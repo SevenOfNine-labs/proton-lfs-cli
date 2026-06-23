@@ -10,8 +10,10 @@ import (
 
 // Preferences stores user-facing settings managed by the tray application.
 type Preferences struct {
-	CredentialProvider string `json:"credentialProvider"`
-	Enabled            bool   `json:"enabled"`
+	CredentialProvider     string `json:"credentialProvider"`
+	DataCredentialProvider string `json:"dataCredentialProvider,omitempty"`
+	DataCredentialHost     string `json:"dataCredentialHost,omitempty"`
+	Enabled                bool   `json:"enabled"`
 }
 
 // DefaultPreferences returns the default preferences.
@@ -36,6 +38,9 @@ func LoadPrefs() Preferences {
 	}
 	if prefs.CredentialProvider == "" {
 		prefs.CredentialProvider = DefaultCredentialProvider
+	}
+	if prefs.DataCredentialProvider != "" && prefs.DataCredentialHost == "" {
+		prefs.DataCredentialHost = DefaultDataCredentialHost
 	}
 	return prefs
 }

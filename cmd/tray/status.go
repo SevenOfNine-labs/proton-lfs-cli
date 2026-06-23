@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -15,13 +16,61 @@ import (
 )
 
 const pollInterval = 5 * time.Second
-const refreshInterval = 15 * time.Minute
+const refreshBeforeExpiry = 10 * time.Minute
+const refreshRetryInterval = time.Minute
+const refreshFallbackInterval = 12 * time.Hour
 
 var (
-	stopCh      chan struct{}
-	stopOnce    sync.Once
-	lastRefresh time.Time
+	stopCh     chan struct{}
+	stopOnce   sync.Once
+	refreshMu  sync.Mutex
+	refreshNow = time.Now
 )
+
+var refreshState = sessionRefreshState{}
+
+type sessionMetadata struct {
+	SessionID            string   `json:"sessionId"`
+	UID                  string   `json:"uid"`
+	AccessToken          string   `json:"accessToken"`
+	RefreshToken         string   `json:"refreshToken"`
+	Scopes               []string `json:"scopes"`
+	PasswordMode         int      `json:"passwordMode"`
+	AuthMode             string   `json:"authMode"`
+	KeyPasswordPersisted bool     `json:"keyPasswordPersisted"`
+	TokenExpiresAt       int64    `json:"tokenExpiresAt"`
+}
+
+type authReadiness struct {
+	statusTitle        string
+	sessionTitle       string
+	transferTitle      string
+	refreshTitle       string
+	tooltip            string
+	actionTitle        string
+	action             authMenuAction
+	dataPasswordActive bool
+	signedIn           bool
+	ready              bool
+	blocked            bool
+}
+
+type sessionRefreshState struct {
+	InProgress  bool
+	LastAttempt time.Time
+	LastSuccess time.Time
+	LastError   string
+	NextAttempt time.Time
+}
+
+type refreshDecision struct {
+	Attempt     bool
+	NextAttempt time.Time
+}
+
+func timeNow() time.Time {
+	return refreshNow()
+}
 
 func startStatusWatcher() {
 	stopCh = make(chan struct{})
@@ -63,10 +112,9 @@ func sessionFilePath() string {
 	return filepath.Join(home, ".proton-drive-cli", "session.json")
 }
 
-// applyLoginStatus checks whether a session file exists and updates the
-// Connect menu item checkmark.
+// applyLoginStatus checks local auth readiness and updates user-facing labels.
 func applyLoginStatus() {
-	applyConnectStatus(isSessionActive())
+	applyAuthReadiness(inspectAuthReadiness(timeNow()))
 }
 
 // applyLFSStatus checks whether the Proton LFS adapter is registered in
@@ -75,35 +123,333 @@ func applyLFSStatus() {
 	applyRegisterStatus(isLFSEnabled())
 }
 
-// maybeRefreshSession proactively refreshes the Proton session token
-// every 15 minutes to keep the session alive. This calls POST /auth/v4/refresh
-// (NOT a login attempt) — it never triggers CAPTCHA or rate-limiting.
+// maybeRefreshSession proactively refreshes the Proton session token near
+// expiry. This calls POST /auth/v4/refresh and never attempts account login.
 func maybeRefreshSession() {
-	if time.Since(lastRefresh) < refreshInterval {
+	meta, ok := readSessionMetadata()
+	if !ok || meta.RefreshToken == "" {
 		return
 	}
-
-	// Check if a session file exists (no point refreshing if not logged in)
-	sf := sessionFilePath()
-	if sf == "" {
+	now := timeNow()
+	decision := decideRefresh(now, meta, snapshotRefreshState())
+	if !decision.Attempt {
+		setRefreshNextAttempt(decision.NextAttempt)
 		return
 	}
-	if _, err := os.Stat(sf); os.IsNotExist(err) {
-		return
-	}
-
 	driveCLI := discoverDriveCLIBinary()
 	if driveCLI == "" {
+		recordRefreshFailure(now, "proton-drive-cli not found")
+		applyLoginStatus()
 		return
 	}
-
-	lastRefresh = time.Now()
-
-	// Spawn in background — don't block the status poll loop
+	if !markRefreshStarted(now) {
+		return
+	}
+	applyLoginStatus()
 	go func() {
 		cmd := exec.Command(driveCLI, "session", "refresh")
-		_ = cmd.Run()
+		out, err := cmd.CombinedOutput()
+		logSubprocessOutput("refresh", out)
+		finishedAt := timeNow()
+		if err != nil {
+			recordRefreshFailure(finishedAt, err.Error())
+			trayLog.Printf("refresh: failed: %v", err)
+		} else {
+			recordRefreshSuccess(finishedAt)
+			trayLog.Print("refresh: session token refreshed")
+		}
+		applyLoginStatus()
 	}()
+}
+
+func readSessionMetadata() (sessionMetadata, bool) {
+	sf := sessionFilePath()
+	if sf == "" {
+		return sessionMetadata{}, false
+	}
+	data, err := os.ReadFile(sf)
+	if err != nil {
+		return sessionMetadata{}, false
+	}
+	var meta sessionMetadata
+	if err := json.Unmarshal(data, &meta); err != nil {
+		return sessionMetadata{}, false
+	}
+	return meta, true
+}
+
+func validSessionShape(meta sessionMetadata) bool {
+	return meta.SessionID != "" &&
+		meta.UID != "" &&
+		meta.AccessToken != "" &&
+		meta.RefreshToken != "" &&
+		meta.Scopes != nil &&
+		meta.PasswordMode > 0
+}
+
+func tokenExpiry(meta sessionMetadata) time.Time {
+	if meta.TokenExpiresAt <= 0 {
+		return time.Time{}
+	}
+	return time.UnixMilli(meta.TokenExpiresAt)
+}
+
+func hasConfiguredDataCredential() bool {
+	prefs := config.LoadPrefs()
+	if strings.TrimSpace(prefs.DataCredentialProvider) != "" {
+		return true
+	}
+	if config.EnvTrim(config.EnvDataCredentialProvider) != "" {
+		return true
+	}
+	return configuredDataCredentialProviderFromGit() != ""
+}
+
+func configuredDataCredentialProviderFromGit() string {
+	out, err := exec.Command("git", "config", "--global", "lfs.customtransfer.proton.args").Output()
+	if err != nil {
+		return ""
+	}
+	return parseFlagValue(string(out), "--data-credential-provider")
+}
+
+func parseFlagValue(text string, flag string) string {
+	fields := strings.Fields(text)
+	for i, field := range fields {
+		if field == flag && i+1 < len(fields) {
+			return strings.Trim(fields[i+1], `"'`)
+		}
+		if strings.HasPrefix(field, flag+"=") {
+			return strings.Trim(strings.TrimPrefix(field, flag+"="), `"'`)
+		}
+	}
+	return ""
+}
+
+func inspectAuthReadiness(now time.Time) authReadiness {
+	meta, hasSession := readSessionMetadata()
+	health := snapshotRefreshState()
+	base := authReadiness{
+		statusTitle:   "Status: Not connected",
+		sessionTitle:  "Session: Not connected",
+		transferTitle: "Transfers: Sign-in required",
+		actionTitle:   "Connect to Proton...",
+		action:        authActionConnect,
+		refreshTitle:  refreshTitle(now, meta, hasSession, health),
+		tooltip:       "Proton LFS - Not connected",
+	}
+	if !hasSession {
+		return base
+	}
+	base.signedIn = true
+	base.actionTitle = "Disconnect from Proton"
+	base.action = authActionDisconnect
+	base.sessionTitle = "Session: Signed in"
+
+	if !validSessionShape(meta) {
+		base.statusTitle = "Status: Setup needed"
+		base.sessionTitle = "Session: Invalid"
+		base.transferTitle = "Transfers: Reconnect required"
+		base.tooltip = "Proton LFS - Setup needed: invalid saved session"
+		base.blocked = true
+		return base
+	}
+	if expiry := tokenExpiry(meta); !expiry.IsZero() && !now.Before(expiry) {
+		base.statusTitle = "Status: Setup needed"
+		base.sessionTitle = "Session: Expired"
+		base.transferTitle = "Transfers: Refresh required"
+		base.tooltip = "Proton LFS - Setup needed: session refresh required"
+		base.blocked = true
+		return base
+	}
+	if meta.PasswordMode == 2 && !hasConfiguredDataCredential() {
+		base.statusTitle = "Status: Setup needed"
+		base.transferTitle = "Transfers: Data password needed"
+		base.dataPasswordActive = true
+		base.tooltip = "Proton LFS - Setup needed: data password required"
+		base.blocked = true
+		return base
+	}
+	base.statusTitle = "Status: Ready"
+	base.transferTitle = "Transfers: Ready"
+	base.tooltip = "Proton LFS - Ready"
+	base.ready = true
+	return base
+}
+
+func applyAuthReadiness(readiness authReadiness) {
+	if mStatus != nil {
+		mStatus.SetTitle(readiness.statusTitle)
+	}
+	if mSession != nil {
+		mSession.SetTitle(readiness.sessionTitle)
+	}
+	if mTransfers != nil {
+		mTransfers.SetTitle(readiness.transferTitle)
+	}
+	if mRefresh != nil {
+		mRefresh.SetTitle(readiness.refreshTitle)
+	}
+	if mPrimaryAuth != nil {
+		mPrimaryAuth.SetTitle(readiness.actionTitle)
+		if readiness.action == authActionNone {
+			mPrimaryAuth.Disable()
+		} else {
+			mPrimaryAuth.Enable()
+		}
+	}
+	if mDataPassword != nil {
+		if readiness.dataPasswordActive {
+			mDataPassword.Enable()
+		} else {
+			mDataPassword.Disable()
+		}
+	}
+	currentAuthAction = readiness.action
+	if !authReadinessShouldOverrideTransferStatus(readiness) {
+		return
+	}
+	switch {
+	case readiness.ready:
+		systray.SetIcon(iconOK)
+		systray.SetTemplateIcon(iconOK, iconOK)
+	case readiness.blocked:
+		systray.SetIcon(iconError)
+		systray.SetTemplateIcon(iconError, iconError)
+	default:
+		systray.SetIcon(iconIdle)
+		systray.SetTemplateIcon(iconIdle, iconIdle)
+	}
+	systray.SetTooltip(readiness.tooltip)
+}
+
+func authReadinessShouldOverrideTransferStatus(readiness authReadiness) bool {
+	if readiness.blocked || !readiness.signedIn {
+		return true
+	}
+	report, err := config.ReadStatus()
+	if err != nil {
+		return true
+	}
+	switch report.State {
+	case config.StateIdle, config.StateOK:
+		return true
+	default:
+		return false
+	}
+}
+
+func snapshotRefreshState() sessionRefreshState {
+	refreshMu.Lock()
+	defer refreshMu.Unlock()
+	return refreshState
+}
+
+func setRefreshNextAttempt(next time.Time) {
+	if next.IsZero() {
+		return
+	}
+	refreshMu.Lock()
+	if refreshState.NextAttempt.IsZero() || !refreshState.NextAttempt.Equal(next) {
+		refreshState.NextAttempt = next
+	}
+	refreshMu.Unlock()
+}
+
+func markRefreshStarted(now time.Time) bool {
+	refreshMu.Lock()
+	defer refreshMu.Unlock()
+	if refreshState.InProgress {
+		return false
+	}
+	refreshState.InProgress = true
+	refreshState.LastAttempt = now
+	refreshState.LastError = ""
+	return true
+}
+
+func recordRefreshSuccess(now time.Time) {
+	refreshMu.Lock()
+	defer refreshMu.Unlock()
+	refreshState.InProgress = false
+	refreshState.LastSuccess = now
+	refreshState.LastError = ""
+	if meta, ok := readSessionMetadata(); ok {
+		refreshState.NextAttempt = nextRefreshAttempt(now, meta)
+	} else {
+		refreshState.NextAttempt = time.Time{}
+	}
+}
+
+func recordRefreshFailure(now time.Time, message string) {
+	refreshMu.Lock()
+	defer refreshMu.Unlock()
+	refreshState.InProgress = false
+	refreshState.LastAttempt = now
+	refreshState.LastError = truncate(strings.TrimSpace(message), 120)
+	refreshState.NextAttempt = now.Add(refreshRetryInterval)
+}
+
+func decideRefresh(now time.Time, meta sessionMetadata, health sessionRefreshState) refreshDecision {
+	if health.InProgress {
+		return refreshDecision{}
+	}
+	if !health.NextAttempt.IsZero() && now.Before(health.NextAttempt) {
+		return refreshDecision{NextAttempt: health.NextAttempt}
+	}
+	next := nextRefreshAttempt(now, meta)
+	if next.IsZero() || !now.Before(next) {
+		return refreshDecision{Attempt: true}
+	}
+	return refreshDecision{NextAttempt: next}
+}
+
+func nextRefreshAttempt(now time.Time, meta sessionMetadata) time.Time {
+	expiry := tokenExpiry(meta)
+	if expiry.IsZero() {
+		return now.Add(refreshFallbackInterval)
+	}
+	return expiry.Add(-refreshBeforeExpiry)
+}
+
+func refreshTitle(now time.Time, meta sessionMetadata, hasSession bool, health sessionRefreshState) string {
+	switch {
+	case !hasSession:
+		return "Refresh: No session"
+	case health.InProgress:
+		return "Refresh: Updating..."
+	case health.LastError != "":
+		if !health.NextAttempt.IsZero() && health.NextAttempt.After(now) {
+			return "Refresh: Failed; retry in " + compactDuration(health.NextAttempt.Sub(now))
+		}
+		return "Refresh: Failed"
+	case !health.LastSuccess.IsZero():
+		return "Refresh: Last refreshed " + relativeTime(health.LastSuccess)
+	}
+	next := nextRefreshAttempt(now, meta)
+	if next.IsZero() {
+		return "Refresh: Scheduled"
+	}
+	if !now.Before(next) {
+		return "Refresh: Due now"
+	}
+	return "Refresh: Due in " + compactDuration(next.Sub(now))
+}
+
+func compactDuration(d time.Duration) string {
+	if d <= 0 {
+		return "now"
+	}
+	switch {
+	case d < time.Minute:
+		return "<1m"
+	case d < time.Hour:
+		return fmt.Sprintf("%dm", int(d.Round(time.Minute).Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh", int(d.Round(time.Hour).Hours()))
+	default:
+		return fmt.Sprintf("%dd", int(d.Round(24*time.Hour).Hours()/24))
+	}
 }
 
 func applyStatus() {

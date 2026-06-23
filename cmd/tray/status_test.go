@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -10,6 +11,37 @@ import (
 
 	"proton-lfs-cli/internal/config"
 )
+
+func writeSessionForStatusTest(t *testing.T, home string, meta sessionMetadata) {
+	t.Helper()
+	dir := filepath.Join(home, ".proton-drive-cli")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	data, err := json.Marshal(meta)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "session.json"), data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func resetRefreshForStatusTest(t *testing.T, now time.Time) {
+	t.Helper()
+	origNow := refreshNow
+	refreshNow = func() time.Time { return now }
+	refreshMu.Lock()
+	origState := refreshState
+	refreshState = sessionRefreshState{}
+	refreshMu.Unlock()
+	t.Cleanup(func() {
+		refreshNow = origNow
+		refreshMu.Lock()
+		refreshState = origState
+		refreshMu.Unlock()
+	})
+}
 
 func TestRelativeTime(t *testing.T) {
 	cases := []struct {
@@ -166,6 +198,125 @@ func TestSessionFilePath(t *testing.T) {
 	expected := filepath.Join(home, ".proton-drive-cli", "session.json")
 	if got != expected {
 		t.Fatalf("sessionFilePath() = %q, expected %q", got, expected)
+	}
+}
+
+func TestInspectAuthReadinessBlocksTwoPasswordWithoutDataCredential(t *testing.T) {
+	now := time.Date(2026, 6, 23, 18, 0, 0, 0, time.UTC)
+	resetRefreshForStatusTest(t, now)
+	home := setupFakeHome(t, fakeHomeOpts{configJSON: `{"credentialProvider":"pass-cli"}`})
+	setupGitConfig(t, "")
+	writeSessionForStatusTest(t, home, sessionMetadata{
+		SessionID:            "session-id",
+		UID:                  "uid-123",
+		AccessToken:          "access",
+		RefreshToken:         "refresh",
+		Scopes:               []string{"drive"},
+		PasswordMode:         2,
+		AuthMode:             "browser-fork",
+		KeyPasswordPersisted: true,
+		TokenExpiresAt:       now.Add(24 * time.Hour).UnixMilli(),
+	})
+
+	readiness := inspectAuthReadiness(now)
+	if !readiness.blocked || readiness.ready {
+		t.Fatalf("expected blocked readiness, got %#v", readiness)
+	}
+	if readiness.statusTitle != "Status: Setup needed" {
+		t.Fatalf("unexpected status title: %s", readiness.statusTitle)
+	}
+	if readiness.transferTitle != "Transfers: Data password needed" {
+		t.Fatalf("unexpected transfer title: %s", readiness.transferTitle)
+	}
+	if !readiness.dataPasswordActive {
+		t.Fatal("data-password action should be enabled for two-password blocker")
+	}
+	if readiness.action != authActionDisconnect {
+		t.Fatalf("signed-in blocked state should offer disconnect, got %s", readiness.action)
+	}
+}
+
+func TestInspectAuthReadinessReadyWithConfiguredDataCredential(t *testing.T) {
+	now := time.Date(2026, 6, 23, 18, 0, 0, 0, time.UTC)
+	resetRefreshForStatusTest(t, now)
+	home := setupFakeHome(t, fakeHomeOpts{
+		configJSON: `{"credentialProvider":"pass-cli","dataCredentialProvider":"pass-cli"}`,
+	})
+	setupGitConfig(t, "")
+	writeSessionForStatusTest(t, home, sessionMetadata{
+		SessionID:            "session-id",
+		UID:                  "uid-123",
+		AccessToken:          "access",
+		RefreshToken:         "refresh",
+		Scopes:               []string{"drive"},
+		PasswordMode:         2,
+		AuthMode:             "browser-fork",
+		KeyPasswordPersisted: true,
+		TokenExpiresAt:       now.Add(24 * time.Hour).UnixMilli(),
+	})
+
+	readiness := inspectAuthReadiness(now)
+	if !readiness.ready || readiness.blocked {
+		t.Fatalf("expected ready readiness, got %#v", readiness)
+	}
+	if readiness.transferTitle != "Transfers: Ready" {
+		t.Fatalf("unexpected transfer title: %s", readiness.transferTitle)
+	}
+}
+
+func TestDecideRefreshUsesTokenExpiry(t *testing.T) {
+	now := time.Date(2026, 6, 23, 18, 0, 0, 0, time.UTC)
+	meta := sessionMetadata{TokenExpiresAt: now.Add(24 * time.Hour).UnixMilli()}
+
+	decision := decideRefresh(now, meta, sessionRefreshState{})
+	if decision.Attempt {
+		t.Fatal("fresh token should not refresh immediately")
+	}
+	wantNext := now.Add(24 * time.Hour).Add(-refreshBeforeExpiry)
+	if !decision.NextAttempt.Equal(wantNext) {
+		t.Fatalf("next attempt = %s, want %s", decision.NextAttempt, wantNext)
+	}
+
+	nearExpiry := sessionMetadata{TokenExpiresAt: now.Add(5 * time.Minute).UnixMilli()}
+	if decision := decideRefresh(now, nearExpiry, sessionRefreshState{}); !decision.Attempt {
+		t.Fatalf("near-expiry token should refresh, got %#v", decision)
+	}
+}
+
+func TestDecideRefreshHonorsRetryBackoff(t *testing.T) {
+	now := time.Date(2026, 6, 23, 18, 0, 0, 0, time.UTC)
+	meta := sessionMetadata{TokenExpiresAt: now.Add(5 * time.Minute).UnixMilli()}
+	health := sessionRefreshState{LastError: "network", NextAttempt: now.Add(time.Minute)}
+
+	decision := decideRefresh(now, meta, health)
+	if decision.Attempt {
+		t.Fatal("refresh should wait for retry backoff")
+	}
+	if !decision.NextAttempt.Equal(health.NextAttempt) {
+		t.Fatalf("next attempt = %s, want %s", decision.NextAttempt, health.NextAttempt)
+	}
+}
+
+func TestAuthReadinessDoesNotOverrideActiveTransferStatus(t *testing.T) {
+	setupFakeHome(t, fakeHomeOpts{})
+	if err := config.WriteStatus(config.StatusReport{
+		State:  config.StateTransferring,
+		LastOp: "upload",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if authReadinessShouldOverrideTransferStatus(authReadiness{
+		signedIn: true,
+		ready:    true,
+	}) {
+		t.Fatal("ready auth state must not hide active transfer status")
+	}
+	if !authReadinessShouldOverrideTransferStatus(authReadiness{
+		signedIn: true,
+		blocked:  true,
+	}) {
+		t.Fatal("blocked auth state should override transfer status")
 	}
 }
 

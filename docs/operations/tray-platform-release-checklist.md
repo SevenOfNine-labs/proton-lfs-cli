@@ -33,6 +33,8 @@ refresh behavior changes.
 ## Session Refresh Display
 
 - Start with a ready local session and confirm the tray/helper shows ready.
+- Start with a two-password session and no data credential provider; confirm
+  the tray/helper shows setup-needed, not connected/ready.
 - Simulate `session_expired` and confirm it does not attempt full login.
 - Simulate `session_invalid` and confirm transfer actions are blocked.
 - Trigger a mocked refresh success and confirm the visible state returns to

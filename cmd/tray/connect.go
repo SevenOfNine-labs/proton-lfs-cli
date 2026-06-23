@@ -1,9 +1,13 @@
 package main
 
 import (
+	"bufio"
+	"bytes"
 	"fmt"
+	"io"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 
 	"proton-lfs-cli/internal/config"
@@ -54,8 +58,17 @@ func connectToProton() {
 			return
 		}
 		trayLog.Print("connect: login succeeded")
-		sendNotification("Connected to Proton")
-		applyConnectStatus(true)
+		readiness := inspectAuthReadiness(timeNow())
+		trayLog.Printf("connect: post-login readiness: %s; %s",
+			readiness.statusTitle, readiness.transferTitle)
+		if readiness.ready {
+			sendNotification("Proton LFS Ready")
+		} else if readiness.blocked {
+			sendNotification("Signed in; setup needed")
+		} else {
+			sendNotification("Signed in")
+		}
+		applyAuthReadiness(readiness)
 	}()
 }
 
@@ -80,12 +93,47 @@ func protonDriveLoginWithTrace(driveCLI string, provider string, traceID string,
 			trayLog.Print("connect: warning: pass-cli not found in PATH")
 		}
 	}
-	out, err := cmd.CombinedOutput()
-	logSubprocessOutput("connect", out)
+	out, err := runLoggedCommand("connect", cmd)
 	if err != nil {
 		trayLog.Printf("connect: exec failed: %v\n  output: %s", err, out)
 	}
 	return out, err
+}
+
+func runLoggedCommand(prefix string, cmd *exec.Cmd) ([]byte, error) {
+	var out bytes.Buffer
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, err
+	}
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return nil, err
+	}
+	if err := cmd.Start(); err != nil {
+		return nil, err
+	}
+	var wg sync.WaitGroup
+	var outMu sync.Mutex
+	wg.Add(2)
+	go streamCommandOutput(prefix, stdout, &out, &outMu, &wg)
+	go streamCommandOutput(prefix, stderr, &out, &outMu, &wg)
+	wg.Wait()
+	err = cmd.Wait()
+	return out.Bytes(), err
+}
+
+func streamCommandOutput(prefix string, r io.Reader, out *bytes.Buffer, outMu *sync.Mutex, wg *sync.WaitGroup) {
+	defer wg.Done()
+	scanner := bufio.NewScanner(r)
+	for scanner.Scan() {
+		line := scanner.Text()
+		outMu.Lock()
+		out.WriteString(line)
+		out.WriteByte('\n')
+		outMu.Unlock()
+		logSubprocessOutput(prefix, []byte(line))
+	}
 }
 
 func activeAuthRateLimit(now time.Time) (time.Duration, bool) {

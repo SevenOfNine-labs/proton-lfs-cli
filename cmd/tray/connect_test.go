@@ -41,6 +41,19 @@ func TestWithAuthTraceEnvSkipsEmptyTraceID(t *testing.T) {
 	}
 }
 
+func TestRedactSubprocessOutput(t *testing.T) {
+	input := `{"AccessToken":"access-token","RefreshToken":"refresh-token","UID":"uid-123"} Bearer secret-token password=hunter2`
+	got := redactSubprocessOutput(input)
+	for _, forbidden := range []string{"access-token", "refresh-token", "uid-123", "secret-token", "hunter2"} {
+		if strings.Contains(got, forbidden) {
+			t.Fatalf("redacted output leaked %q: %s", forbidden, got)
+		}
+	}
+	if !strings.Contains(got, "[redacted]") {
+		t.Fatalf("expected redaction marker in %s", got)
+	}
+}
+
 func TestBuildTrayLoginArgsUsesBrowserForkKeyPasswordProviderOnly(t *testing.T) {
 	setupTrayLogForTest(t)
 	args, ok := buildTrayLoginArgs(config.CredentialProviderPassCLI)

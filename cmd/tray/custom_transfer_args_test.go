@@ -40,3 +40,14 @@ func TestBuildProtonTransferArgsQuotesSingleQuotes(t *testing.T) {
 		t.Fatalf("expected %q, got %q", want, got)
 	}
 }
+
+func TestBuildProtonTransferArgsFromPrefsIncludesDataCredential(t *testing.T) {
+	got := buildProtonTransferArgsFromPrefs(config.Preferences{
+		CredentialProvider:     config.CredentialProviderPassCLI,
+		DataCredentialProvider: config.CredentialProviderPassCLI,
+	}, "/tmp/proton-drive-cli")
+	want := "--backend sdk --drive-cli-bin /tmp/proton-drive-cli --data-credential-provider pass-cli --data-credential-host proton-data.proton-lfs-cli.local"
+	if got != want {
+		t.Fatalf("expected %q, got %q", want, got)
+	}
+}
