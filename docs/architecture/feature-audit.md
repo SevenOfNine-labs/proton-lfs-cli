@@ -160,7 +160,7 @@ The tray binary also provides a small CLI when launched with arguments.
 | Proton SDK bridge transfer path | Beta | Mocked E2E and offline auth gates are strong; real Proton canary remains opt-in. |
 | Browser-fork session handling across repos | Experimental to Beta | Key-password storage and transfer gating are covered; real browser canary still pending. |
 | Credential-provider delegation | Stable | Root never handles secrets; drive-cli provider contracts are tested. |
-| Two-password account handling | Beta | Data password separation is tested; needs real two-password canary. |
+| Two-password account handling | Beta | Browser-fork key-password readiness is covered; explicit data-password fallback remains guarded. |
 | Tray UX | Beta | Status-first menu plan is documented in `docs/architecture/tray-ux-plan.md`; visual/platform behavior still needs manual release checklist. |
 | Packaging/install | Beta | Scripts exist; cross-platform validation is manual. |
 

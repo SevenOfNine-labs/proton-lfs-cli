@@ -19,7 +19,7 @@
 6. Primary auth action:
    - `Connect to Proton...` when no session exists.
    - `Disconnect from Proton` when a saved session exists.
-7. `Configure Data Password...` only enabled for a two-password blocker.
+7. `Configure Data Password...` only enabled for a data-password blocker.
 8. `Recheck Status`.
 9. Provider choices as top-level check items:
    - `Use Proton Pass`.
@@ -33,10 +33,12 @@
 ## State Rules
 
 - `Ready` means a saved browser-fork session exists, the local access token is
-  not expired, and no local transfer blocker is known.
+  not expired, browser-fork key material is recorded, and no local transfer
+  blocker is known.
 - `Setup needed` means the user is signed in but transfers are blocked. The
-  current common case is a two-password account without a configured
-  mailbox/data-password provider.
+  common cases are missing browser-fork key material, an expired local token,
+  an invalid session shape, or a legacy unlock path without an explicit data
+  credential.
 - `Not connected` means there is no saved Proton Drive session.
 - `Connected` is not a menu state. The app uses `Signed in` for session state
   and `Ready` for transfer readiness.

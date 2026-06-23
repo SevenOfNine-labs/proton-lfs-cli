@@ -31,7 +31,9 @@ LIVE_CANARY_DOCTOR_ARGS="--key-password-provider git-credential" \
   make live-canary-preflight
 ```
 
-For a two-password account, include the separate data credential:
+Browser-fork sessions normally use the stored UID-scoped key password for Drive
+unlocks. Include a separate data credential only if offline doctor reports
+`needs_data_password`:
 
 ```bash
 LIVE_CANARY_DOCTOR_ARGS="--key-password-provider git-credential --data-credential-provider git-credential --require-data-password" \
@@ -176,8 +178,8 @@ LIVE_CANARY_DOCTOR_ARGS="--key-password-provider pass-cli" \
 The Makefile and the Go real-E2E prerequisite both parse the same structured
 doctor readiness fields before any transfer can start.
 
-For a two-password account, use the same data credential provider arguments
-that passed preflight:
+If offline doctor reports `needs_data_password`, use the same data credential
+provider arguments that passed preflight:
 
 ```bash
 PROTON_LFS_LIVE_CANARY=I_UNDERSTAND_THIS_TOUCHES_A_REAL_PROTON_ACCOUNT \

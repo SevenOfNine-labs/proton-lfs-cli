@@ -111,11 +111,11 @@ func requireLiveCanaryDoctor(t *testing.T, driveCliBin, doctorArgs string) {
 func TestE2ERealProtonDrivePipeline(t *testing.T) {
 	root, storageBase := requireRealE2EPrereqs(t)
 
-	originalBytes := []byte(fmt.Sprintf(
-		"proton-lfs-cli-live-canary\ncreated=%s\nnonce=%d\n",
-		time.Now().UTC().Format(time.RFC3339),
-		time.Now().UnixNano(),
-	))
+	testDataPath := filepath.Join(root, "testdata-lfs", "tiny-1kb.bin")
+	originalBytes, err := os.ReadFile(testDataPath)
+	if err != nil {
+		t.Fatalf("failed to read live canary fixture %s: %v", testDataPath, err)
+	}
 
 	// Build adapter.
 	adapterPath := buildAdapter(t, root)
@@ -188,7 +188,7 @@ func TestE2ERealProtonDrivePipeline(t *testing.T) {
 		t.Fatalf("unexpected error in lfs push output:\n%s", lfsPushOutput)
 	}
 
-	t.Logf("upload complete: oid-prefix=%s, size=%d bytes", oid[:12], len(originalBytes))
+	t.Logf("upload complete: oid-prefix=%s, fixture=%s, size=%d bytes", oid[:12], filepath.Base(testDataPath), len(originalBytes))
 
 	// Clone into a fresh directory, skipping LFS smudge.
 	cloneBase := t.TempDir()

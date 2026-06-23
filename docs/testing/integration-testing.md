@@ -56,8 +56,9 @@ make test-integration-sdk NODE="$(command -v node)"
 See `docs/architecture/sdk-capability-matrix.md` for the full environment matrix.
 
 Accounts requiring 2FA should complete interactive `proton-drive login` before
-real SDK tests. Two-password accounts should use a separate mailbox/data
-password provider entry:
+real SDK tests. Browser-fork sessions normally unlock Drive with the stored
+UID-scoped key password. Add a separate mailbox/data password provider only if
+offline doctor reports `needs_data_password`:
 
 ```bash
 git config lfs.customtransfer.proton.args "--backend=sdk --data-credential-provider git-credential"

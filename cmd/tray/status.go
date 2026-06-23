@@ -213,6 +213,10 @@ func configuredDataCredentialProviderFromGit() string {
 	return parseFlagValue(string(out), "--data-credential-provider")
 }
 
+func browserForkKeyPasswordPersisted(meta sessionMetadata) bool {
+	return meta.AuthMode == "browser-fork" && meta.KeyPasswordPersisted
+}
+
 func parseFlagValue(text string, flag string) string {
 	fields := strings.Fields(text)
 	for i, field := range fields {
@@ -262,11 +266,18 @@ func inspectAuthReadiness(now time.Time) authReadiness {
 		base.blocked = true
 		return base
 	}
-	if meta.PasswordMode == 2 && !hasConfiguredDataCredential() {
+	if meta.AuthMode == "browser-fork" && !meta.KeyPasswordPersisted {
+		base.statusTitle = "Status: Setup needed"
+		base.transferTitle = "Transfers: Reconnect required"
+		base.tooltip = "Proton LFS - Setup needed: browser-fork key password missing"
+		base.blocked = true
+		return base
+	}
+	if !browserForkKeyPasswordPersisted(meta) && !hasConfiguredDataCredential() {
 		base.statusTitle = "Status: Setup needed"
 		base.transferTitle = "Transfers: Data password needed"
 		base.dataPasswordActive = true
-		base.tooltip = "Proton LFS - Setup needed: data password required"
+		base.tooltip = "Proton LFS - Setup needed: local unlock material required"
 		base.blocked = true
 		return base
 	}

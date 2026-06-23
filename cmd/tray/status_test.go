@@ -201,7 +201,40 @@ func TestSessionFilePath(t *testing.T) {
 	}
 }
 
-func TestInspectAuthReadinessBlocksTwoPasswordWithoutDataCredential(t *testing.T) {
+func TestInspectAuthReadinessBlocksLegacySessionWithoutDataCredential(t *testing.T) {
+	now := time.Date(2026, 6, 23, 18, 0, 0, 0, time.UTC)
+	resetRefreshForStatusTest(t, now)
+	home := setupFakeHome(t, fakeHomeOpts{configJSON: `{"credentialProvider":"pass-cli"}`})
+	setupGitConfig(t, "")
+	writeSessionForStatusTest(t, home, sessionMetadata{
+		SessionID:      "session-id",
+		UID:            "uid-123",
+		AccessToken:    "access",
+		RefreshToken:   "refresh",
+		Scopes:         []string{"drive"},
+		PasswordMode:   2,
+		TokenExpiresAt: now.Add(24 * time.Hour).UnixMilli(),
+	})
+
+	readiness := inspectAuthReadiness(now)
+	if !readiness.blocked || readiness.ready {
+		t.Fatalf("expected blocked readiness, got %#v", readiness)
+	}
+	if readiness.statusTitle != "Status: Setup needed" {
+		t.Fatalf("unexpected status title: %s", readiness.statusTitle)
+	}
+	if readiness.transferTitle != "Transfers: Data password needed" {
+		t.Fatalf("unexpected transfer title: %s", readiness.transferTitle)
+	}
+	if !readiness.dataPasswordActive {
+		t.Fatal("data-password action should be enabled for legacy unlock blocker")
+	}
+	if readiness.action != authActionDisconnect {
+		t.Fatalf("signed-in blocked state should offer disconnect, got %s", readiness.action)
+	}
+}
+
+func TestInspectAuthReadinessReadyForBrowserForkTwoPasswordWithoutDataCredential(t *testing.T) {
 	now := time.Date(2026, 6, 23, 18, 0, 0, 0, time.UTC)
 	resetRefreshForStatusTest(t, now)
 	home := setupFakeHome(t, fakeHomeOpts{configJSON: `{"credentialProvider":"pass-cli"}`})
@@ -219,20 +252,45 @@ func TestInspectAuthReadinessBlocksTwoPasswordWithoutDataCredential(t *testing.T
 	})
 
 	readiness := inspectAuthReadiness(now)
+	if !readiness.ready || readiness.blocked {
+		t.Fatalf("expected ready readiness, got %#v", readiness)
+	}
+	if readiness.statusTitle != "Status: Ready" {
+		t.Fatalf("unexpected status title: %s", readiness.statusTitle)
+	}
+	if readiness.transferTitle != "Transfers: Ready" {
+		t.Fatalf("unexpected transfer title: %s", readiness.transferTitle)
+	}
+	if readiness.dataPasswordActive {
+		t.Fatal("data-password action should not be active for browser-fork key material")
+	}
+}
+
+func TestInspectAuthReadinessBlocksBrowserForkMissingKeyPassword(t *testing.T) {
+	now := time.Date(2026, 6, 23, 18, 0, 0, 0, time.UTC)
+	resetRefreshForStatusTest(t, now)
+	home := setupFakeHome(t, fakeHomeOpts{configJSON: `{"credentialProvider":"pass-cli"}`})
+	setupGitConfig(t, "")
+	writeSessionForStatusTest(t, home, sessionMetadata{
+		SessionID:      "session-id",
+		UID:            "uid-123",
+		AccessToken:    "access",
+		RefreshToken:   "refresh",
+		Scopes:         []string{"drive"},
+		PasswordMode:   1,
+		AuthMode:       "browser-fork",
+		TokenExpiresAt: now.Add(24 * time.Hour).UnixMilli(),
+	})
+
+	readiness := inspectAuthReadiness(now)
 	if !readiness.blocked || readiness.ready {
 		t.Fatalf("expected blocked readiness, got %#v", readiness)
 	}
-	if readiness.statusTitle != "Status: Setup needed" {
-		t.Fatalf("unexpected status title: %s", readiness.statusTitle)
-	}
-	if readiness.transferTitle != "Transfers: Data password needed" {
+	if readiness.transferTitle != "Transfers: Reconnect required" {
 		t.Fatalf("unexpected transfer title: %s", readiness.transferTitle)
 	}
-	if !readiness.dataPasswordActive {
-		t.Fatal("data-password action should be enabled for two-password blocker")
-	}
-	if readiness.action != authActionDisconnect {
-		t.Fatalf("signed-in blocked state should offer disconnect, got %s", readiness.action)
+	if readiness.dataPasswordActive {
+		t.Fatal("data-password action should not be active for missing key-password blocker")
 	}
 }
 

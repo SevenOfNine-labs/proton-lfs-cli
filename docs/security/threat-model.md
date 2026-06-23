@@ -42,7 +42,9 @@
 - **No HTTP layer** — credentials never traverse network connections, even localhost
 - **Passwords are never persisted to disk** — `saveSession()` strips `mailboxPassword` before writing
 - **Passwords are never accepted via transfer CLI flags** — browser login and local unlock storage are handled by proton-drive-cli
-- Two-password accounts use a distinct mailbox/data password credential entry; the login password is not reused as a fallback
+- Browser-fork sessions use UID-scoped key-password material for Drive unlocks;
+  explicit data-password credentials are separate fallback entries and account
+  login passwords are not reused by transfers
 - Session file (`~/.proton-drive-cli/session.json`) contains only revocable tokens (sessionId, accessToken, refreshToken)
 - Session directory `0700`, session file `0600` (owner-only)
 - Error messages sanitized — no credential values in responses or logs

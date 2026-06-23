@@ -85,9 +85,11 @@ make test-integration-sdk
 ```
 
 If your account requires two-factor authentication, complete an interactive
-`proton-drive login` before SDK transfers. If your account requires a separate
-mailbox/data password, store it in a distinct credential entry and opt into the
-data credential provider:
+`proton-drive login` before SDK transfers. Browser-fork sessions normally use
+the stored UID-scoped key password for Drive unlocks, including accounts that
+Proton reports as two-password mode. Configure a separate mailbox/data
+credential only if `proton-drive doctor` or bridge `auth-state` explicitly
+reports `needs_data_password`:
 
 ```bash
 git config lfs.customtransfer.proton.args \
