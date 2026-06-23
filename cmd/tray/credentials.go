@@ -9,6 +9,10 @@ import (
 // GIT_TERMINAL_PROMPT=0 and GCM_INTERACTIVE=never suppress interactive
 // prompts so the check is truly silent.
 func credentialVerify(provider string) bool {
+	return credentialVerifyWithTrace(provider, "")
+}
+
+func credentialVerifyWithTrace(provider string, traceID string) bool {
 	driveCLI := discoverDriveCLIBinary()
 	if driveCLI == "" {
 		trayLog.Print("credential-verify: proton-drive-cli not found")
@@ -21,6 +25,7 @@ func credentialVerify(provider string) bool {
 		"GIT_TERMINAL_PROMPT=0",
 		"GCM_INTERACTIVE=never",
 	}
+	env = withAuthTraceEnv(env, traceID)
 	// For pass-cli provider, set PROTON_PASS_CLI_BIN so proton-drive-cli can
 	// find pass-cli even when running from a macOS .app bundle with minimal PATH
 	if provider == "pass-cli" {
@@ -33,6 +38,7 @@ func credentialVerify(provider string) bool {
 	}
 	cmd.Env = append(cmd.Environ(), env...)
 	out, err := cmd.CombinedOutput()
+	logSubprocessOutput("credential-verify", out)
 	if err != nil {
 		trayLog.Printf("credential-verify: failed: %v\n  output: %s", err, out)
 		return false
