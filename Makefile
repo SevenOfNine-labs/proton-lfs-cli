@@ -21,7 +21,7 @@ LIVE_CANARY_ACK_VALUE := I_UNDERSTAND_THIS_TOUCHES_A_REAL_PROTON_ACCOUNT
 	build build-adapter build-tray build-lfs build-drive-cli build-sea build-all build-bundle \
 	install uninstall \
 	test test-adapter test-tray test-lfs test-integration test-integration-timeout test-integration-stress test-integration-sdk test-e2e-mock test-e2e-real test-all \
-	live-canary-preflight browser-fork-canary pass-env check-submodules check-live-canary-ack check-live-canary-doctor-args check-browser-fork-canary-args check-sdk-prereqs check-sdk-real-prereqs \
+	live-canary-preflight live-drive-scope-canary browser-fork-canary pass-env check-submodules check-live-canary-ack check-live-canary-doctor-args check-browser-fork-canary-args check-sdk-prereqs check-sdk-real-prereqs \
 	fmt lint lint-go \
 	docs docs-lint \
 	clean status install-hooks
@@ -303,7 +303,10 @@ check-browser-fork-canary-args: ## Require explicit browser-fork login args
 browser-fork-canary: check-live-canary-ack check-live-canary-doctor-args check-browser-fork-canary-args live-canary-preflight ## One guarded browser-fork login canary; no transfer
 	@NODE_BIN="$(NODE)" GO_BIN="$(GO)" DRIVE_CLI_BIN="$(PWD)/$(DRIVE_CLI_DIR)/dist/index.js" ./scripts/browser-fork-canary.sh
 
-test-e2e-real: check-live-canary-ack check-live-canary-doctor-args live-canary-preflight ## Real Proton Drive E2E (requires explicit live canary acknowledgement)
+live-drive-scope-canary: check-live-canary-ack check-live-canary-doctor-args live-canary-preflight ## One guarded read-only Drive metadata canary; no transfer
+	@NODE_BIN="$(NODE)" DRIVE_CLI_BIN="$(PWD)/$(DRIVE_CLI_DIR)/dist/index.js" ./scripts/live-drive-scope-canary.sh
+
+test-e2e-real: live-drive-scope-canary ## Real Proton Drive E2E (requires explicit live canary acknowledgement)
 	@mkdir -p $(GO_CACHE_DIR)
 	@eval "$$(./scripts/export-pass-env.sh)" && \
 		GOCACHE=$(PWD)/$(GO_CACHE_DIR) $(GO) test -tags integration ./tests/integration/... -run E2E -v

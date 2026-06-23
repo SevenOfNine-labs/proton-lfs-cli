@@ -19,6 +19,7 @@ Integration tests validate Git LFS client behavior against the adapter runtime a
 | `make test-integration-credentials` | Credential flow security tests |
 | `make test-e2e-mock` | Mocked E2E pipeline (no real credentials) |
 | `make live-canary-preflight` | Offline gate before any real Proton canary |
+| `make live-drive-scope-canary` | Guarded read-only Drive metadata canary; no transfer |
 | `make browser-fork-canary` | Guarded one-login browser-fork canary; no transfer |
 | `make test-e2e-real` | Guarded real Proton Drive E2E; requires the live canary acknowledgement |
 
@@ -116,7 +117,9 @@ Do not run real-account tests directly. First follow
 `docs/operations/live-canary-runbook.md`.
 
 `make test-e2e-real` refuses to run unless this acknowledgement is set for the
-same command and the offline doctor arguments are supplied:
+same command and the offline doctor arguments are supplied. It also depends on
+`make live-drive-scope-canary`, which performs one read-only `bridge list` call
+against `/` before any Git LFS transfer can start:
 
 ```bash
 PROTON_LFS_LIVE_CANARY=I_UNDERSTAND_THIS_TOUCHES_A_REAL_PROTON_ACCOUNT \
@@ -126,14 +129,16 @@ LIVE_CANARY_DOCTOR_ARGS="--key-password-provider pass-cli" \
 
 The Go test also checks these gates directly before resolving credentials, so a
 direct `go test -tags integration ... -run E2EReal` invocation skips unless the
-same live-canary environment is present. The Makefile and Go test both parse
-the structured `doctor --json` readiness fields instead of matching free-form
-doctor output.
+same live-canary environment is present. When that environment is present, the
+direct Go path also runs the read-only Drive scope canary before creating a Git
+repository, LFS object, or transfer adapter. The Makefile and Go test both
+parse the structured `doctor --json` readiness fields instead of matching
+free-form doctor output.
 Offline readiness is deliberately local: it proves session shape, local expiry,
 permissions, and unlock-provider availability. It does not prove a remotely
 revoked or server-expired Proton session is still valid; that can only be found
-by the guarded live metadata/transfer path, and failures there must not cause a
-retry-login loop.
+by the guarded live metadata path, and failures there must not cause a
+retry-login loop or continue into the transfer path.
 The live path also classifies Proton API 9101 as `insufficient_scope`, which is
 an app/session authorization-scope blocker rather than a credential or data
 password blocker.

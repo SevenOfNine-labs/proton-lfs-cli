@@ -123,14 +123,27 @@ Expected local properties:
 
 ## One Metadata Read
 
-Run one small metadata read:
+Run the guarded metadata-read target:
+
+```bash
+PROTON_LFS_LIVE_CANARY=I_UNDERSTAND_THIS_TOUCHES_A_REAL_PROTON_ACCOUNT \
+LIVE_CANARY_DOCTOR_ARGS="--key-password-provider pass-cli" \
+  make live-drive-scope-canary
+```
+
+This target runs the offline preflight first, then performs exactly one
+read-only `bridge list` request against `/`. It does not run `login`, `init`,
+upload, download, delete, or the Git LFS transfer path.
+
+The manual equivalent is one small metadata read:
 
 ```bash
 proton-drive ls /
 ```
 
-Stop after this command regardless of success. Do not upload or download in
-the same canary session.
+Stop after this command regardless of success. Do not upload or download in the
+same canary session. If the target reports Proton API 9101 /
+`INSUFFICIENT_SCOPE`, do not continue to `make test-e2e-real`.
 
 ## Browser-Fork Canary
 
@@ -171,7 +184,9 @@ browser-fork-only, and legacy account credential flags are never allowed.
 ## Real E2E Guard
 
 The `test-e2e-real` target is guarded and refuses to run unless the explicit
-acknowledgement and the exact offline doctor arguments are present:
+acknowledgement and the exact offline doctor arguments are present. It also
+depends on `make live-drive-scope-canary`, so the full LFS transfer cannot
+start until one read-only Drive metadata request succeeds:
 
 ```bash
 PROTON_LFS_LIVE_CANARY=I_UNDERSTAND_THIS_TOUCHES_A_REAL_PROTON_ACCOUNT \
@@ -180,7 +195,9 @@ LIVE_CANARY_DOCTOR_ARGS="--key-password-provider pass-cli" \
 ```
 
 The Makefile and the Go real-E2E prerequisite both parse the same structured
-doctor readiness fields before any transfer can start.
+doctor readiness fields before any transfer can start. The Makefile live scope
+canary then checks that Proton accepts the saved session for a read-only Drive
+API call before the Git LFS integration test is invoked.
 
 If offline doctor reports `needs_data_password`, use the same data credential
 provider arguments that passed preflight:
@@ -201,7 +218,9 @@ failure as evidence to inspect rather than a reason to retry live immediately.
 Do not run this target until the one-login canary and one metadata read have
 succeeded and the result has been recorded. Direct `go test` invocations are
 also gated and skip before credential resolution unless the same environment is
-present.
+present. When that environment is present, the Go prerequisite path runs the
+same read-only Drive scope canary before creating a Git repository, LFS object,
+or transfer adapter.
 
 ## Evidence To Record
 

@@ -44,6 +44,7 @@ func requireRealE2EPrereqs(t *testing.T) (root, storageBase string) {
 	}
 
 	requireLiveCanaryDoctor(t, driveCliBin, doctorArgs)
+	requireLiveDriveScopeCanary(t, driveCliBin, doctorArgs)
 
 	storageBase = strings.Trim(strings.TrimSpace(os.Getenv("PROTON_LFS_CANARY_STORAGE_BASE")), "/")
 	if storageBase == "" {
@@ -99,13 +100,137 @@ func requireLiveCanaryDoctor(t *testing.T, driveCliBin, doctorArgs string) {
 	t.Logf("offline doctor passed: authState=%s", readiness.AuthState.State)
 }
 
+func requireLiveDriveScopeCanary(t *testing.T, driveCliBin, doctorArgs string) {
+	t.Helper()
+
+	nodeBin := strings.TrimSpace(os.Getenv("NODE_BIN"))
+	if nodeBin == "" {
+		nodeBin = "node"
+	}
+
+	request, err := liveDriveScopeRequestFromDoctorArgs(doctorArgs)
+	if err != nil {
+		t.Fatalf("real E2E hard stop: %v", err)
+	}
+	body, err := json.Marshal(request)
+	if err != nil {
+		t.Fatalf("real E2E hard stop: live scope request marshal failed: %v", err)
+	}
+
+	cmd := exec.Command(nodeBin, driveCliBin, "bridge", "list")
+	cmd.Env = os.Environ()
+	cmd.Stdin = bytes.NewReader(body)
+	out, err := cmd.CombinedOutput()
+	if err != nil && strings.TrimSpace(string(out)) == "" {
+		t.Fatalf("real E2E hard stop: live Drive scope canary failed before JSON response: %v", err)
+	}
+
+	var response struct {
+		OK      bool            `json:"ok"`
+		Error   string          `json:"error"`
+		Code    int             `json:"code"`
+		Details json.RawMessage `json:"details"`
+	}
+	if parseErr := json.Unmarshal(bytes.TrimSpace(out), &response); parseErr != nil {
+		t.Fatalf("real E2E hard stop: live Drive scope canary returned invalid JSON: %v [%s]", parseErr, redactBridgeOutput(string(out)))
+	}
+	if response.OK {
+		t.Log("live Drive scope canary passed: one read-only metadata request succeeded")
+		return
+	}
+
+	details := parseBridgeDetails(response.Details)
+	errorCode := strings.TrimSpace(details["errorCode"])
+	protonCode := strings.TrimSpace(details["protonCode"])
+	if errorCode == "INSUFFICIENT_SCOPE" || protonCode == "9101" || strings.Contains(response.Error, "9101") || strings.Contains(strings.ToLower(response.Error), "sufficient scope") {
+		t.Fatalf("real E2E hard stop: live Drive scope canary returned INSUFFICIENT_SCOPE / Proton API 9101; refusing LFS transfer [%s]", redactBridgeOutput(string(out)))
+	}
+	t.Fatalf("real E2E hard stop: live Drive scope canary failed; refusing LFS transfer [%s]", redactBridgeOutput(string(out)))
+}
+
+func liveDriveScopeRequestFromDoctorArgs(doctorArgs string) (map[string]string, error) {
+	request := map[string]string{"folder": "/"}
+	tokens := strings.Fields(doctorArgs)
+
+	for i := 0; i < len(tokens); i++ {
+		token := tokens[i]
+		option, value, hasInlineValue := strings.Cut(token, "=")
+
+		switch option {
+		case "--require-data-password":
+			continue
+		case "--key-password-provider", "--key-password-host":
+			if hasInlineValue {
+				if value == "" {
+					return nil, fmt.Errorf("empty value for %s", option)
+				}
+				continue
+			}
+			i++
+			if i >= len(tokens) || strings.HasPrefix(tokens[i], "--") {
+				return nil, fmt.Errorf("missing value after %s", option)
+			}
+		case "--data-credential-provider", "--data-credential-host":
+			if !hasInlineValue {
+				i++
+				if i >= len(tokens) || strings.HasPrefix(tokens[i], "--") {
+					return nil, fmt.Errorf("missing value after %s", option)
+				}
+				value = tokens[i]
+			}
+			if value == "" {
+				return nil, fmt.Errorf("empty value for %s", option)
+			}
+			if option == "--data-credential-provider" {
+				request["dataCredentialProvider"] = value
+			} else {
+				request["dataCredentialHost"] = value
+			}
+		default:
+			return nil, fmt.Errorf("unsupported LIVE_CANARY_DOCTOR_ARGS option for live scope canary: %s", option)
+		}
+	}
+
+	return request, nil
+}
+
+func parseBridgeDetails(raw json.RawMessage) map[string]string {
+	if len(raw) == 0 {
+		return nil
+	}
+
+	var asString string
+	if err := json.Unmarshal(raw, &asString); err == nil && strings.TrimSpace(asString) != "" {
+		var out map[string]any
+		if err := json.Unmarshal([]byte(asString), &out); err == nil {
+			return stringifyJSONMap(out)
+		}
+	}
+
+	var asObject map[string]any
+	if err := json.Unmarshal(raw, &asObject); err == nil {
+		return stringifyJSONMap(asObject)
+	}
+
+	return nil
+}
+
+func stringifyJSONMap(in map[string]any) map[string]string {
+	out := make(map[string]string, len(in))
+	for key, value := range in {
+		out[key] = strings.TrimSpace(fmt.Sprint(value))
+	}
+	return out
+}
+
 // TestE2ERealProtonDrivePipeline exercises the full Git LFS pipeline through
 // Proton Drive: commit one tiny canary object, push via the adapter, clone into
 // a fresh repo, pull, verify byte-for-byte fidelity, and attempt cleanup.
 //
 // Prerequisites:
 //   - PROTON_LFS_LIVE_CANARY is set to the exact acknowledgement
-//   - LIVE_CANARY_DOCTOR_ARGS is set and make live-canary-preflight passes
+//   - LIVE_CANARY_DOCTOR_ARGS is set
+//   - offline doctor and one read-only Drive scope canary pass
 //   - browser-fork login already completed for a disposable Proton account
 //   - proton-drive-cli built (make build-drive-cli)
 func TestE2ERealProtonDrivePipeline(t *testing.T) {
