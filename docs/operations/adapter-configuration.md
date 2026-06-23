@@ -21,6 +21,11 @@ The Go adapter does **not** resolve credentials itself. It sends non-secret sele
 
 `proton-drive-cli` searches all Proton Pass vaults for a login item with a `proton.me` URL. For a separate mailbox/data password, create a second login item whose URL is `https://proton-data.proton-lfs-cli.local`, then enable `PROTON_DATA_CREDENTIAL_PROVIDER=pass-cli` or pass `--data-credential-provider pass-cli`.
 
+The tray Connect action does not prompt for Proton username/password when
+`pass-cli` lookup fails. Fix the Proton Pass item instead: it must be a login
+item with a URL matching `https://proton.me` and populated username/email plus
+password fields.
+
 The `PROTON_PASS_CLI_BIN` env var is forwarded to the subprocess via the env allowlist.
 
 ### git-credential

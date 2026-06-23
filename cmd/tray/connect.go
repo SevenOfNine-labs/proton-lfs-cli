@@ -9,7 +9,7 @@ import (
 
 // connectToProton runs the unified tray Connect flow for any credential provider:
 //  1. Verify credentials exist via proton-drive-cli credential verify --provider
-//  2. If missing → open terminal for interactive credential store
+//  2. If missing and safe for the provider → open interactive credential setup
 //  3. If present → log in silently via proton-drive-cli login --credential-provider
 func connectToProton() {
 	driveCLI := discoverDriveCLIBinary()
@@ -25,6 +25,12 @@ func connectToProton() {
 	trayLog.Printf("connect: credential provider = %s", provider)
 
 	if !credentialVerify(provider) {
+		if !shouldOpenInteractiveCredentialStore(provider) {
+			trayLog.Print("connect: pass-cli credentials not found; refusing interactive credential prompt")
+			trayLog.Print("connect: create or update a Proton Pass login item with URL https://proton.me")
+			sendNotification("Proton Pass item not found")
+			return
+		}
 		trayLog.Print("connect: credentials not found, opening terminal for interactive store")
 		// No credentials stored — open terminal for interactive store
 		script := fmt.Sprintf("'%s' credential store --provider %s; echo; printf 'Press Enter to close... ' && read", driveCLI, provider)
@@ -49,6 +55,10 @@ func connectToProton() {
 		sendNotification("Connected to Proton")
 		applyConnectStatus(true)
 	}()
+}
+
+func shouldOpenInteractiveCredentialStore(provider string) bool {
+	return provider != config.CredentialProviderPassCLI
 }
 
 // protonDriveLogin runs proton-drive-cli login with the given extra args.
