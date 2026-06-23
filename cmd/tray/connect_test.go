@@ -1,12 +1,24 @@
 package main
 
 import (
+	"io"
+	"log"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
 	"proton-lfs-cli/internal/config"
 )
+
+func setupTrayLogForTest(t *testing.T) {
+	t.Helper()
+	original := trayLog
+	trayLog = log.New(io.Discard, "", 0)
+	t.Cleanup(func() {
+		trayLog = original
+	})
+}
 
 func TestShouldOpenInteractiveCredentialStore(t *testing.T) {
 	if shouldOpenInteractiveCredentialStore(config.CredentialProviderPassCLI) {
@@ -35,6 +47,47 @@ func TestWithAuthTraceEnvSkipsEmptyTraceID(t *testing.T) {
 	env := withAuthTraceEnv([]string{"EXISTING=1"}, " ")
 	if len(env) != 1 || env[0] != "EXISTING=1" {
 		t.Fatalf("expected unchanged env for empty trace id, got %#v", env)
+	}
+}
+
+func TestResolveTrayAuthModeDefaultsToBrowserFork(t *testing.T) {
+	t.Setenv(trayAuthModeEnv, "")
+	if got := resolveTrayAuthMode(); got != trayAuthModeBrowserFork {
+		t.Fatalf("expected browser-fork default, got %q", got)
+	}
+
+	t.Setenv(trayAuthModeEnv, "unexpected")
+	if got := resolveTrayAuthMode(); got != trayAuthModeBrowserFork {
+		t.Fatalf("expected invalid env value to fall back to browser-fork, got %q", got)
+	}
+}
+
+func TestResolveTrayAuthModeAllowsExplicitSRPOverride(t *testing.T) {
+	t.Setenv(trayAuthModeEnv, "srp")
+
+	if got := resolveTrayAuthMode(); got != trayAuthModeSRP {
+		t.Fatalf("expected srp override, got %q", got)
+	}
+}
+
+func TestBuildTrayLoginArgsBrowserForkSkipsPasswordCredentialLookup(t *testing.T) {
+	setupTrayLogForTest(t)
+	args, ok := buildTrayLoginArgs(
+		trayAuthModeBrowserFork,
+		config.CredentialProviderPassCLI,
+		"/bin/false",
+		"trace-test",
+	)
+	if !ok {
+		t.Fatal("expected browser-fork args to be built")
+	}
+
+	want := []string{
+		"--auth-mode", "browser-fork",
+		"--key-password-provider", config.CredentialProviderPassCLI,
+	}
+	if !reflect.DeepEqual(args, want) {
+		t.Fatalf("unexpected browser-fork login args:\n got: %#v\nwant: %#v", args, want)
 	}
 }
 
