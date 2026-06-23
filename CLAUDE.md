@@ -85,8 +85,8 @@ make lint               # Run Go vet + golangci-lint
 ### Credential Management
 ```bash
 pass-cli login          # Authenticate with Proton Pass
-eval "$(make -s pass-env)"  # Export credentials from Pass
-./scripts/export-pass-env.sh  # Direct credential export
+eval "$(make -s pass-env)"  # Export pass-cli provider binary only
+./scripts/export-pass-env.sh  # Direct provider-env export
 ```
 
 ## Backend Modes

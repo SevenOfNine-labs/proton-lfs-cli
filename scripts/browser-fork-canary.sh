@@ -33,6 +33,41 @@ split_canary_args() {
   done
 }
 
+validate_browser_fork_login_args() {
+  local i=0
+  local token
+  local value
+
+  while [[ "${i}" -lt "${#login_args[@]}" ]]; do
+    token="${login_args[${i}]}"
+    case "${token}" in
+      --auth-mode | --auth-mode=*)
+        fail "LIVE_BROWSER_FORK_LOGIN_ARGS must not set --auth-mode; login is browser-fork-only."
+        ;;
+      --key-password-provider | --key-password-host)
+        i=$((i + 1))
+        if [[ "${i}" -ge "${#login_args[@]}" ]]; then
+          fail "LIVE_BROWSER_FORK_LOGIN_ARGS missing value after ${token}."
+        fi
+        value="${login_args[${i}]}"
+        if [[ "${value}" == --* ]]; then
+          fail "LIVE_BROWSER_FORK_LOGIN_ARGS missing value after ${token}."
+        fi
+        ;;
+      --key-password-provider=* | --key-password-host=*)
+        value="${token#*=}"
+        if [[ -z "${value}" ]]; then
+          fail "LIVE_BROWSER_FORK_LOGIN_ARGS contains empty value for ${token%%=*}."
+        fi
+        ;;
+      *)
+        fail "LIVE_BROWSER_FORK_LOGIN_ARGS contains unsupported login option: ${token}. Allowed options: --key-password-provider and --key-password-host."
+        ;;
+    esac
+    i=$((i + 1))
+  done
+}
+
 if [[ "${PROTON_LFS_LIVE_CANARY:-}" != "${LIVE_CANARY_ACK_VALUE}" ]]; then
   fail "Refusing to run browser-fork canary without the exact PROTON_LFS_LIVE_CANARY acknowledgement."
 fi
@@ -44,14 +79,7 @@ split_canary_args "LIVE_CANARY_DOCTOR_ARGS" "${LIVE_CANARY_DOCTOR_ARGS:-}"
 doctor_args=("${SPLIT_CANARY_ARGS[@]}")
 split_canary_args "LIVE_BROWSER_FORK_LOGIN_ARGS" "${LIVE_BROWSER_FORK_LOGIN_ARGS:-}"
 login_args=("${SPLIT_CANARY_ARGS[@]}")
-
-for token in "${login_args[@]}"; do
-  case "${token}" in
-    --auth-mode | --auth-mode=*)
-      fail "LIVE_BROWSER_FORK_LOGIN_ARGS must not set --auth-mode; login is browser-fork-only."
-      ;;
-  esac
-done
+validate_browser_fork_login_args
 
 cd "${ROOT_DIR}"
 

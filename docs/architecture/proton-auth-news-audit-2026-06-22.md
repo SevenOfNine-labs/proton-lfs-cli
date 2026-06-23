@@ -77,8 +77,8 @@ attempted during this audit.
 ## Impact on Our Auth Plan
 
 - Keep transfer initialization gated by offline `bridge auth-state`.
-- Keep `allowLogin=false` on all transfer commands.
-- Keep refusing unsafe states (`needs_login`, `login_available`,
+- Keep account-login fields absent from all transfer commands.
+- Keep refusing unsafe states (`needs_login`,
   `needs_data_password`, `needs_key_password`, `session_expired`,
   `session_invalid`, and `configuration_error`) without attempting SRP.
 - Treat a future official-CLI-aligned browser-fork path as the safer canary
@@ -96,8 +96,8 @@ Completed in `proton-drive-cli@b97563b` and this root pointer/docs update:
    `portal:./submodules/sdk/client/js`.
 2. Updated build/test/docs scripts and TypeScript adapter assumptions for the
    new SDK layout.
-3. Kept auth behavior unchanged: transfer commands still check offline
-   `auth-state` first and still send `allowLogin=false`.
+3. Kept transfer auth behavior conservative: transfer commands still check
+   offline `auth-state` first and do not send account-login fields.
 4. Ran full drive-cli lint/build/docs/test validation without real Proton
    login.
 5. Updated the root submodule pointer and root workflows for the new nested SDK

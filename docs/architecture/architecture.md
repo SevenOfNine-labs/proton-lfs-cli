@@ -297,7 +297,7 @@ sequenceDiagram
 
     Note over Adapter,DriveCLI: Later, during Git LFS operation
     Adapter->>DriveCLI: bridge auth-state (offline)
-    DriveCLI-->>Adapter: ready
+    DriveCLI-->>Adapter: ready (local readiness only)
     Adapter->>DriveCLI: bridge upload/download (no account login fields)
 
 ```
@@ -613,6 +613,12 @@ flowchart LR
 3. ✅ **Environment allowlist**: Only safe vars passed to subprocess
 4. ✅ **Session isolation**: Per-user session files (mode 0600)
 5. ✅ **Input validation**: OID and path validation before subprocess spawn
+
+`auth-state=ready` is deliberately local-only. It proves that saved session
+metadata, local expiry, permissions, and unlock-provider configuration look
+usable, but not that Proton has not revoked the browser session remotely. A
+remote auth rejection during the first guarded SDK call is surfaced as an auth
+error and must not trigger a transfer-time login loop.
 
 ### Validation & Sanitization
 

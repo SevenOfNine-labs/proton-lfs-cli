@@ -76,6 +76,7 @@ make test-integration
 SDK integration path:
 
 ```bash
+proton-drive login --key-password-provider pass-cli
 eval "$(make -s pass-env)"
 make check-submodules
 make test-integration-sdk
@@ -84,6 +85,7 @@ make test-integration-sdk
 SDK backend with proton-drive-cli:
 
 ```bash
+proton-drive login --key-password-provider pass-cli
 eval "$(make -s pass-env)"
 make check-submodules
 make check-sdk-prereqs

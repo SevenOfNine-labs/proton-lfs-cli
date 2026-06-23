@@ -19,7 +19,8 @@ import (
 const liveCanaryAckValue = "I_UNDERSTAND_THIS_TOUCHES_A_REAL_PROTON_ACCOUNT"
 
 // requireRealE2EPrereqs skips the test unless the environment is configured for
-// real Proton Drive E2E: pass-cli resolves real credentials and proton-drive-cli is built.
+// real Proton Drive E2E: offline doctor reports a browser-fork-ready session
+// and proton-drive-cli is built.
 func requireRealE2EPrereqs(t *testing.T) (root, storageBase string) {
 	t.Helper()
 
@@ -43,9 +44,6 @@ func requireRealE2EPrereqs(t *testing.T) (root, storageBase string) {
 	}
 
 	requireLiveCanaryDoctor(t, driveCliBin, doctorArgs)
-
-	// Verify pass-cli can resolve real credentials (will skip if not logged in).
-	sdkResolvedCredentials(t)
 
 	storageBase = strings.Trim(strings.TrimSpace(os.Getenv("PROTON_LFS_CANARY_STORAGE_BASE")), "/")
 	if storageBase == "" {
@@ -108,7 +106,7 @@ func requireLiveCanaryDoctor(t *testing.T, driveCliBin, doctorArgs string) {
 // Prerequisites:
 //   - PROTON_LFS_LIVE_CANARY is set to the exact acknowledgement
 //   - LIVE_CANARY_DOCTOR_ARGS is set and make live-canary-preflight passes
-//   - pass-cli logged in with disposable Proton credentials
+//   - browser-fork login already completed for a disposable Proton account
 //   - proton-drive-cli built (make build-drive-cli)
 func TestE2ERealProtonDrivePipeline(t *testing.T) {
 	root, storageBase := requireRealE2EPrereqs(t)
@@ -136,8 +134,8 @@ func TestE2ERealProtonDrivePipeline(t *testing.T) {
 	// Resolve proton-drive-cli binary path.
 	driveCliBin := sdkDriveCliBin(t, root)
 
-	// Build credential env.
-	sdkEnv := append(sdkCredentialEnv(t, env), "LFS_STORAGE_BASE="+storageBase)
+	// Preserve provider-specific env only; account auth came from browser-fork.
+	sdkEnv := append(sdkProviderEnv(env), "LFS_STORAGE_BASE="+storageBase)
 	t.Logf("real canary storage base: %s", storageBase)
 
 	// Set up source repository.

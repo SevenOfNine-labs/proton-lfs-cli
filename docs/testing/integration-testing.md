@@ -31,6 +31,10 @@ Integration tests validate Git LFS client behavior against the adapter runtime a
 ## Credentials For SDK Tests
 
 Credentials are resolved by proton-drive-cli via the configured provider (`pass-cli` or `git-credential`).
+Only local unlock material is resolved this way. Proton account authorization is
+browser-fork-only and must already have produced a saved local session before
+real SDK transfers run; account usernames, passwords, and second-factor codes
+are not supplied to Git LFS transfers.
 
 Preferred path:
 
@@ -39,8 +43,10 @@ pass-cli login
 make test-integration-sdk
 ```
 
-`make test-integration-sdk` now performs a prerequisite check and resolves `PROTON_PASS_*` via `scripts/export-pass-env.sh`.
-For non-default vault/item references, export your custom `PROTON_PASS_*` values first.
+`make test-integration-sdk` now performs a prerequisite check and may export
+`PROTON_PASS_CLI_BIN` via `scripts/export-pass-env.sh` for sessions whose
+key-password provider is Proton Pass. It does not export account usernames or
+passwords.
 If Node is only configured via shell startup files (`~/.zshrc`, `nvm`, `fnm`), run with:
 
 ```bash
@@ -61,14 +67,14 @@ git config lfs.customtransfer.proton.args "--backend=sdk --data-credential-provi
 
 If you are testing with a personal Proton account:
 
-1. Store credentials in Proton Pass (a login item with a `proton.me` URL in any vault).
-1. Or export custom pass-cli configuration before tests:
+1. Complete browser-fork login first:
 
 ```bash
-eval "$(./scripts/export-pass-env.sh --ref-root 'pass://Personal/Your Entry')"
+proton-drive login --key-password-provider pass-cli
 ```
 
-1. Authenticate and run prerequisite checks:
+1. Authenticate pass-cli if the saved session uses it as a key-password or
+   data-password provider, then run prerequisite checks:
 
 ```bash
 pass-cli login
@@ -122,6 +128,11 @@ direct `go test -tags integration ... -run E2EReal` invocation skips unless the
 same live-canary environment is present. The Makefile and Go test both parse
 the structured `doctor --json` readiness fields instead of matching free-form
 doctor output.
+Offline readiness is deliberately local: it proves session shape, local expiry,
+permissions, and unlock-provider availability. It does not prove a remotely
+revoked or server-expired Proton session is still valid; that can only be found
+by the guarded live metadata/transfer path, and failures there must not cause a
+retry-login loop.
 
 `make browser-fork-canary` is a separate live-login path. It requires
 `PROTON_LFS_LIVE_CANARY`, `LIVE_CANARY_DOCTOR_ARGS`, and
@@ -129,7 +140,9 @@ doctor output.
 only inspects local status and offline doctor readiness. Its post-login doctor
 inspection requires `authMode=browser-fork`, `state=ready`, and
 `canAttemptTransfer=true`, and its script tests prove that no transfer command
-is attempted in this path.
+is attempted in this path. The script accepts only `--key-password-provider`
+and `--key-password-host` login args, so legacy account credential flags and
+unknown options fail before proton-drive-cli is invoked.
 
 ## High-Value Missing Tests
 

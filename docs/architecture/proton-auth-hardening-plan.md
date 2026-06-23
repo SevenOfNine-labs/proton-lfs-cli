@@ -1,12 +1,15 @@
 # Proton Auth Hardening Plan
 
 **Date**: 2026-05-22
-**Status**: Planning only. Do not run real Proton login tests until the
-offline gates in this document pass.
+**Status**: Superseded by the browser-fork-only auth implementation. Keep this
+document only for anti-abuse rationale and historical context; current source
+of truth is `docs/architecture/proton-sdk-bridge.md`,
+`docs/operations/live-canary-runbook.md`, and
+`docs/testing/spec-requirements.yaml`.
 
 ## Scope
 
-This plan covers the account authorization path used by the Git LFS adapter:
+This historical plan covered the account authorization path used by the Git LFS adapter:
 
 ```text
 git-lfs custom transfer adapter
@@ -217,35 +220,21 @@ Every code path must use this single refresh method. No direct
 
 ## Credential Rules
 
-Credential resolution should produce this internal shape:
-
-```ts
-interface AuthInputs {
-  username?: string;
-  loginPassword?: string;
-  dataPassword?: string;
-  secondFactorCode?: string;
-  humanVerificationToken?: string;
-  humanVerificationTokenType?: string;
-  allowLogin: boolean;
-}
-```
+The current implementation does not accept account-login inputs in the Git LFS
+adapter or transfer bridge. Interactive account authorization is
+browser-fork-only and happens before transfers.
 
 Rules:
 
-- Existing valid sessions should not require username or login password for
-  normal operations.
-- Key unlock requires a password unless we later add an encrypted local salted
-  key pass store.
-- Full SRP login requires explicit `allowLogin` and a username/login password.
-- `PasswordMode === 2` requires `dataPassword`; missing data password returns
-  `data_password_required`.
-- TOTP-required accounts return `two_factor_required` unless a single-use code
-  is supplied for the current login attempt.
-- FIDO2-required accounts return `fido2_required`; non-interactive CLI support
-  should stop there until a safe interactive flow exists.
-- Human verification returns `human_verification_required` with the methods and
-  verification URL/token. It must not be auto-retried.
+- Existing saved browser-fork sessions are required for normal operations.
+- Git LFS transfer requests never include account username/password,
+  second-factor codes, or login permission flags.
+- Key-password unlock material is resolved by proton-drive-cli from the
+  session's configured key-password provider.
+- `PasswordMode === 2` may require a separate mailbox/data password provider;
+  missing data password returns `data_password_required`.
+- FIDO2, human verification, and other account challenges must stop outside the
+  transfer path and must not be auto-retried.
 
 ## Anti-Abuse Rules
 
@@ -266,18 +255,16 @@ The safest behavior is conservative and boring:
 
 ### Phase 0: Documentation and preflights
 
-- Keep this plan as the source of truth for auth changes.
+- Keep `proton-sdk-bridge.md`, `live-canary-runbook.md`, and the formal
+  requirements matrix as the source of truth for auth changes.
 - Add a preflight that detects stale SDK `dist` vs `src` before bridge tests.
 - Replace desktop app-version strings with
   `external-drive-proton-lfs-cli@<version>`.
 
 ### Phase 1: Auth API parity
 
-- Add `AuthApiClient.complete2FA()`.
-- Add typed human-verification extraction for code `9001` and Details payloads.
-- Normalize auth response fields (`Scopes` vs `Scope`, `2FA`, `PasswordMode`).
-- Add tests for auth/info, auth, 2FA, refresh, human verification, and rate
-  limit response parsing.
+Superseded. Do not add direct SRP account-login parity to the transfer bridge.
+Account authorization follows the browser-fork path exposed by proton-drive-cli.
 
 ### Phase 2: Session manager consolidation
 
@@ -287,22 +274,18 @@ The safest behavior is conservative and boring:
 - Store and check `refreshGeneration`.
 - Add cross-process refresh race tests.
 
-### Phase 3: Auth orchestrator
+### Phase 3: Transfer auth gate
 
-- Introduce `AuthOrchestrator`.
-- Split login password from data password in `createSDKClient`.
-- Prevent full SRP login unless `allowLogin` is explicit.
-- Treat key unlock failure as `key_unlock_failed`, not as a reason to login.
+- Keep bridge transfer request schemas free of account-login fields.
+- Treat key-password/data-password failure as typed auth states, not as a
+  reason to login.
 - Add structured bridge errors for every auth state.
 
 ### Phase 4: Credential providers
 
-- Make pass-cli lookup deterministic:
-  - explicit refs for username, login password, data password, and optional
-    TOTP code when configured;
-  - scanning fallback only when explicit refs are absent.
+- Keep pass-cli lookup scoped to key-password/data-password provider entries.
+- Search all vaults for matching provider hosts where pass-cli supports it.
 - Avoid environment variables for long-lived secrets in normal usage.
-- Keep one-shot TOTP/human-verification values memory-only.
 
 ### Phase 5: Offline verification
 

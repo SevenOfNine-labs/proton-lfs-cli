@@ -10,29 +10,17 @@ import (
 	"testing"
 )
 
-// TestCredentialPassCLIResolution verifies the pass-cli → adapter → bridge credential flow.
-func TestCredentialPassCLIResolution(t *testing.T) {
+// TestCredentialPassCLIReadiness verifies optional pass-cli provider readiness
+// without resolving Proton account username/password references.
+func TestCredentialPassCLIReadiness(t *testing.T) {
 	passCLIBin := sdkPassCLIPath()
 	if _, err := exec.LookPath(passCLIBin); err != nil {
 		t.Skipf("pass-cli not found: %v", err)
 	}
 
-	_, usernameRef, passwordRef := sdkPassRefConfig()
-
-	// Verify that pass-cli can resolve credentials
-	username := sdkReadPassCLISecret(t, passCLIBin, usernameRef)
-	if username == "" {
-		t.Fatal("expected non-empty username from pass-cli")
-	}
-
-	password := sdkReadPassCLISecret(t, passCLIBin, passwordRef)
-	if password == "" {
-		t.Fatal("expected non-empty password from pass-cli")
-	}
-
-	// Sanity: password should not appear in username
-	if strings.Contains(username, password) {
-		t.Fatal("username should not contain password")
+	cmd := exec.Command(passCLIBin, "test")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Skipf("pass-cli not authenticated or unavailable: %v [%s]", err, strings.TrimSpace(string(out)))
 	}
 }
 
@@ -74,16 +62,13 @@ func TestCredentialErrorMessageSanitization(t *testing.T) {
 		t.Skipf("mock-pass-cli.sh not found at %s: %v", mockPassCLI, err)
 	}
 
-	// Run the adapter with credentials resolved via mock-pass-cli.
-	// The error messages should NOT contain the password.
+	// Run the adapter with a stale secret-shaped environment value. The error
+	// messages should NOT contain the value.
 	testPassword := "super-secret-test-password-42"
 	cmd := exec.Command(adapterPath, "--backend=sdk", "--drive-cli-bin=/nonexistent/proton-drive-cli")
 	cmd.Env = append(
 		os.Environ(),
-		"PROTON_PASS_CLI_BIN="+mockPassCLI,
-		"PROTON_PASS_REF_ROOT=pass://Personal/Proton Git LFS",
-		"PASS_MOCK_USERNAME=test@invalid.test",
-		"PASS_MOCK_PASSWORD="+testPassword,
+		"PROTON_DATA_PASSWORD="+testPassword,
 	)
 	cmd.Stdin = strings.NewReader(`{"event":"init","operation":"upload","concurrent":true,"concurrenttransfers":1}`)
 	output, _ := cmd.CombinedOutput()

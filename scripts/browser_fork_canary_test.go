@@ -76,6 +76,69 @@ func TestBrowserForkCanaryRejectsAuthModeOverrideBeforeLogin(t *testing.T) {
 	}
 }
 
+func TestBrowserForkCanaryRejectsLegacyCredentialProviderBeforeLogin(t *testing.T) {
+	env := newBrowserForkScriptEnv(t, `{
+		"ok": true,
+		"canAttemptTransfer": true,
+		"canAttemptLiveCanary": true,
+		"authState": {"state": "ready", "authMode": "browser-fork"}
+	}`)
+	env.vars = replaceEnv(env.vars, "LIVE_BROWSER_FORK_LOGIN_ARGS", "--credential-provider pass-cli --key-password-provider git-credential")
+
+	out, err := runBrowserForkScript(t, env)
+	if err == nil {
+		t.Fatalf("expected legacy credential provider to fail:\n%s", out)
+	}
+	if !strings.Contains(out, "unsupported login option: --credential-provider") {
+		t.Fatalf("expected unsupported login option error, got:\n%s", out)
+	}
+	if commands := readFakeDriveCommands(t, env.logPath); len(commands) != 0 {
+		t.Fatalf("drive CLI was called before login args passed: %v", commands)
+	}
+}
+
+func TestBrowserForkCanaryRejectsUnknownLoginArgBeforeLogin(t *testing.T) {
+	env := newBrowserForkScriptEnv(t, `{
+		"ok": true,
+		"canAttemptTransfer": true,
+		"canAttemptLiveCanary": true,
+		"authState": {"state": "ready", "authMode": "browser-fork"}
+	}`)
+	env.vars = replaceEnv(env.vars, "LIVE_BROWSER_FORK_LOGIN_ARGS", "--key-password-provider git-credential --username user@example.test")
+
+	out, err := runBrowserForkScript(t, env)
+	if err == nil {
+		t.Fatalf("expected unknown login arg to fail:\n%s", out)
+	}
+	if !strings.Contains(out, "unsupported login option: --username") {
+		t.Fatalf("expected unsupported login option error, got:\n%s", out)
+	}
+	if commands := readFakeDriveCommands(t, env.logPath); len(commands) != 0 {
+		t.Fatalf("drive CLI was called before login args passed: %v", commands)
+	}
+}
+
+func TestBrowserForkCanaryRejectsMissingLoginArgValueBeforeLogin(t *testing.T) {
+	env := newBrowserForkScriptEnv(t, `{
+		"ok": true,
+		"canAttemptTransfer": true,
+		"canAttemptLiveCanary": true,
+		"authState": {"state": "ready", "authMode": "browser-fork"}
+	}`)
+	env.vars = replaceEnv(env.vars, "LIVE_BROWSER_FORK_LOGIN_ARGS", "--key-password-provider --key-password-host proton.test")
+
+	out, err := runBrowserForkScript(t, env)
+	if err == nil {
+		t.Fatalf("expected missing login arg value to fail:\n%s", out)
+	}
+	if !strings.Contains(out, "missing value after --key-password-provider") {
+		t.Fatalf("expected missing value error, got:\n%s", out)
+	}
+	if commands := readFakeDriveCommands(t, env.logPath); len(commands) != 0 {
+		t.Fatalf("drive CLI was called before login args passed: %v", commands)
+	}
+}
+
 func TestBrowserForkCanaryRejectsPostLoginDoctorMismatch(t *testing.T) {
 	env := newBrowserForkScriptEnv(t, `{
 		"ok": true,

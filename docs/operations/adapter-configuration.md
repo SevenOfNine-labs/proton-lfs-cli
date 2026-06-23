@@ -62,7 +62,11 @@ proton-drive doctor --key-password-provider git-credential --data-credential-pro
 
 This preflight is offline: it checks local credential entries, session-file
 permissions/shape, stale secret environment variables, and the bridge entry
-point without attempting Proton authentication.
+point without attempting Proton authentication. A ready result is therefore a
+local readiness statement, not a remote session validation. If Proton has
+revoked or expired the browser session server-side, the next guarded live
+metadata or transfer call must surface that as an auth failure without starting
+a new login attempt.
 
 ## Helper Script
 
@@ -72,6 +76,9 @@ eval "$(./scripts/export-pass-env.sh)"
 ```
 
 The script verifies that `pass-cli` is authenticated and sets `PROTON_PASS_CLI_BIN`.
+It also unsets legacy account credential reference variables; proton-drive-cli
+searches provider vaults directly for browser-fork key-password and optional
+data-password entries.
 
 ## proton-drive-cli Constants
 

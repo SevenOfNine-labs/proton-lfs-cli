@@ -43,6 +43,11 @@ safety gate, the doctor tests, TypeScript lint, and a build freshness check.
 When `LIVE_CANARY_DOCTOR_ARGS` is set, it also parses `doctor --json` with the
 root structured readiness checker and requires `canAttemptLiveCanary=true`.
 It does not perform Proton login, token refresh, upload, or download.
+`state=ready` means the saved local session shape, local expiry timestamps,
+file permissions, and configured local unlock providers look usable. It does
+not prove the server still accepts the session; remote revocation or server-side
+expiry is discovered only by the guarded live metadata/read path, and must not
+trigger an automatic retry login.
 
 ## Account Rules
 
@@ -154,7 +159,8 @@ Stop after this target. The target parses the offline doctor JSON and requires
 `authMode=browser-fork`, `state=ready`, and `canAttemptTransfer=true`. Only run
 `make test-e2e-real` later, in a separate command, after recording that result.
 The browser-fork helper rejects any `LIVE_BROWSER_FORK_LOGIN_ARGS` value that
-tries to set `--auth-mode`; login is browser-fork-only.
+is not `--key-password-provider` or `--key-password-host`; login is
+browser-fork-only, and legacy account credential flags are never allowed.
 
 ## Real E2E Guard
 

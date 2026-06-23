@@ -239,11 +239,7 @@ test-integration-sdk: check-submodules check-sdk-prereqs ## Run sdk backend inte
 
 test-e2e-mock: build-adapter ## Mocked E2E pipeline (no real credentials)
 	@mkdir -p $(GO_CACHE_DIR)
-	@chmod +x scripts/mock-pass-cli.sh
-	PROTON_PASS_CLI_BIN=$(PWD)/scripts/mock-pass-cli.sh \
-		PROTON_DRIVE_CLI_BIN=$(PWD)/tests/testdata/mock-proton-drive-cli.js \
-		PASS_MOCK_USERNAME=integration-user@proton.test \
-		PASS_MOCK_PASSWORD=integration-password \
+	PROTON_DRIVE_CLI_BIN=$(PWD)/tests/testdata/mock-proton-drive-cli.js \
 		GOCACHE=$(PWD)/$(GO_CACHE_DIR) $(GO) test -tags integration ./tests/integration/... -run E2EMocked -v
 
 live-canary-preflight: check-submodules build-adapter build-drive-cli ## Offline gate before any real Proton canary
@@ -312,7 +308,7 @@ test-e2e-real: check-live-canary-ack check-live-canary-doctor-args live-canary-p
 	@eval "$$(./scripts/export-pass-env.sh)" && \
 		GOCACHE=$(PWD)/$(GO_CACHE_DIR) $(GO) test -tags integration ./tests/integration/... -run E2E -v
 
-pass-env: ## Print export commands for Proton Pass-based adapter credentials
+pass-env: ## Print Proton Pass CLI provider env (no account credentials)
 	@./scripts/export-pass-env.sh
 
 check-submodules: ## Verify pinned root and Proton SDK submodule checkouts

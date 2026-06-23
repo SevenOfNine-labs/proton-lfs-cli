@@ -1,13 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PASS_REF_ROOT="${PROTON_PASS_REF_ROOT:-pass://Personal/Proton Git LFS}"
-PASS_REF_ROOT="${PASS_REF_ROOT%/}"
-USERNAME_REF="${PROTON_PASS_USERNAME_REF:-${PASS_REF_ROOT}/username}"
-PASSWORD_REF="${PROTON_PASS_PASSWORD_REF:-${PASS_REF_ROOT}/password}"
-
-MOCK_USERNAME="${PASS_MOCK_USERNAME:-integration-user@proton.test}"
-MOCK_PASSWORD="${PASS_MOCK_PASSWORD:-integration-password}"
+MOCK_VAULT_NAME="${MOCK_PASS_VAULT_NAME:-Personal}"
+MOCK_ITEM_TITLE="${MOCK_PASS_ITEM_TITLE:-Proton}"
+MOCK_USERNAME="${MOCK_PASS_USERNAME:-integration-user@proton.test}"
+MOCK_PASSWORD="${MOCK_PASS_PASSWORD:-integration-password}"
 
 json_escape() {
   local value="${1:-}"
@@ -21,6 +18,10 @@ if [[ "${1:-}" == "--version" ]]; then
   exit 0
 fi
 
+if [[ "${1:-}" == "test" ]]; then
+  exit 0
+fi
+
 if [[ "${1:-}" == "user" && "${2:-}" == "info" ]]; then
   if [[ "${3:-}" == "--output" && "${4:-}" == "json" ]]; then
     printf '{"email":"%s"}\n' "$(json_escape "$MOCK_USERNAME")"
@@ -30,14 +31,25 @@ if [[ "${1:-}" == "user" && "${2:-}" == "info" ]]; then
   exit 0
 fi
 
+if [[ "${1:-}" == "vault" && "${2:-}" == "list" && "${3:-}" == "--output" && "${4:-}" == "json" ]]; then
+  printf '{"vaults":[{"name":"%s"}]}\n' "$(json_escape "$MOCK_VAULT_NAME")"
+  exit 0
+fi
+
+if [[ "${1:-}" == "item" && "${2:-}" == "list" ]]; then
+  printf '{"items":[{"name":"%s","username":"%s","urls":["https://proton.me"]}]}\n' \
+    "$(json_escape "$MOCK_ITEM_TITLE")" \
+    "$(json_escape "$MOCK_USERNAME")"
+  exit 0
+fi
+
 if [[ "${1:-}" == "item" && "${2:-}" == "view" ]]; then
   OUTPUT_JSON="false"
-  REF=""
+  REF="$MOCK_ITEM_TITLE"
 
   if [[ "${3:-}" == "--output" && "${4:-}" == "json" ]]; then
     OUTPUT_JSON="true"
-    REF="${5:-}"
-  else
+  elif [[ "${3:-}" != --* ]]; then
     REF="${3:-}"
   fi
 
@@ -46,24 +58,18 @@ if [[ "${1:-}" == "item" && "${2:-}" == "view" ]]; then
     exit 2
   fi
 
-  VALUE=""
-  case "$REF" in
-    "$USERNAME_REF")
-      VALUE="$MOCK_USERNAME"
-      ;;
-    "$PASSWORD_REF")
-      VALUE="$MOCK_PASSWORD"
-      ;;
-    *)
-      echo "reference not found: $REF" >&2
-      exit 1
-      ;;
-  esac
+  if [[ "$REF" != "$MOCK_ITEM_TITLE" && "$*" != *"--item-title $MOCK_ITEM_TITLE"* ]]; then
+    echo "item not found: $REF" >&2
+    exit 1
+  fi
 
   if [[ "$OUTPUT_JSON" == "true" ]]; then
-    printf '{"value":"%s"}\n' "$(json_escape "$VALUE")"
+    printf '{"item":{"content":{"title":"%s","content":{"Login":{"username":"%s","password":"%s","urls":["https://proton.me"]}}}}}\n' \
+      "$(json_escape "$MOCK_ITEM_TITLE")" \
+      "$(json_escape "$MOCK_USERNAME")" \
+      "$(json_escape "$MOCK_PASSWORD")"
   else
-    printf '%s\n' "$VALUE"
+    printf 'Username: %s\nPassword: %s\nURL: https://proton.me\n' "$MOCK_USERNAME" "$MOCK_PASSWORD"
   fi
   exit 0
 fi

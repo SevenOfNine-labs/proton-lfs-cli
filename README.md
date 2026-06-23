@@ -106,7 +106,7 @@ make test-integration-sdk NODE="$(command -v node)"
 make test-integration-sdk JS_PM=npm
 ```
 
-If you use non-default vault/item references, set `PROTON_PASS_*` first, then run:
+If you use a non-default `pass-cli` binary, export it before running:
 
 ```bash
 eval "$(make -s pass-env)"
@@ -115,14 +115,16 @@ make test-integration-sdk
 
 ## Credentials
 
-Use Proton Pass references, not plaintext credentials:
+Use browser-fork login for account authorization. Proton Pass or
+`git-credential` is used only as the local key-password/data-password provider:
 
 ```bash
 pass-cli login
 eval "$(./scripts/export-pass-env.sh)"
 ```
 
-Canonical reference root is `pass://Personal/Proton LFS`.
+`export-pass-env.sh` exports `PROTON_PASS_CLI_BIN` and unsets legacy account
+credential references; it does not export Proton usernames or passwords.
 
 ## Repository Layout
 

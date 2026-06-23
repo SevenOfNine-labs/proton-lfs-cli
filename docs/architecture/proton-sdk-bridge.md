@@ -52,6 +52,9 @@ malformed `exists` and batch helper payloads instead of inferring success.
 ## Security Considerations
 
 - No account credentials are accepted by bridge transfer commands
+- `auth-state` readiness is local-only. It validates saved session shape,
+  local expiry, file permissions, and local unlock metadata; it cannot prove a
+  remotely revoked Proton session is still accepted by the server.
 - Local unlock selectors are passed via stdin (not visible in `ps` output)
 - OID validation: strict 64-character hex regex before subprocess spawn
 - Path traversal prevention: reject paths containing `..`
@@ -75,7 +78,10 @@ malformed `exists` and batch helper payloads instead of inferring success.
 
 1. CAPTCHA may require manual intervention for new accounts.
 2. FIDO2-only 2FA is surfaced as an auth-required state and must be completed outside the transfer path.
-3. No streaming for large files (>2GB may timeout -- increase `PROTON_DRIVE_CLI_TIMEOUT_MS`).
+3. Remote session revocation can still make the first live SDK call fail after
+   offline `ready`; this must be reported as an auth failure, not retried as an
+   automatic login.
+4. No streaming for large files (>2GB may timeout -- increase `PROTON_DRIVE_CLI_TIMEOUT_MS`).
 
 ## Next Hardening Targets
 

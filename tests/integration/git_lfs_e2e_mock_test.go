@@ -15,8 +15,6 @@ import (
 //
 // Prerequisites:
 //   - PROTON_DRIVE_CLI_BIN points at mock-proton-drive-cli.js
-//   - PROTON_PASS_CLI_BIN points at mock-pass-cli.sh
-//   - PASS_MOCK_USERNAME / PASS_MOCK_PASSWORD set
 func TestE2EMockedPipeline(t *testing.T) {
 	root := repoRoot(t)
 
@@ -29,27 +27,15 @@ func TestE2EMockedPipeline(t *testing.T) {
 		t.Skipf("mock bridge not found at %s: %v", mockBridge, err)
 	}
 
-	mockPassCLI := os.Getenv("PROTON_PASS_CLI_BIN")
-	if mockPassCLI == "" {
-		mockPassCLI = filepath.Join(root, "scripts", "mock-pass-cli.sh")
-	}
-	if _, err := os.Stat(mockPassCLI); err != nil {
-		t.Skipf("mock-pass-cli.sh not found at %s: %v", mockPassCLI, err)
-	}
-
 	// Set up mock storage directory for the bridge.
 	mockStorageDir := filepath.Join(t.TempDir(), "mock-bridge-storage")
 
 	// Build adapter and set up repository.
 	s := setupRepositoryForUpload(t)
 
-	// Build credential and bridge environment.
+	// Build bridge environment. Account auth is represented by mock auth-state.
 	sdkEnv := append(
 		s.env,
-		"PROTON_PASS_CLI_BIN="+mockPassCLI,
-		"PROTON_PASS_REF_ROOT=pass://Personal/Proton Git LFS",
-		"PASS_MOCK_USERNAME=integration-user@proton.test",
-		"PASS_MOCK_PASSWORD=integration-password",
 		"PROTON_DRIVE_CLI_BIN="+mockBridge,
 		"MOCK_BRIDGE_STORAGE_DIR="+mockStorageDir,
 	)
@@ -115,22 +101,10 @@ func TestE2EMockedPipelineBlocksMissingBrowserForkKeyPassword(t *testing.T) {
 		t.Skipf("mock bridge not found at %s: %v", mockBridge, err)
 	}
 
-	mockPassCLI := os.Getenv("PROTON_PASS_CLI_BIN")
-	if mockPassCLI == "" {
-		mockPassCLI = filepath.Join(root, "scripts", "mock-pass-cli.sh")
-	}
-	if _, err := os.Stat(mockPassCLI); err != nil {
-		t.Skipf("mock-pass-cli.sh not found at %s: %v", mockPassCLI, err)
-	}
-
 	mockStorageDir := filepath.Join(t.TempDir(), "mock-bridge-storage")
 	s := setupRepositoryForUpload(t)
 	sdkEnv := append(
 		s.env,
-		"PROTON_PASS_CLI_BIN="+mockPassCLI,
-		"PROTON_PASS_REF_ROOT=pass://Personal/Proton Git LFS",
-		"PASS_MOCK_USERNAME=integration-user@proton.test",
-		"PASS_MOCK_PASSWORD=integration-password",
 		"PROTON_DRIVE_CLI_BIN="+mockBridge,
 		"MOCK_BRIDGE_STORAGE_DIR="+mockStorageDir,
 		"MOCK_BRIDGE_AUTH_STATE=needs_key_password",
