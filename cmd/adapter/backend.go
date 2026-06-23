@@ -42,6 +42,7 @@ const (
 	ErrCodeDataPasswordRequired ErrorCode = "data_password_required"
 	ErrCodeKeyPasswordRequired  ErrorCode = "key_password_required"
 	ErrCodeKeyUnlockFailed      ErrorCode = "key_unlock_failed"
+	ErrCodeInsufficientScope    ErrorCode = "insufficient_scope"
 	ErrCodeNotFound             ErrorCode = "not_found"
 	ErrCodePermissionDenied     ErrorCode = "permission_denied"
 	ErrCodeServerError          ErrorCode = "server_error"
@@ -485,6 +486,9 @@ func mapBridgeError(err error, fallbackMessage string) error {
 		strings.Contains(msg, "unauthorized"),
 		strings.Contains(msg, "401"):
 		return newBackendError(401, "session is invalid or expired", err)
+	case strings.Contains(msg, "sufficient scope"),
+		strings.Contains(msg, "9101"):
+		return newBackendErrorWithCode(403, "Proton rejected this app/session authorization scope", err, ErrCodeInsufficientScope)
 	case strings.Contains(msg, "not found"),
 		strings.Contains(msg, "404"):
 		return newBackendError(404, "object not found in drive backend", err)
@@ -510,6 +514,7 @@ type bridgeErrorDetails struct {
 	TwoFactorType  string `json:"twoFactorType"`
 	TOTPAllowed    bool   `json:"totpAllowed"`
 	FIDO2Available bool   `json:"fido2Available"`
+	ProtonCode     int    `json:"protonCode"`
 }
 
 func bridgeStatusOrDefault(bridgeErr *BridgeError, fallback int) int {
@@ -555,6 +560,8 @@ func mapStructuredBridgeError(bridgeErr *BridgeError, fallbackMessage string, or
 		return newBackendErrorWithCode(bridgeStatusOrDefault(bridgeErr, 407), "captcha verification required — run: proton-drive login", original, ErrCodeCaptchaRequired)
 	case errorCode == "RATE_LIMITED":
 		return newBackendErrorWithCode(bridgeStatusOrDefault(bridgeErr, 429), "rate limited by proton api — wait and retry", original, ErrCodeRateLimited)
+	case errorCode == "INSUFFICIENT_SCOPE" || details.ProtonCode == 9101 || strings.Contains(lowerMsg, "sufficient scope"):
+		return newBackendErrorWithCode(bridgeStatusOrDefault(bridgeErr, 403), "Proton rejected this app/session authorization scope", original, ErrCodeInsufficientScope)
 	case errorCode == "NOT_FOUND" || errorCode == "FILE_NOT_FOUND" || errorCode == "PATH_NOT_FOUND":
 		return newBackendErrorWithCode(bridgeStatusOrDefault(bridgeErr, 404), "object not found in drive backend", original, ErrCodeNotFound)
 	case errorCode == "PERMISSION_DENIED":

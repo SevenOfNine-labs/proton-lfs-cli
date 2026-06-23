@@ -68,6 +68,7 @@ Stop immediately if any of these appear:
 
 - CAPTCHA or human verification.
 - HTTP 429 or Proton anti-abuse/rate-limit code.
+- Proton API 9101 / `INSUFFICIENT_SCOPE`.
 - FIDO2-only challenge.
 - Unexpected second login prompt.
 - More than one browser-fork login attempt in logs.
@@ -77,6 +78,9 @@ Stop immediately if any of these appear:
 
 After a hard stop, do not retry live. Return to mocked fixtures and add a
 regression test for the observed state.
+`INSUFFICIENT_SCOPE` means the saved session can be locally ready while Proton
+still rejects the app/session authorization scope for Drive API calls. Treat it
+as an app-version/session-scope investigation, not as a data-password problem.
 
 ## One Login Attempt
 

@@ -350,6 +350,16 @@ func TestMapStructuredBridgeErrorAuthStates(t *testing.T) {
 			wantCode:  401,
 			wantClass: ErrCodeKeyUnlockFailed,
 		},
+		{
+			name: "insufficient scope",
+			err: &BridgeError{
+				Code:    403,
+				Message: "API Error (9101): Access token does not have sufficient scope",
+				Details: `{"errorCode":"INSUFFICIENT_SCOPE","protonCode":9101}`,
+			},
+			wantCode:  403,
+			wantClass: ErrCodeInsufficientScope,
+		},
 	}
 
 	for _, tc := range cases {

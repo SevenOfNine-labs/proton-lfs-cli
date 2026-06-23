@@ -134,6 +134,9 @@ permissions, and unlock-provider availability. It does not prove a remotely
 revoked or server-expired Proton session is still valid; that can only be found
 by the guarded live metadata/transfer path, and failures there must not cause a
 retry-login loop.
+The live path also classifies Proton API 9101 as `insufficient_scope`, which is
+an app/session authorization-scope blocker rather than a credential or data
+password blocker.
 
 `make browser-fork-canary` is a separate live-login path. It requires
 `PROTON_LFS_LIVE_CANARY`, `LIVE_CANARY_DOCTOR_ARGS`, and

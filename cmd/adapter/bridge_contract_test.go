@@ -239,6 +239,7 @@ func TestBridgeContractErrorCodesAreClassified(t *testing.T) {
 		"TIMEOUT":                ErrCodeNetworkFailure,
 		"CONNECTION_REFUSED":     ErrCodeNetworkFailure,
 		"API_ERROR":              ErrCodeServerError,
+		"INSUFFICIENT_SCOPE":     ErrCodeInsufficientScope,
 		"RATE_LIMITED":           ErrCodeRateLimited,
 		"QUOTA_EXCEEDED":         ErrCodeServerError,
 		"NOT_FOUND":              ErrCodeNotFound,
