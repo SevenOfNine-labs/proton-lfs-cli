@@ -8,7 +8,10 @@ COREPACK_HOME_DIR := $(PWD)/.cache/corepack
 ADAPTER_BIN := bin/git-lfs-proton-adapter
 TRAY_BIN := bin/proton-lfs-tray
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+GIT_COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo dev)
+BUILD_TIME := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 LDFLAGS_VERSION := -X main.Version=$(VERSION)
+ADAPTER_LDFLAGS := -X main.GitCommit=$(GIT_COMMIT) -X main.BuildTime=$(BUILD_TIME)
 GIT_LFS_DIR := submodules/git-lfs
 DRIVE_CLI_DIR := submodules/proton-drive-cli
 GO_CACHE_DIR := .cache/go-build
@@ -72,7 +75,7 @@ build-all: check-submodules build-adapter build-tray build-lfs build-drive-cli #
 
 build-adapter: ## Build the custom transfer adapter
 	@mkdir -p bin
-	$(GO) build -trimpath -o $(ADAPTER_BIN) ./cmd/adapter
+	$(GO) build -trimpath -ldflags '$(ADAPTER_LDFLAGS)' -o $(ADAPTER_BIN) ./cmd/adapter
 
 build-tray: ## Build the system tray application (requires CGO)
 	@mkdir -p bin
