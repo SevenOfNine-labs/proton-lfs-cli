@@ -74,6 +74,19 @@ revoked or expired the browser session server-side, the next guarded live
 metadata or transfer call must surface that as an auth failure without starting
 a new login attempt.
 
+## Session Refresh
+
+The tray refresh heartbeat is token maintenance only. It calls
+`proton-drive-cli session refresh --json`, which preserves redacted HTTP and
+Proton API details without printing token values. Recoverable failures retry
+after a short backoff. Non-recoverable failures, including Proton `10013`
+`Invalid refresh token`, are remembered for the same saved session and shown as
+`Refresh: Reconnect required` / `Transfers: Reconnect required`; the tray does
+not keep retrying and does not start login automatically.
+
+A successful browser-fork Connect creates a new session and clears the
+same-session refresh blocker.
+
 ## Helper Script
 
 ```bash

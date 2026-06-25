@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -352,6 +353,109 @@ func TestDecideRefreshHonorsRetryBackoff(t *testing.T) {
 	}
 	if !decision.NextAttempt.Equal(health.NextAttempt) {
 		t.Fatalf("next attempt = %s, want %s", decision.NextAttempt, health.NextAttempt)
+	}
+}
+
+func TestParseRefreshCommandResultAndTerminalFailure(t *testing.T) {
+	out := []byte(`debug line
+{"ok":false,"state":"refresh_failed","error":"Request failed with status 400","errorCode":"API_ERROR","recoverable":false,"statusCode":400,"protonCode":10013,"protonError":"Invalid refresh token","action":"stop: refresh token rejected or session invalid; run browser login after offline gates pass"}`)
+
+	result, ok := parseRefreshCommandResult(out)
+	if !ok {
+		t.Fatal("expected refresh JSON to parse")
+	}
+	if result.Recoverable == nil || *result.Recoverable {
+		t.Fatalf("expected terminal recoverable=false result, got %#v", result.Recoverable)
+	}
+	message, recoverable := refreshFailureFromCommand(result, true, errors.New("exit status 1"))
+	if recoverable {
+		t.Fatalf("expected terminal refresh failure, got message %q", message)
+	}
+	for _, want := range []string{
+		"Invalid refresh token",
+		"code=API_ERROR",
+		"status=400",
+		"proton=10013",
+		"stop:",
+	} {
+		if !strings.Contains(message, want) {
+			t.Fatalf("failure summary missing %q: %s", want, message)
+		}
+	}
+}
+
+func TestDecideRefreshStopsAfterTerminalFailureForSameSession(t *testing.T) {
+	now := time.Date(2026, 6, 23, 18, 0, 0, 0, time.UTC)
+	meta := sessionMetadata{
+		SessionID:      "session-1",
+		TokenExpiresAt: now.Add(5 * time.Minute).UnixMilli(),
+	}
+	health := sessionRefreshState{
+		LastError:       "Invalid refresh token",
+		ActionRequired:  true,
+		ActionSessionID: "session-1",
+	}
+
+	decision := decideRefresh(now, meta, health)
+	if decision.Attempt {
+		t.Fatal("terminal same-session refresh failure must not retry")
+	}
+	if got := refreshTitle(now, meta, true, health); got != "Refresh: Reconnect required" {
+		t.Fatalf("refresh title = %q, want reconnect required", got)
+	}
+}
+
+func TestDecideRefreshAllowsNewSessionAfterTerminalFailure(t *testing.T) {
+	now := time.Date(2026, 6, 23, 18, 0, 0, 0, time.UTC)
+	meta := sessionMetadata{
+		SessionID:      "session-2",
+		TokenExpiresAt: now.Add(5 * time.Minute).UnixMilli(),
+	}
+	health := sessionRefreshState{
+		LastError:       "Invalid refresh token",
+		ActionRequired:  true,
+		ActionSessionID: "session-1",
+	}
+
+	decision := decideRefresh(now, meta, health)
+	if !decision.Attempt {
+		t.Fatalf("new session should not inherit terminal refresh failure, got %#v", decision)
+	}
+}
+
+func TestInspectAuthReadinessBlocksTerminalRefreshFailure(t *testing.T) {
+	now := time.Date(2026, 6, 23, 18, 0, 0, 0, time.UTC)
+	resetRefreshForStatusTest(t, now)
+	home := setupFakeHome(t, fakeHomeOpts{configJSON: `{"credentialProvider":"pass-cli"}`})
+	setupGitConfig(t, "")
+	writeSessionForStatusTest(t, home, sessionMetadata{
+		SessionID:            "session-id",
+		UID:                  "uid-123",
+		AccessToken:          "access",
+		RefreshToken:         "refresh",
+		Scopes:               []string{"drive"},
+		PasswordMode:         1,
+		AuthMode:             "browser-fork",
+		KeyPasswordPersisted: true,
+		TokenExpiresAt:       now.Add(24 * time.Hour).UnixMilli(),
+	})
+	refreshMu.Lock()
+	refreshState = sessionRefreshState{
+		LastError:       "Invalid refresh token",
+		ActionRequired:  true,
+		ActionSessionID: "session-id",
+	}
+	refreshMu.Unlock()
+
+	readiness := inspectAuthReadiness(now)
+	if !readiness.blocked || readiness.ready {
+		t.Fatalf("expected blocked readiness, got %#v", readiness)
+	}
+	if readiness.sessionTitle != "Session: Refresh failed" {
+		t.Fatalf("unexpected session title: %s", readiness.sessionTitle)
+	}
+	if readiness.transferTitle != "Transfers: Reconnect required" {
+		t.Fatalf("unexpected transfer title: %s", readiness.transferTitle)
 	}
 }
 

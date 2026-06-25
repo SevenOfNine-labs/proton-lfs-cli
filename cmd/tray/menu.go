@@ -239,6 +239,7 @@ func disconnectFromProton() {
 			return
 		}
 		trayLog.Print("disconnect: logout succeeded")
+		clearRefreshState()
 		sendNotification("Disconnected from Proton")
 		applyLoginStatus()
 	}()

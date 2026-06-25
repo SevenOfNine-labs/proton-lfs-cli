@@ -58,6 +58,7 @@ func connectToProton() {
 			return
 		}
 		trayLog.Print("connect: login succeeded")
+		clearRefreshState()
 		readiness := inspectAuthReadiness(timeNow())
 		trayLog.Printf("connect: post-login readiness: %s; %s",
 			readiness.statusTitle, readiness.transferTitle)

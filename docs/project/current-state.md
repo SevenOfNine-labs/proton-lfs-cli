@@ -1,6 +1,6 @@
 # Current State
 
-Date: 2026-06-22
+Date: 2026-06-25
 
 ## Implemented
 
@@ -45,6 +45,10 @@ Date: 2026-06-22
 - Helper CLI scope diagnostics provide redacted local auth/session evidence and
   an explicitly acknowledged one-read live Drive scope probe for API 9101
   investigations.
+- Tray refresh now consumes structured `proton-drive-cli session refresh --json`
+  results. Recoverable refresh failures back off; non-recoverable refresh-token
+  rejection is shown as reconnect required and is not retried for the same
+  saved session.
 
 ## Architecture
 
@@ -104,3 +108,6 @@ stopping without a transfer.
 `proton-lfs-cli scope-diagnostics` can be used before those live runs to collect
 redacted local evidence; `scope-diagnostics --live` is gated by the same
 acknowledgement and performs one read-only Drive metadata probe.
+If the tray log shows Proton `10013` / `Invalid refresh token`, the current
+saved session cannot be repaired by refresh; run the guarded browser-fork
+connect flow to create a new session.

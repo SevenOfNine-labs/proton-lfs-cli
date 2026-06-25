@@ -15,7 +15,7 @@
 2. `Status: <Ready | Setup needed | Not connected | Checking...>`.
 3. `Session: <Signed in | Not connected | Expired | Invalid>`.
 4. `Transfers: <Ready | Data password needed | Sign-in required | ...>`.
-5. `Refresh: <Due in ... | Updating... | Failed; retry in ...>`.
+5. `Refresh: <Due in ... | Updating... | Failed; retry in ... | Reconnect required>`.
 6. Primary auth action:
    - `Connect to Proton...` when no session exists.
    - `Disconnect from Proton` when a saved session exists.
@@ -50,9 +50,15 @@
 - The tray schedules refresh from `tokenExpiresAt`, refreshing near expiry
   instead of rotating a fresh token every few minutes.
 - Refresh success records a visible last-refresh state.
-- Refresh failure records a visible retry state and logs the redacted failure.
+- Recoverable refresh failure records a visible retry state and logs the
+  redacted failure.
 - A revoked, invalid, or expired refresh token must surface as action required;
-  it must not loop into automatic login.
+  it must not loop into automatic login or repeat refresh attempts for the same
+  saved session.
+- The tray calls `proton-drive-cli session refresh --json`, consumes the
+  redacted `statusCode`, Proton `Code`, `errorCode`, and `recoverable` fields,
+  and treats non-recoverable failures such as Proton `10013` as reconnect
+  required until browser login creates a new session.
 
 ## Debuggability
 

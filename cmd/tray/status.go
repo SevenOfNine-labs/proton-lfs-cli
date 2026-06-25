@@ -56,11 +56,27 @@ type authReadiness struct {
 }
 
 type sessionRefreshState struct {
-	InProgress  bool
-	LastAttempt time.Time
-	LastSuccess time.Time
-	LastError   string
-	NextAttempt time.Time
+	InProgress      bool
+	LastAttempt     time.Time
+	LastSuccess     time.Time
+	LastError       string
+	NextAttempt     time.Time
+	ActionRequired  bool
+	ActionSessionID string
+}
+
+type refreshCommandResult struct {
+	OK          bool             `json:"ok"`
+	Refreshed   bool             `json:"refreshed"`
+	State       string           `json:"state"`
+	Error       string           `json:"error"`
+	ErrorCode   string           `json:"errorCode"`
+	Recoverable *bool            `json:"recoverable"`
+	StatusCode  int              `json:"statusCode"`
+	ProtonCode  int              `json:"protonCode"`
+	ProtonError string           `json:"protonError"`
+	Action      string           `json:"action"`
+	Details     *json.RawMessage `json:"details"`
 }
 
 type refreshDecision struct {
@@ -138,7 +154,7 @@ func maybeRefreshSession() {
 	}
 	driveCLI := discoverDriveCLIBinary()
 	if driveCLI == "" {
-		recordRefreshFailure(now, "proton-drive-cli not found")
+		recordRefreshFailure(now, meta.SessionID, "proton-drive-cli not found", true)
 		applyLoginStatus()
 		return
 	}
@@ -147,13 +163,17 @@ func maybeRefreshSession() {
 	}
 	applyLoginStatus()
 	go func() {
-		cmd := exec.Command(driveCLI, "session", "refresh")
+		cmd := exec.Command(driveCLI, "session", "refresh", "--json")
 		out, err := cmd.CombinedOutput()
 		logSubprocessOutput("refresh", out)
 		finishedAt := timeNow()
-		if err != nil {
-			recordRefreshFailure(finishedAt, err.Error())
-			trayLog.Printf("refresh: failed: %v", err)
+		if result, ok := parseRefreshCommandResult(out); ok && result.OK {
+			recordRefreshSuccess(finishedAt)
+			trayLog.Print("refresh: session token refreshed")
+		} else if err != nil || ok {
+			message, recoverable := refreshFailureFromCommand(result, ok, err)
+			recordRefreshFailure(finishedAt, meta.SessionID, message, recoverable)
+			trayLog.Printf("refresh: failed: %s", message)
 		} else {
 			recordRefreshSuccess(finishedAt)
 			trayLog.Print("refresh: session token refreshed")
@@ -255,6 +275,14 @@ func inspectAuthReadiness(now time.Time) authReadiness {
 		base.sessionTitle = "Session: Invalid"
 		base.transferTitle = "Transfers: Reconnect required"
 		base.tooltip = "Proton LFS - Setup needed: invalid saved session"
+		base.blocked = true
+		return base
+	}
+	if refreshActionRequiredForSession(meta, health) {
+		base.statusTitle = "Status: Setup needed"
+		base.sessionTitle = "Session: Refresh failed"
+		base.transferTitle = "Transfers: Reconnect required"
+		base.tooltip = "Proton LFS - Setup needed: session refresh failed"
 		base.blocked = true
 		return base
 	}
@@ -376,6 +404,8 @@ func markRefreshStarted(now time.Time) bool {
 	refreshState.InProgress = true
 	refreshState.LastAttempt = now
 	refreshState.LastError = ""
+	refreshState.ActionRequired = false
+	refreshState.ActionSessionID = ""
 	return true
 }
 
@@ -385,6 +415,8 @@ func recordRefreshSuccess(now time.Time) {
 	refreshState.InProgress = false
 	refreshState.LastSuccess = now
 	refreshState.LastError = ""
+	refreshState.ActionRequired = false
+	refreshState.ActionSessionID = ""
 	if meta, ok := readSessionMetadata(); ok {
 		refreshState.NextAttempt = nextRefreshAttempt(now, meta)
 	} else {
@@ -392,17 +424,27 @@ func recordRefreshSuccess(now time.Time) {
 	}
 }
 
-func recordRefreshFailure(now time.Time, message string) {
+func recordRefreshFailure(now time.Time, sessionID string, message string, recoverable bool) {
 	refreshMu.Lock()
 	defer refreshMu.Unlock()
 	refreshState.InProgress = false
 	refreshState.LastAttempt = now
 	refreshState.LastError = truncate(strings.TrimSpace(message), 120)
-	refreshState.NextAttempt = now.Add(refreshRetryInterval)
+	refreshState.ActionRequired = !recoverable
+	refreshState.ActionSessionID = ""
+	if recoverable {
+		refreshState.NextAttempt = now.Add(refreshRetryInterval)
+		return
+	}
+	refreshState.ActionSessionID = sessionID
+	refreshState.NextAttempt = time.Time{}
 }
 
 func decideRefresh(now time.Time, meta sessionMetadata, health sessionRefreshState) refreshDecision {
 	if health.InProgress {
+		return refreshDecision{}
+	}
+	if refreshActionRequiredForSession(meta, health) {
 		return refreshDecision{}
 	}
 	if !health.NextAttempt.IsZero() && now.Before(health.NextAttempt) {
@@ -429,6 +471,8 @@ func refreshTitle(now time.Time, meta sessionMetadata, hasSession bool, health s
 		return "Refresh: No session"
 	case health.InProgress:
 		return "Refresh: Updating..."
+	case refreshActionRequiredForSession(meta, health):
+		return "Refresh: Reconnect required"
 	case health.LastError != "":
 		if !health.NextAttempt.IsZero() && health.NextAttempt.After(now) {
 			return "Refresh: Failed; retry in " + compactDuration(health.NextAttempt.Sub(now))
@@ -445,6 +489,80 @@ func refreshTitle(now time.Time, meta sessionMetadata, hasSession bool, health s
 		return "Refresh: Due now"
 	}
 	return "Refresh: Due in " + compactDuration(next.Sub(now))
+}
+
+func clearRefreshState() {
+	refreshMu.Lock()
+	defer refreshMu.Unlock()
+	refreshState = sessionRefreshState{}
+}
+
+func refreshActionRequiredForSession(meta sessionMetadata, health sessionRefreshState) bool {
+	return health.ActionRequired && health.ActionSessionID != "" && health.ActionSessionID == meta.SessionID
+}
+
+func parseRefreshCommandResult(out []byte) (refreshCommandResult, bool) {
+	text := strings.TrimSpace(string(out))
+	if text == "" {
+		return refreshCommandResult{}, false
+	}
+	lines := strings.Split(text, "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		line := strings.TrimSpace(lines[i])
+		if !strings.HasPrefix(line, "{") {
+			continue
+		}
+		var result refreshCommandResult
+		if err := json.Unmarshal([]byte(line), &result); err == nil && result.State != "" {
+			return result, true
+		}
+	}
+	var result refreshCommandResult
+	if err := json.Unmarshal([]byte(text), &result); err == nil && result.State != "" {
+		return result, true
+	}
+	return refreshCommandResult{}, false
+}
+
+func refreshFailureFromCommand(result refreshCommandResult, parsed bool, err error) (string, bool) {
+	if !parsed {
+		if err != nil {
+			return err.Error(), true
+		}
+		return "refresh failed", true
+	}
+	recoverable := true
+	if result.Recoverable != nil {
+		recoverable = *result.Recoverable
+	}
+	summary := strings.TrimSpace(result.ProtonError)
+	if summary == "" {
+		summary = strings.TrimSpace(result.Error)
+	}
+	if summary == "" && err != nil {
+		summary = err.Error()
+	}
+	if summary == "" {
+		summary = "refresh failed"
+	}
+
+	var details []string
+	if result.ErrorCode != "" {
+		details = append(details, "code="+result.ErrorCode)
+	}
+	if result.StatusCode > 0 {
+		details = append(details, fmt.Sprintf("status=%d", result.StatusCode))
+	}
+	if result.ProtonCode > 0 {
+		details = append(details, fmt.Sprintf("proton=%d", result.ProtonCode))
+	}
+	if len(details) > 0 {
+		summary = fmt.Sprintf("%s (%s)", summary, strings.Join(details, " "))
+	}
+	if result.Action != "" {
+		summary = summary + "; " + result.Action
+	}
+	return summary, recoverable
 }
 
 func compactDuration(d time.Duration) string {
