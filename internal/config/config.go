@@ -32,6 +32,7 @@ const (
 	DefaultStorageBase        = "LFS"
 	DefaultCredentialProvider = CredentialProviderPassCLI
 	DefaultDataCredentialHost = "proton-data.proton-lfs-cli.local"
+	DefaultDriveCLIAppVersion = "external-drive-protonlfscli@0.1.2"
 )
 
 // Environment variable names

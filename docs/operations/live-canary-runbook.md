@@ -81,6 +81,10 @@ regression test for the observed state.
 `INSUFFICIENT_SCOPE` means the saved session can be locally ready while Proton
 still rejects the app/session authorization scope for Drive API calls. Treat it
 as an app-version/session-scope investigation, not as a data-password problem.
+For redacted evidence, run `proton-lfs-cli scope-diagnostics` first, then
+`PROTON_LFS_LIVE_CANARY=I_UNDERSTAND_THIS_TOUCHES_A_REAL_PROTON_ACCOUNT proton-lfs-cli scope-diagnostics --live`
+if one read-only server probe is intentionally allowed. The diagnostics command
+does not run login or transfer commands.
 
 ## One Login Attempt
 

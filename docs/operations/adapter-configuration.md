@@ -93,9 +93,38 @@ The Go adapter spawns `proton-drive-cli bridge <command>` directly as a subproce
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `PROTON_APP_VERSION` | empty | Optional Proton client app version override forwarded by the Go adapter |
-| `PROTON_DRIVE_CLI_APP_VERSION` | `external-drive-proton-lfs-cli@0.1.2` | proton-drive-cli default Proton app-version header |
+| `PROTON_DRIVE_CLI_APP_VERSION` | `external-drive-protonlfscli@0.1.2` | proton-drive-cli default Proton app-version header |
 | `PROTON_DRIVE_CLI_BIN` | `submodules/proton-drive-cli/dist/index.js` | Path to proton-drive-cli entry point |
 | `PROTON_DRIVE_CLI_TIMEOUT_MS` | `300000` | Subprocess command timeout |
 | `PROTON_DRIVE_CLI_SESSION_DIR` | `~/.proton-drive-cli` | Session file storage directory |
 
 Two-factor challenges are handled by interactive `proton-drive login`. Transfer commands surface `TWO_FACTOR_REQUIRED` and stop instead of attempting repeated logins.
+
+## Redacted Scope Diagnostics
+
+Use the helper diagnostics command when local readiness is green but Proton
+rejects the saved session during the live metadata gate:
+
+```bash
+proton-lfs-cli scope-diagnostics
+```
+
+This local mode prints JSON evidence only: credential-provider selections,
+session-file shape, redacted session identifiers, token presence flags, token
+expiry, local scope names, app-version inputs, and the offline
+`bridge auth-state` result. It does not contact Proton.
+
+To perform the one read-only server probe, use the same explicit live canary
+acknowledgement:
+
+```bash
+PROTON_LFS_LIVE_CANARY=I_UNDERSTAND_THIS_TOUCHES_A_REAL_PROTON_ACCOUNT \
+  proton-lfs-cli scope-diagnostics --live
+```
+
+Live mode adds exactly one `bridge list` request for `/` through
+`https://drive-api.proton.me` and reports structured Proton errors such as
+`INSUFFICIENT_SCOPE` / API 9101. It does not run login, init, upload, download,
+delete, refresh, or retry loops, and it omits raw token, password, UID, and
+session values. If local `authState.state` is not `ready`, live mode stops
+before the read-only server probe even when the acknowledgement is present.

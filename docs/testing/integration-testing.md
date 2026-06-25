@@ -142,6 +142,11 @@ retry-login loop or continue into the transfer path.
 The live path also classifies Proton API 9101 as `insufficient_scope`, which is
 an app/session authorization-scope blocker rather than a credential or data
 password blocker.
+Use `proton-lfs-cli scope-diagnostics` for redacted local evidence, and add
+`--live` with the explicit canary acknowledgement for exactly one read-only
+metadata probe. This command is designed for issue evidence: it reports local
+scope names and structured Proton error details without raw tokens, passwords,
+UIDs, or session IDs.
 
 `make browser-fork-canary` is a separate live-login path. It requires
 `PROTON_LFS_LIVE_CANARY`, `LIVE_CANARY_DOCTOR_ARGS`, and

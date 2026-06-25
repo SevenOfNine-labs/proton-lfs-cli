@@ -27,9 +27,9 @@ Date: 2026-06-22
   recursive SDK traversal, because the official Proton SDK commit currently
   contains an unmapped nested gitlink.
 - Latest official Proton Drive CLI/SDK auth signals were reviewed on
-  2026-06-22. `proton-drive-cli@b97563b` now pins the migrated official SDK
-  `origin/main@a3fc5e54` layout and uses the new `submodules/sdk/client/js`
-  package path.
+  2026-06-25. Current official sources still require browser-based CLI login,
+  honest third-party `x-pm-appversion` identity, SDK-based Drive operations
+  rather than raw API calls, and application-owned auth/session handling.
 - Transfer failures preserve retryable/temporary backend metadata in status JSON
   and render it in helper/tray status surfaces without adding automatic login or
   retry loops.
@@ -42,6 +42,9 @@ Date: 2026-06-22
   Git LFS transfer events.
 - Bridge subprocess tests cover strict envelopes, typed timeouts, malformed
   output, stderr redaction, and concurrency limits.
+- Helper CLI scope diagnostics provide redacted local auth/session evidence and
+  an explicitly acknowledged one-read live Drive scope probe for API 9101
+  investigations.
 
 ## Architecture
 
@@ -98,3 +101,6 @@ to run unless `PROTON_LFS_LIVE_CANARY` matches the exact acknowledgement in the
 Makefile. The separate `make browser-fork-canary` path runs one forced
 browser-fork login only, then local status and offline doctor inspection before
 stopping without a transfer.
+`proton-lfs-cli scope-diagnostics` can be used before those live runs to collect
+redacted local evidence; `scope-diagnostics --live` is gated by the same
+acknowledgement and performs one read-only Drive metadata probe.

@@ -1,4 +1,4 @@
-# Proton Auth News Audit - 2026-06-21
+# Proton Auth News Audit - 2026-06-21, refreshed 2026-06-25
 
 This note records the latest Proton auth and SDK signals reviewed before any
 real Proton login canary. No live login or transfer was attempted during this
@@ -9,6 +9,7 @@ audit.
 - Proton blog: `https://proton.me/blog/drive-sdk-june-2026`
 - Proton blog: `https://proton.me/blog/drive-cryptography-update`
 - Proton blog: `https://proton.me/blog/proton-drive-cli`
+- Proton support: `https://proton.me/support/drive-cli`
 - Proton blog: `https://proton.me/blog/authenticator-app`
 - Proton support: `https://proton.me/support/switch-two-password-mode`
 - Proton support: `https://proton.me/support/two-factor-authentication-2fa`
@@ -19,6 +20,15 @@ audit.
 
 ### Drive SDK and Official CLI
 
+- The latest Proton Drive CLI support article says official CLI login is
+  browser-based (`proton-drive auth login`) and its examples use
+  `filesystem list` for read-only Drive inspection. That keeps our account
+  password out of helper CLI commands and makes a single metadata list the
+  right live scope probe.
+- Proton's official CLI launch blog says sign-in happens through the browser,
+  no password is passed on the command line, and sessions are stored by the
+  operating system credential store. Our current browser-fork-only login model
+  and redacted diagnostics align with that requirement.
 - Proton's June 2026 Drive SDK messaging emphasizes SDK-based Drive operations,
   not SDK-owned account authentication.
 - Proton's June 2026 Drive cryptography update reinforces that SDK freshness is
@@ -33,9 +43,13 @@ audit.
   `x-pm-appversion`, using the `external-drive-{name}@{semver}` family of
   values. Clients that spoof official Proton clients or ship unsafe behavior
   may be limited or blocked.
+- As of the 2026-06-25 refresh, the upstream README still says the SDK is not
+  ready for production third-party apps, strongly recommends using the SDK over
+  raw Drive API calls for experimentation, requires official endpoints, and
+  requires honest application identity in `x-pm-appversion`.
 - Official SDK commit `24a1895f` changed browser-fork authentication so the
   official CLI uses `cli-drive`, while third-party/forked app versions use
-  `external-drive`. We should keep `external-drive-proton-lfs-cli@...` and not
+  `external-drive`. We should keep `external-drive-protonlfscli@...` and not
   borrow the official CLI client identity.
 - Official SDK commit `823b724d` improved auth UX for browser-fork login by
   clearer terminal output and JSON sign-in URL support.
@@ -92,7 +106,11 @@ audit.
 - Keep the live-login ban-avoidance rule: no real Proton login until offline
   gates and runbook checks pass.
 - Keep the third-party app-version identity:
-  `external-drive-proton-lfs-cli@...`.
+  `external-drive-protonlfscli@...`.
+- Preserve the hard boundary now enforced by `scope-diagnostics`: local
+  readiness is offline auth/session evidence; live scope acceptance is proven
+  only by one acknowledged, read-only metadata list; real LFS transfer remains
+  behind both.
 - Consider a future optional browser-fork login mode modeled on the official
   CLI. This may be less brittle than direct SRP for first login, but it still
   must be gated behind the same offline and live-canary controls.

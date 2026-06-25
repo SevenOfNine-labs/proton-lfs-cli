@@ -86,6 +86,9 @@ func TestConstants(t *testing.T) {
 	if DefaultDataCredentialHost != "proton-data.proton-lfs-cli.local" {
 		t.Fatalf("DefaultDataCredentialHost = %q", DefaultDataCredentialHost)
 	}
+	if DefaultDriveCLIAppVersion != "external-drive-protonlfscli@0.1.2" {
+		t.Fatalf("DefaultDriveCLIAppVersion = %q", DefaultDriveCLIAppVersion)
+	}
 	if EnvDriveCLIBin != "PROTON_DRIVE_CLI_BIN" {
 		t.Fatalf("EnvDriveCLIBin = %q", EnvDriveCLIBin)
 	}
