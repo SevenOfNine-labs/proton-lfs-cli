@@ -21,18 +21,21 @@ const (
 	DefaultDriveCLIBin        = config.DefaultDriveCLIBin
 	DefaultStorageBase        = config.DefaultStorageBase
 	DefaultCredentialProvider = config.DefaultCredentialProvider
+	DefaultDataCredentialHost = config.DefaultDataCredentialHost
 )
 
 // Environment variable names
 const (
-	EnvDriveCLIBin        = config.EnvDriveCLIBin
-	EnvNodeBin            = config.EnvNodeBin
-	EnvStorageBase        = config.EnvStorageBase
-	EnvAppVersion         = config.EnvAppVersion
-	EnvBackend            = config.EnvBackend
-	EnvAllowMockTransfers = config.EnvAllowMockTransfers
-	EnvLocalStoreDir      = config.EnvLocalStoreDir
-	EnvCredentialProvider = config.EnvCredentialProvider
+	EnvDriveCLIBin            = config.EnvDriveCLIBin
+	EnvNodeBin                = config.EnvNodeBin
+	EnvStorageBase            = config.EnvStorageBase
+	EnvAppVersion             = config.EnvAppVersion
+	EnvBackend                = config.EnvBackend
+	EnvAllowMockTransfers     = config.EnvAllowMockTransfers
+	EnvLocalStoreDir          = config.EnvLocalStoreDir
+	EnvCredentialProvider     = config.EnvCredentialProvider
+	EnvDataCredentialProvider = config.EnvDataCredentialProvider
+	EnvDataCredentialHost     = config.EnvDataCredentialHost
 )
 
 func envTrim(key string) string {

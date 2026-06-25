@@ -8,16 +8,20 @@ COREPACK_HOME_DIR := $(PWD)/.cache/corepack
 ADAPTER_BIN := bin/git-lfs-proton-adapter
 TRAY_BIN := bin/proton-lfs-tray
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+GIT_COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo dev)
+BUILD_TIME := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 LDFLAGS_VERSION := -X main.Version=$(VERSION)
+ADAPTER_LDFLAGS := -X main.GitCommit=$(GIT_COMMIT) -X main.BuildTime=$(BUILD_TIME)
 GIT_LFS_DIR := submodules/git-lfs
 DRIVE_CLI_DIR := submodules/proton-drive-cli
 GO_CACHE_DIR := .cache/go-build
+LIVE_CANARY_ACK_VALUE := I_UNDERSTAND_THIS_TOUCHES_A_REAL_PROTON_ACCOUNT
 
 .PHONY: help setup setup-env install-deps \
 	build build-adapter build-tray build-lfs build-drive-cli build-sea build-all build-bundle \
 	install uninstall \
 	test test-adapter test-tray test-lfs test-integration test-integration-timeout test-integration-stress test-integration-sdk test-e2e-mock test-e2e-real test-all \
-	pass-env check-sdk-prereqs check-sdk-real-prereqs \
+	live-canary-preflight live-drive-scope-canary browser-fork-canary pass-env check-submodules check-live-canary-ack check-live-canary-doctor-args check-browser-fork-canary-args check-sdk-prereqs check-sdk-real-prereqs \
 	fmt lint lint-go \
 	docs docs-lint \
 	clean status install-hooks
@@ -67,11 +71,11 @@ install-deps: ## Install Go dependencies and JS dependencies (default: yarn via 
 
 build: build-adapter ## Build first-party binaries
 
-build-all: build-adapter build-tray build-lfs build-drive-cli ## Build adapter, tray app, Git LFS submodule, and proton-drive-cli
+build-all: check-submodules build-adapter build-tray build-lfs build-drive-cli ## Build adapter, tray app, Git LFS submodule, and proton-drive-cli
 
 build-adapter: ## Build the custom transfer adapter
 	@mkdir -p bin
-	$(GO) build -trimpath -o $(ADAPTER_BIN) ./cmd/adapter
+	$(GO) build -trimpath -ldflags '$(ADAPTER_LDFLAGS)' -o $(ADAPTER_BIN) ./cmd/adapter
 
 build-tray: ## Build the system tray application (requires CGO)
 	@mkdir -p bin
@@ -80,7 +84,7 @@ build-tray: ## Build the system tray application (requires CGO)
 build-sea: build-drive-cli ## Build proton-drive-cli as a standalone Node.js SEA binary
 	@bash scripts/build-sea.sh
 
-build-bundle: build-adapter build-tray build-sea ## Build all components into dist/ for packaging
+build-bundle: check-submodules build-adapter build-tray build-sea ## Build all components into dist/ for packaging
 	@mkdir -p dist
 	@cp bin/git-lfs-proton-adapter dist/ 2>/dev/null || true
 	@cp bin/proton-lfs-tray dist/ 2>/dev/null || true
@@ -89,12 +93,15 @@ build-bundle: build-adapter build-tray build-sea ## Build all components into di
 
 # ---------- install / uninstall ----------
 
-INSTALL_APP ?= /Applications/ProtonGitLFS.app
+INSTALL_APP ?= /Applications/ProtonLFS.app
 INSTALL_BIN ?= $(HOME)/.local/bin
 
 ifeq ($(shell uname -s),Darwin)
 
 install: build-bundle ## Install bundle (macOS: .app to /Applications, or set INSTALL_APP)
+	@# Clean up old installation artifacts
+	@rm -rf /Applications/ProtonGitLFS.app 2>/dev/null || true
+	@rm -f "$(HOME)/Library/LaunchAgents/com.proton.git-lfs-tray.plist" 2>/dev/null || true
 	@mkdir -p "$(INSTALL_APP)/Contents/MacOS" "$(INSTALL_APP)/Contents/Helpers" "$(INSTALL_APP)/Contents/Resources"
 	@cp dist/proton-lfs-tray      "$(INSTALL_APP)/Contents/MacOS/proton-lfs-tray"
 	@cp dist/git-lfs-proton-adapter   "$(INSTALL_APP)/Contents/Helpers/git-lfs-proton-adapter"
@@ -102,6 +109,9 @@ install: build-bundle ## Install bundle (macOS: .app to /Applications, or set IN
 	@chmod +x "$(INSTALL_APP)/Contents/MacOS/proton-lfs-tray" \
 		"$(INSTALL_APP)/Contents/Helpers/git-lfs-proton-adapter" \
 		"$(INSTALL_APP)/Contents/Helpers/proton-drive-cli"
+	@if [ -f cmd/tray/AppIcon.icns ]; then \
+		cp cmd/tray/AppIcon.icns "$(INSTALL_APP)/Contents/Resources/AppIcon.icns"; \
+	fi
 	@bash scripts/ensure-info-plist.sh "$(INSTALL_APP)/Contents/Info.plist" "$(VERSION)"
 	@codesign --force --deep --sign - "$(INSTALL_APP)"
 	@xattr -dr com.apple.quarantine "$(INSTALL_APP)" 2>/dev/null || true
@@ -167,7 +177,9 @@ build-lfs: ## Build Git LFS submodule
 
 build-drive-cli: ## Build proton-drive-cli TypeScript bridge
 	@if [ ! -d $(DRIVE_CLI_DIR) ]; then \
-		echo "$(DRIVE_CLI_DIR) not found. Run: git submodule update --init --recursive"; \
+		echo "$(DRIVE_CLI_DIR) not found."; \
+		echo "Run the Local Bring-Up submodule commands in docs/operations/deployment.md,"; \
+		echo "then run: make check-submodules"; \
 		exit 1; \
 	fi
 	@if [ "$(JS_PM)" = "yarn" ]; then \
@@ -178,7 +190,7 @@ build-drive-cli: ## Build proton-drive-cli TypeScript bridge
 
 test: test-adapter test-tray ## Run core tests
 
-test-all: test-adapter test-tray test-lfs test-integration test-e2e-mock ## Run all test suites
+test-all: check-submodules test-adapter test-tray test-lfs test-integration test-e2e-mock ## Run all test suites
 
 test-adapter: ## Run adapter tests
 	@mkdir -p $(GO_CACHE_DIR)
@@ -219,27 +231,91 @@ test-integration-credentials: ## Run credential flow security tests
 	@mkdir -p $(GO_CACHE_DIR)
 	GOCACHE=$(PWD)/$(GO_CACHE_DIR) $(GO) test -tags integration ./tests/integration/... -run Credential -v
 
-test-integration-sdk: check-sdk-prereqs ## Run sdk backend integration tests (requires proton-drive-cli and pass-cli)
+test-integration-sdk: check-submodules check-sdk-prereqs ## Run sdk backend integration tests (requires proton-drive-cli and pass-cli)
 	@mkdir -p $(GO_CACHE_DIR)
 	@eval "$$(./scripts/export-pass-env.sh)" && \
+		PROTON_LFS_RUN_SDK_INTEGRATION=1 \
 		GOCACHE=$(PWD)/$(GO_CACHE_DIR) $(GO) test -tags integration ./tests/integration/... -run SDK -v
 
 test-e2e-mock: build-adapter ## Mocked E2E pipeline (no real credentials)
 	@mkdir -p $(GO_CACHE_DIR)
-	@chmod +x scripts/mock-pass-cli.sh
-	PROTON_PASS_CLI_BIN=$(PWD)/scripts/mock-pass-cli.sh \
-		PROTON_DRIVE_CLI_BIN=$(PWD)/tests/testdata/mock-proton-drive-cli.js \
-		PASS_MOCK_USERNAME=integration-user@proton.test \
-		PASS_MOCK_PASSWORD=integration-password \
+	PROTON_DRIVE_CLI_BIN=$(PWD)/tests/testdata/mock-proton-drive-cli.js \
 		GOCACHE=$(PWD)/$(GO_CACHE_DIR) $(GO) test -tags integration ./tests/integration/... -run E2EMocked -v
 
-test-e2e-real: build-adapter build-drive-cli ## Real Proton Drive E2E (requires pass-cli login + build-drive-cli)
+live-canary-preflight: check-submodules build-adapter build-drive-cli ## Offline gate before any real Proton canary
+	@echo "Running offline live-canary preflight (no Proton login)..."
+	@mkdir -p $(GO_CACHE_DIR)
+	GOCACHE=$(PWD)/$(GO_CACHE_DIR) $(GO) test ./...
+	@if [ "$(JS_PM)" = "yarn" ]; then \
+		cd $(DRIVE_CLI_DIR) && COREPACK_HOME=$(COREPACK_HOME_DIR) $(JS_PM) lint && \
+			COREPACK_HOME=$(COREPACK_HOME_DIR) $(JS_PM) jest src/auth/flow-safety.test.ts src/cli/doctor.test.ts --runInBand; \
+	else \
+		cd $(DRIVE_CLI_DIR) && $(JS_PM) run lint && \
+			npx jest src/auth/flow-safety.test.ts src/cli/doctor.test.ts --runInBand; \
+	fi
+	@if [ -n "$${LIVE_CANARY_DOCTOR_ARGS:-}" ]; then \
+		echo "Running optional offline doctor with LIVE_CANARY_DOCTOR_ARGS..."; \
+		if ! DOCTOR_OUTPUT="$$( $(NODE) "$(PWD)/$(DRIVE_CLI_DIR)/dist/index.js" doctor --json $$LIVE_CANARY_DOCTOR_ARGS )"; then \
+			echo "$$DOCTOR_OUTPUT"; \
+			echo "Offline doctor failed; refusing live canary."; \
+			exit 2; \
+		fi; \
+		echo "$$DOCTOR_OUTPUT"; \
+		if ! printf '%s\n' "$$DOCTOR_OUTPUT" | $(GO) run ./scripts/check_doctor_readiness.go --require-live-canary; then \
+			echo "Offline doctor did not mark live canary as ready."; \
+			exit 2; \
+		fi; \
+	else \
+		echo "Skipped credential-store doctor. Set LIVE_CANARY_DOCTOR_ARGS to run it."; \
+	fi
+	@echo "Offline live-canary preflight passed."
+
+check-live-canary-ack: ## Refuse real Proton tests without explicit acknowledgement
+	@if [ "$${PROTON_LFS_LIVE_CANARY:-}" != "$(LIVE_CANARY_ACK_VALUE)" ]; then \
+		echo "Refusing to run a real Proton canary."; \
+		echo "This target may touch a real Proton account and must never run by accident."; \
+		echo "Read docs/operations/live-canary-runbook.md first."; \
+		echo "Then run with:"; \
+		echo "  PROTON_LFS_LIVE_CANARY=$(LIVE_CANARY_ACK_VALUE) LIVE_CANARY_DOCTOR_ARGS='--key-password-provider pass-cli' make test-e2e-real"; \
+		exit 2; \
+	fi
+
+check-live-canary-doctor-args: ## Require explicit offline doctor args for real Proton tests
+	@if [ -z "$${LIVE_CANARY_DOCTOR_ARGS:-}" ]; then \
+		echo "Refusing to run a real Proton canary without LIVE_CANARY_DOCTOR_ARGS."; \
+		echo "The offline doctor must pass with the exact key-password provider args"; \
+		echo "that will be used by the live canary."; \
+		echo "Example:"; \
+		echo "  LIVE_CANARY_DOCTOR_ARGS='--key-password-provider pass-cli'"; \
+		exit 2; \
+	fi
+
+check-browser-fork-canary-args: ## Require explicit browser-fork login args
+	@if [ -z "$${LIVE_BROWSER_FORK_LOGIN_ARGS:-}" ]; then \
+		echo "Refusing to run browser-fork canary without LIVE_BROWSER_FORK_LOGIN_ARGS."; \
+		echo "This must name the key-password provider/host for the single"; \
+		echo "browser login attempt."; \
+		echo "Example:"; \
+		echo "  LIVE_BROWSER_FORK_LOGIN_ARGS='--key-password-provider git-credential'"; \
+		exit 2; \
+	fi
+
+browser-fork-canary: check-live-canary-ack check-live-canary-doctor-args check-browser-fork-canary-args live-canary-preflight ## One guarded browser-fork login canary; no transfer
+	@NODE_BIN="$(NODE)" GO_BIN="$(GO)" DRIVE_CLI_BIN="$(PWD)/$(DRIVE_CLI_DIR)/dist/index.js" ./scripts/browser-fork-canary.sh
+
+live-drive-scope-canary: check-live-canary-ack check-live-canary-doctor-args live-canary-preflight ## One guarded read-only Drive metadata canary; no transfer
+	@NODE_BIN="$(NODE)" DRIVE_CLI_BIN="$(PWD)/$(DRIVE_CLI_DIR)/dist/index.js" ./scripts/live-drive-scope-canary.sh
+
+test-e2e-real: live-drive-scope-canary ## Real Proton Drive E2E (requires explicit live canary acknowledgement)
 	@mkdir -p $(GO_CACHE_DIR)
 	@eval "$$(./scripts/export-pass-env.sh)" && \
 		GOCACHE=$(PWD)/$(GO_CACHE_DIR) $(GO) test -tags integration ./tests/integration/... -run E2E -v
 
-pass-env: ## Print export commands for Proton Pass-based adapter credentials
+pass-env: ## Print Proton Pass CLI provider env (no account credentials)
 	@./scripts/export-pass-env.sh
+
+check-submodules: ## Verify pinned root and Proton SDK submodule checkouts
+	@./scripts/check-submodules.sh
 
 check-sdk-prereqs: ## Verify prerequisites for sdk integration tests
 	@command -v git-lfs >/dev/null 2>&1 || (echo "git-lfs not found on PATH" && exit 1)

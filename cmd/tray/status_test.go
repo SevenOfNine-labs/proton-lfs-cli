@@ -1,13 +1,48 @@
 package main
 
 import (
+	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
 	"time"
+
+	"proton-lfs-cli/internal/config"
 )
+
+func writeSessionForStatusTest(t *testing.T, home string, meta sessionMetadata) {
+	t.Helper()
+	dir := filepath.Join(home, ".proton-drive-cli")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	data, err := json.Marshal(meta)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "session.json"), data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func resetRefreshForStatusTest(t *testing.T, now time.Time) {
+	t.Helper()
+	origNow := refreshNow
+	refreshNow = func() time.Time { return now }
+	refreshMu.Lock()
+	origState := refreshState
+	refreshState = sessionRefreshState{}
+	refreshMu.Unlock()
+	t.Cleanup(func() {
+		refreshNow = origNow
+		refreshMu.Lock()
+		refreshState = origState
+		refreshMu.Unlock()
+	})
+}
 
 func TestRelativeTime(t *testing.T) {
 	cases := []struct {
@@ -87,6 +122,70 @@ func TestTruncateMultibyteInput(t *testing.T) {
 	t.Logf("truncate(%q, 4) = %q (len=%d)", input, got, len(got))
 }
 
+func TestTransferStatusTextWithRetryMetadata(t *testing.T) {
+	report := config.StatusReport{
+		State:     config.StateError,
+		LastOp:    "upload",
+		Error:     "drive service is unavailable",
+		ErrorCode: "server_error",
+		Retryable: true,
+		Temporary: true,
+		Timestamp: time.Now().Add(-1 * time.Minute),
+	}
+
+	got := transferStatusText(report)
+	for _, want := range []string{
+		"upload",
+		"drive service is unavailable",
+		"code=server_error",
+		"retryable",
+		"temporary",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("transferStatusText missing %q: %s", want, got)
+		}
+	}
+}
+
+func TestStatusTooltipWithTemporaryRateLimit(t *testing.T) {
+	report := config.StatusReport{
+		State:       config.StateRateLimited,
+		ErrorDetail: "Wait before retrying operations",
+		ErrorCode:   "rate_limited",
+		Temporary:   true,
+	}
+
+	got := statusTooltip(report)
+	for _, want := range []string{
+		"Rate Limited",
+		"Wait before retrying operations",
+		"temporary",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("statusTooltip missing %q: %s", want, got)
+		}
+	}
+	if strings.Contains(got, "retryable") {
+		t.Fatalf("rate-limit tooltip must not show adapter retryable: %s", got)
+	}
+}
+
+func TestStatusTooltipAuthBlockerOmitsRetryMetadata(t *testing.T) {
+	report := config.StatusReport{
+		State:       config.StateAuthRequired,
+		ErrorDetail: "Run proton-drive login before Git LFS transfer",
+		ErrorCode:   "auth_required",
+	}
+
+	got := statusTooltip(report)
+	if !strings.Contains(got, "Authentication Required") {
+		t.Fatalf("statusTooltip missing auth state: %s", got)
+	}
+	if strings.Contains(got, "retryable") || strings.Contains(got, "temporary") {
+		t.Fatalf("auth tooltip must not show retry metadata: %s", got)
+	}
+}
+
 func TestSessionFilePath(t *testing.T) {
 	got := sessionFilePath()
 	if got == "" {
@@ -103,6 +202,286 @@ func TestSessionFilePath(t *testing.T) {
 	}
 }
 
+func TestInspectAuthReadinessBlocksLegacySessionWithoutDataCredential(t *testing.T) {
+	now := time.Date(2026, 6, 23, 18, 0, 0, 0, time.UTC)
+	resetRefreshForStatusTest(t, now)
+	home := setupFakeHome(t, fakeHomeOpts{configJSON: `{"credentialProvider":"pass-cli"}`})
+	setupGitConfig(t, "")
+	writeSessionForStatusTest(t, home, sessionMetadata{
+		SessionID:      "session-id",
+		UID:            "uid-123",
+		AccessToken:    "access",
+		RefreshToken:   "refresh",
+		Scopes:         []string{"drive"},
+		PasswordMode:   2,
+		TokenExpiresAt: now.Add(24 * time.Hour).UnixMilli(),
+	})
+
+	readiness := inspectAuthReadiness(now)
+	if !readiness.blocked || readiness.ready {
+		t.Fatalf("expected blocked readiness, got %#v", readiness)
+	}
+	if readiness.statusTitle != "Status: Setup needed" {
+		t.Fatalf("unexpected status title: %s", readiness.statusTitle)
+	}
+	if readiness.transferTitle != "Transfers: Data password needed" {
+		t.Fatalf("unexpected transfer title: %s", readiness.transferTitle)
+	}
+	if !readiness.dataPasswordActive {
+		t.Fatal("data-password action should be enabled for legacy unlock blocker")
+	}
+	if readiness.action != authActionDisconnect {
+		t.Fatalf("signed-in blocked state should offer disconnect, got %s", readiness.action)
+	}
+}
+
+func TestInspectAuthReadinessReadyForBrowserForkTwoPasswordWithoutDataCredential(t *testing.T) {
+	now := time.Date(2026, 6, 23, 18, 0, 0, 0, time.UTC)
+	resetRefreshForStatusTest(t, now)
+	home := setupFakeHome(t, fakeHomeOpts{configJSON: `{"credentialProvider":"pass-cli"}`})
+	setupGitConfig(t, "")
+	writeSessionForStatusTest(t, home, sessionMetadata{
+		SessionID:            "session-id",
+		UID:                  "uid-123",
+		AccessToken:          "access",
+		RefreshToken:         "refresh",
+		Scopes:               []string{"drive"},
+		PasswordMode:         2,
+		AuthMode:             "browser-fork",
+		KeyPasswordPersisted: true,
+		TokenExpiresAt:       now.Add(24 * time.Hour).UnixMilli(),
+	})
+
+	readiness := inspectAuthReadiness(now)
+	if !readiness.ready || readiness.blocked {
+		t.Fatalf("expected ready readiness, got %#v", readiness)
+	}
+	if readiness.statusTitle != "Status: Ready" {
+		t.Fatalf("unexpected status title: %s", readiness.statusTitle)
+	}
+	if readiness.transferTitle != "Transfers: Ready" {
+		t.Fatalf("unexpected transfer title: %s", readiness.transferTitle)
+	}
+	if readiness.dataPasswordActive {
+		t.Fatal("data-password action should not be active for browser-fork key material")
+	}
+}
+
+func TestInspectAuthReadinessBlocksBrowserForkMissingKeyPassword(t *testing.T) {
+	now := time.Date(2026, 6, 23, 18, 0, 0, 0, time.UTC)
+	resetRefreshForStatusTest(t, now)
+	home := setupFakeHome(t, fakeHomeOpts{configJSON: `{"credentialProvider":"pass-cli"}`})
+	setupGitConfig(t, "")
+	writeSessionForStatusTest(t, home, sessionMetadata{
+		SessionID:      "session-id",
+		UID:            "uid-123",
+		AccessToken:    "access",
+		RefreshToken:   "refresh",
+		Scopes:         []string{"drive"},
+		PasswordMode:   1,
+		AuthMode:       "browser-fork",
+		TokenExpiresAt: now.Add(24 * time.Hour).UnixMilli(),
+	})
+
+	readiness := inspectAuthReadiness(now)
+	if !readiness.blocked || readiness.ready {
+		t.Fatalf("expected blocked readiness, got %#v", readiness)
+	}
+	if readiness.transferTitle != "Transfers: Reconnect required" {
+		t.Fatalf("unexpected transfer title: %s", readiness.transferTitle)
+	}
+	if readiness.dataPasswordActive {
+		t.Fatal("data-password action should not be active for missing key-password blocker")
+	}
+}
+
+func TestInspectAuthReadinessReadyWithConfiguredDataCredential(t *testing.T) {
+	now := time.Date(2026, 6, 23, 18, 0, 0, 0, time.UTC)
+	resetRefreshForStatusTest(t, now)
+	home := setupFakeHome(t, fakeHomeOpts{
+		configJSON: `{"credentialProvider":"pass-cli","dataCredentialProvider":"pass-cli"}`,
+	})
+	setupGitConfig(t, "")
+	writeSessionForStatusTest(t, home, sessionMetadata{
+		SessionID:            "session-id",
+		UID:                  "uid-123",
+		AccessToken:          "access",
+		RefreshToken:         "refresh",
+		Scopes:               []string{"drive"},
+		PasswordMode:         2,
+		AuthMode:             "browser-fork",
+		KeyPasswordPersisted: true,
+		TokenExpiresAt:       now.Add(24 * time.Hour).UnixMilli(),
+	})
+
+	readiness := inspectAuthReadiness(now)
+	if !readiness.ready || readiness.blocked {
+		t.Fatalf("expected ready readiness, got %#v", readiness)
+	}
+	if readiness.transferTitle != "Transfers: Ready" {
+		t.Fatalf("unexpected transfer title: %s", readiness.transferTitle)
+	}
+}
+
+func TestDecideRefreshUsesTokenExpiry(t *testing.T) {
+	now := time.Date(2026, 6, 23, 18, 0, 0, 0, time.UTC)
+	meta := sessionMetadata{TokenExpiresAt: now.Add(24 * time.Hour).UnixMilli()}
+
+	decision := decideRefresh(now, meta, sessionRefreshState{})
+	if decision.Attempt {
+		t.Fatal("fresh token should not refresh immediately")
+	}
+	wantNext := now.Add(24 * time.Hour).Add(-refreshBeforeExpiry)
+	if !decision.NextAttempt.Equal(wantNext) {
+		t.Fatalf("next attempt = %s, want %s", decision.NextAttempt, wantNext)
+	}
+
+	nearExpiry := sessionMetadata{TokenExpiresAt: now.Add(5 * time.Minute).UnixMilli()}
+	if decision := decideRefresh(now, nearExpiry, sessionRefreshState{}); !decision.Attempt {
+		t.Fatalf("near-expiry token should refresh, got %#v", decision)
+	}
+}
+
+func TestDecideRefreshHonorsRetryBackoff(t *testing.T) {
+	now := time.Date(2026, 6, 23, 18, 0, 0, 0, time.UTC)
+	meta := sessionMetadata{TokenExpiresAt: now.Add(5 * time.Minute).UnixMilli()}
+	health := sessionRefreshState{LastError: "network", NextAttempt: now.Add(time.Minute)}
+
+	decision := decideRefresh(now, meta, health)
+	if decision.Attempt {
+		t.Fatal("refresh should wait for retry backoff")
+	}
+	if !decision.NextAttempt.Equal(health.NextAttempt) {
+		t.Fatalf("next attempt = %s, want %s", decision.NextAttempt, health.NextAttempt)
+	}
+}
+
+func TestParseRefreshCommandResultAndTerminalFailure(t *testing.T) {
+	out := []byte(`debug line
+{"ok":false,"state":"refresh_failed","error":"Request failed with status 400","errorCode":"API_ERROR","recoverable":false,"statusCode":400,"protonCode":10013,"protonError":"Invalid refresh token","action":"stop: refresh token rejected or session invalid; run browser login after offline gates pass"}`)
+
+	result, ok := parseRefreshCommandResult(out)
+	if !ok {
+		t.Fatal("expected refresh JSON to parse")
+	}
+	if result.Recoverable == nil || *result.Recoverable {
+		t.Fatalf("expected terminal recoverable=false result, got %#v", result.Recoverable)
+	}
+	message, recoverable := refreshFailureFromCommand(result, true, errors.New("exit status 1"))
+	if recoverable {
+		t.Fatalf("expected terminal refresh failure, got message %q", message)
+	}
+	for _, want := range []string{
+		"Invalid refresh token",
+		"code=API_ERROR",
+		"status=400",
+		"proton=10013",
+		"stop:",
+	} {
+		if !strings.Contains(message, want) {
+			t.Fatalf("failure summary missing %q: %s", want, message)
+		}
+	}
+}
+
+func TestDecideRefreshStopsAfterTerminalFailureForSameSession(t *testing.T) {
+	now := time.Date(2026, 6, 23, 18, 0, 0, 0, time.UTC)
+	meta := sessionMetadata{
+		SessionID:      "session-1",
+		TokenExpiresAt: now.Add(5 * time.Minute).UnixMilli(),
+	}
+	health := sessionRefreshState{
+		LastError:       "Invalid refresh token",
+		ActionRequired:  true,
+		ActionSessionID: "session-1",
+	}
+
+	decision := decideRefresh(now, meta, health)
+	if decision.Attempt {
+		t.Fatal("terminal same-session refresh failure must not retry")
+	}
+	if got := refreshTitle(now, meta, true, health); got != "Refresh: Reconnect required" {
+		t.Fatalf("refresh title = %q, want reconnect required", got)
+	}
+}
+
+func TestDecideRefreshAllowsNewSessionAfterTerminalFailure(t *testing.T) {
+	now := time.Date(2026, 6, 23, 18, 0, 0, 0, time.UTC)
+	meta := sessionMetadata{
+		SessionID:      "session-2",
+		TokenExpiresAt: now.Add(5 * time.Minute).UnixMilli(),
+	}
+	health := sessionRefreshState{
+		LastError:       "Invalid refresh token",
+		ActionRequired:  true,
+		ActionSessionID: "session-1",
+	}
+
+	decision := decideRefresh(now, meta, health)
+	if !decision.Attempt {
+		t.Fatalf("new session should not inherit terminal refresh failure, got %#v", decision)
+	}
+}
+
+func TestInspectAuthReadinessBlocksTerminalRefreshFailure(t *testing.T) {
+	now := time.Date(2026, 6, 23, 18, 0, 0, 0, time.UTC)
+	resetRefreshForStatusTest(t, now)
+	home := setupFakeHome(t, fakeHomeOpts{configJSON: `{"credentialProvider":"pass-cli"}`})
+	setupGitConfig(t, "")
+	writeSessionForStatusTest(t, home, sessionMetadata{
+		SessionID:            "session-id",
+		UID:                  "uid-123",
+		AccessToken:          "access",
+		RefreshToken:         "refresh",
+		Scopes:               []string{"drive"},
+		PasswordMode:         1,
+		AuthMode:             "browser-fork",
+		KeyPasswordPersisted: true,
+		TokenExpiresAt:       now.Add(24 * time.Hour).UnixMilli(),
+	})
+	refreshMu.Lock()
+	refreshState = sessionRefreshState{
+		LastError:       "Invalid refresh token",
+		ActionRequired:  true,
+		ActionSessionID: "session-id",
+	}
+	refreshMu.Unlock()
+
+	readiness := inspectAuthReadiness(now)
+	if !readiness.blocked || readiness.ready {
+		t.Fatalf("expected blocked readiness, got %#v", readiness)
+	}
+	if readiness.sessionTitle != "Session: Refresh failed" {
+		t.Fatalf("unexpected session title: %s", readiness.sessionTitle)
+	}
+	if readiness.transferTitle != "Transfers: Reconnect required" {
+		t.Fatalf("unexpected transfer title: %s", readiness.transferTitle)
+	}
+}
+
+func TestAuthReadinessDoesNotOverrideActiveTransferStatus(t *testing.T) {
+	setupFakeHome(t, fakeHomeOpts{})
+	if err := config.WriteStatus(config.StatusReport{
+		State:  config.StateTransferring,
+		LastOp: "upload",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if authReadinessShouldOverrideTransferStatus(authReadiness{
+		signedIn: true,
+		ready:    true,
+	}) {
+		t.Fatal("ready auth state must not hide active transfer status")
+	}
+	if !authReadinessShouldOverrideTransferStatus(authReadiness{
+		signedIn: true,
+		blocked:  true,
+	}) {
+		t.Fatal("blocked auth state should override transfer status")
+	}
+}
+
 func TestTerminalCommandDarwin(t *testing.T) {
 	if runtime.GOOS != "darwin" {
 		t.Skip("darwin-only test")
@@ -110,6 +489,7 @@ func TestTerminalCommandDarwin(t *testing.T) {
 	cmd := terminalCommand("echo hello")
 	if cmd == nil {
 		t.Fatal("expected non-nil command on darwin")
+		return
 	}
 	if len(cmd.Args) < 3 {
 		t.Fatalf("expected at least 3 args, got %v", cmd.Args)

@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"os"
 	"os/exec"
 	"strings"
 
@@ -13,10 +12,9 @@ import (
 
 // Function vars for testability — tests swap these to inject mocks.
 var (
-	findDriveCLI     = discoverDriveCLIBinary
-	findAdapter      = discoverAdapterBinary
-	verifyCredential = credentialVerify
-	loginDrive       = cliDriveLogin
+	findDriveCLI = discoverDriveCLIBinary
+	findAdapter  = discoverAdapterBinary
+	loginDrive   = cliDriveLogin
 )
 
 // cliDriveLogin runs proton-drive-cli login without -q, capturing stderr
@@ -27,9 +25,8 @@ func cliDriveLogin(driveCLI string, args ...string) error {
 	cmd := exec.Command(driveCLI, cmdArgs...)
 	cmd.Stderr = &stderr
 	// For pass-cli provider, set PROTON_PASS_CLI_BIN so proton-drive-cli can
-	// find pass-cli even when running from a macOS .app bundle with minimal PATH
-	// Extract provider from args (looks for "--credential-provider" or "--provider")
-	provider := extractProviderFromArgs(args)
+	// find pass-cli even when running from a macOS .app bundle with minimal PATH.
+	provider := extractKeyPasswordProviderFromArgs(args)
 	if provider == "pass-cli" {
 		if passCLI := discoverPassCLIBinary(); passCLI != "" {
 			cmd.Env = append(cmd.Environ(), "PROTON_PASS_CLI_BIN="+passCLI)
@@ -44,11 +41,11 @@ func cliDriveLogin(driveCLI string, args ...string) error {
 	return nil
 }
 
-// extractProviderFromArgs scans args for --credential-provider or --provider
+// extractKeyPasswordProviderFromArgs scans args for --key-password-provider
 // and returns the value, or empty string if not found.
-func extractProviderFromArgs(args []string) string {
+func extractKeyPasswordProviderFromArgs(args []string) string {
 	for i, arg := range args {
-		if (arg == "--credential-provider" || arg == "--provider") && i+1 < len(args) {
+		if arg == "--key-password-provider" && i+1 < len(args) {
 			return args[i+1]
 		}
 	}
@@ -76,21 +73,11 @@ func cliStatus(w io.Writer) int {
 	if err != nil {
 		_, _ = fmt.Fprintln(w, "Transfer: no data")
 	} else {
-		switch report.State {
-		case config.StateTransferring:
-			_, _ = fmt.Fprintf(w, "Transfer: %s in progress\n", report.LastOp)
-		case config.StateError:
-			msg := "failed"
-			if report.Error != "" {
-				msg = report.Error
-			}
-			_, _ = fmt.Fprintf(w, "Transfer: %s %s (%s)\n", report.LastOp, relativeTime(report.Timestamp), msg)
-		case config.StateOK:
-			_, _ = fmt.Fprintf(w, "Transfer: %s %s (ok)\n", report.LastOp, relativeTime(report.Timestamp))
-		default:
-			_, _ = fmt.Fprintln(w, "Transfer: idle")
-		}
+		_, _ = fmt.Fprintf(w, "Transfer: %s\n", transferStatusText(report))
 	}
+	readiness := inspectAuthReadiness(timeNow())
+	_, _ = fmt.Fprintf(w, "Readiness: %s\n", strings.TrimPrefix(readiness.statusTitle, "Status: "))
+	_, _ = fmt.Fprintf(w, "Refresh:  %s\n", strings.TrimPrefix(readiness.refreshTitle, "Refresh: "))
 	return 0
 }
 
@@ -117,7 +104,7 @@ func cliLogout(w io.Writer) int {
 	return 0
 }
 
-// cliConfig shows or sets the credential provider.
+// cliConfig shows or sets the browser-fork key-password provider.
 func cliConfig(w io.Writer, args []string) int {
 	if len(args) == 0 {
 		prefs := config.LoadPrefs()
@@ -128,8 +115,8 @@ func cliConfig(w io.Writer, args []string) int {
 	provider := args[0]
 	switch provider {
 	case "--help", "-h":
-		_, _ = fmt.Fprintln(w, "Usage: proton-git-lfs config [provider]")
-		_, _ = fmt.Fprintf(w, "\nShow or set the credential provider.\n")
+		_, _ = fmt.Fprintln(w, "Usage: proton-lfs-cli config [provider]")
+		_, _ = fmt.Fprintf(w, "\nShow or set the browser-fork key-password provider.\n")
 		_, _ = fmt.Fprintf(w, "With no argument, prints the current provider.\n\n")
 		_, _ = fmt.Fprintf(w, "Providers: %s, %s\n",
 			config.CredentialProviderGitCredential, config.CredentialProviderPassCLI)
@@ -149,7 +136,7 @@ func cliConfig(w io.Writer, args []string) int {
 		_, _ = fmt.Fprintf(w, "error saving config: %v\n", err)
 		return 1
 	}
-	_, _ = fmt.Fprintf(w, "Credential provider set to %s\n", provider)
+	_, _ = fmt.Fprintf(w, "Key-password provider set to %s\n", provider)
 	return 0
 }
 
@@ -169,13 +156,7 @@ func cliRegister(w io.Writer) int {
 
 	prefs := config.LoadPrefs()
 	driveCLIPath := findDriveCLI()
-	args := "--backend sdk"
-	if prefs.CredentialProvider == config.CredentialProviderGitCredential {
-		args += " --credential-provider git-credential"
-	}
-	if driveCLIPath != "" {
-		args += " --drive-cli-bin " + driveCLIPath
-	}
+	args := buildProtonTransferArgs(prefs.CredentialProvider, driveCLIPath)
 	if err := exec.Command("git", "config", "--global",
 		"lfs.customtransfer.proton.args", args).Run(); err != nil {
 		_, _ = fmt.Fprintf(w, "error: git config failed: %v\n", err)
@@ -196,10 +177,7 @@ func cliRegister(w io.Writer) int {
 	return 0
 }
 
-// cliLogin handles the unified login flow for any credential provider.
-// 1. Verify credentials exist via proton-drive-cli credential verify --provider
-// 2. If missing, start interactive credential store
-// 3. Login via proton-drive-cli login --credential-provider
+// cliLogin handles browser-fork login for the configured key-password provider.
 func cliLogin(w io.Writer) int {
 	driveCLI := findDriveCLI()
 	if driveCLI == "" {
@@ -210,30 +188,8 @@ func cliLogin(w io.Writer) int {
 	prefs := config.LoadPrefs()
 	provider := prefs.CredentialProvider
 
-	if !verifyCredential(provider) {
-		_, _ = fmt.Fprintln(w, "No credentials stored. Starting credential setup...")
-		cmd := exec.Command(driveCLI, "credential", "store", "--provider", provider)
-		cmd.Stdin = os.Stdin
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		// For pass-cli provider, set PROTON_PASS_CLI_BIN
-		if provider == "pass-cli" {
-			if passCLI := discoverPassCLIBinary(); passCLI != "" {
-				cmd.Env = append(cmd.Environ(), "PROTON_PASS_CLI_BIN="+passCLI)
-			}
-		}
-		if err := cmd.Run(); err != nil {
-			_, _ = fmt.Fprintf(w, "error: credential store failed: %v\n", err)
-			return 1
-		}
-		if !verifyCredential(provider) {
-			_, _ = fmt.Fprintln(w, "error: credentials not found after store")
-			return 1
-		}
-	}
-
 	_, _ = fmt.Fprintln(w, "Logging in...")
-	if err := loginDrive(driveCLI, "--credential-provider", provider); err != nil {
+	if err := loginDrive(driveCLI, "--key-password-provider", provider); err != nil {
 		_, _ = fmt.Fprintf(w, "error: login failed: %v\n", err)
 		return 1
 	}

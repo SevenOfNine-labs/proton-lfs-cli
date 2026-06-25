@@ -163,7 +163,7 @@ func TestSetAutoStartLinuxCreatesDesktopEntry(t *testing.T) {
 		t.Fatalf("setAutoStartLinux(true) failed: %v", err)
 	}
 
-	desktopPath := filepath.Join(tmpHome, ".config", "autostart", "proton-git-lfs.desktop")
+	desktopPath := filepath.Join(tmpHome, ".config", "autostart", "proton-lfs.desktop")
 	content, err := os.ReadFile(desktopPath)
 	if err != nil {
 		t.Fatalf("desktop entry not created: %v", err)
@@ -202,7 +202,7 @@ func TestIsAutoStartEnabled(t *testing.T) {
 		if err := os.MkdirAll(autoDir, 0o755); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(filepath.Join(autoDir, "proton-git-lfs.desktop"), []byte("[Desktop Entry]"), 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(autoDir, "proton-lfs.desktop"), []byte("[Desktop Entry]"), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	default:

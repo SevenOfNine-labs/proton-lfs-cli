@@ -1,4 +1,4 @@
-// Proton Git LFS system tray application.
+// Proton LFS system tray application.
 package main
 
 import (
@@ -51,6 +51,13 @@ func main() {
 			}
 			augmentPath()
 			os.Exit(cliStatus(os.Stdout))
+		case "scope-diagnostics":
+			if hasHelpFlag(os.Args[2:]) {
+				fmt.Println("Usage: proton-lfs-cli scope-diagnostics [--live]\n\nPrint redacted auth/session and Drive API scope diagnostics. Without --live, no Proton network request is attempted. With --live, the command requires the explicit live canary acknowledgement and performs exactly one read-only bridge list request.")
+				return
+			}
+			augmentPath()
+			os.Exit(cliScopeDiagnostics(os.Stdout, os.Args[2:]))
 		case "config":
 			os.Exit(cliConfig(os.Stdout, os.Args[2:]))
 		default:
@@ -67,7 +74,7 @@ func main() {
 	systray.Run(onReady, onExit)
 }
 
-const usage = `Proton Git LFS — system tray app and CLI
+const usage = `Proton LFS — system tray app and CLI
 
 Usage:
   proton-lfs-cli                   Launch the system tray app
@@ -75,6 +82,8 @@ Usage:
   proton-lfs-cli logout            Log out and clear session
   proton-lfs-cli register          Enable LFS backend (git config --global)
   proton-lfs-cli status            Show session, LFS, and transfer status
+  proton-lfs-cli scope-diagnostics [--live]
+                                   Print redacted Drive auth/scope evidence
   proton-lfs-cli config [provider] Show or set credential provider
   proton-lfs-cli --version         Print version and exit
   proton-lfs-cli --help            Show this help

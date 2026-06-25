@@ -40,7 +40,7 @@ INSTALL_DIR=~/.local/bin VERSION=v0.1.0 curl -fsSL \
 The full bundle includes all three components needed for a complete Proton Drive LFS setup:
 
 - **git-lfs-proton-adapter** — the Git LFS custom transfer adapter
-- **proton-lfs-cli-tray** — system tray app for status, credential setup, and login
+- **proton-lfs-tray** — system tray app for status, credential setup, and login
 - **proton-drive-cli** — Proton Drive client (handles auth, encryption, file transfer)
 
 #### Build and install
@@ -57,7 +57,7 @@ make install          # Build all components and install
 
 | Platform | Default location | Override |
 | --- | --- | --- |
-| macOS | `/Applications/ProtonGitLFS.app` | `INSTALL_APP=/path/to/App.app make install` |
+| macOS | `/Applications/ProtonLFS.app` | `INSTALL_APP=/path/to/App.app make install` |
 | Linux | `~/.local/bin/` | `INSTALL_BIN=/usr/local/bin make install` |
 
 On both platforms, `make install` also places a `proton-lfs-cli` CLI entry point on your PATH (`~/.local/bin/proton-lfs-cli`):
@@ -77,9 +77,9 @@ make uninstall
 On macOS, `make install` creates a standard `.app` bundle:
 
 ```
-ProtonGitLFS.app/
+ProtonLFS.app/
   Contents/
-    MacOS/proton-lfs-cli-tray       ← system tray executable
+    MacOS/proton-lfs-tray       ← system tray executable
     Helpers/git-lfs-proton-adapter  ← transfer adapter
     Helpers/proton-drive-cli        ← Proton Drive client (SEA binary)
     Info.plist
@@ -327,12 +327,26 @@ LFS objects are encrypted and uploaded to Proton Drive automatically.
 
 ### 2FA and data password
 
-If your Proton account uses two-factor authentication or a separate data password, set these environment variables before running transfers:
+If your Proton account uses two-factor authentication, run interactive `proton-drive login` first. Transfer commands surface `TWO_FACTOR_REQUIRED` and stop instead of repeatedly trying to log in.
+
+If your Proton account uses a separate mailbox/data password, store that password as a distinct secure credential entry and opt into a separate data credential provider. Do not reuse the login password unless Proton itself uses the same password mode for the account.
 
 ```bash
-export PROTON_DATA_PASSWORD='...'
-export PROTON_SECOND_FACTOR_CODE='...'
+printf "protocol=https\nhost=proton-data.proton-lfs-cli.local\nusername=your.email@proton.me\npassword=<mailbox-data-password>\n\n" | git credential approve
+git config lfs.customtransfer.proton.args "--backend=sdk --credential-provider git-credential --data-credential-provider git-credential --drive-cli-bin=/path/to/proton-drive-cli"
 ```
+
+For Proton Pass, create a second login item with URL `https://proton-data.proton-lfs-cli.local`, then add `--data-credential-provider pass-cli`.
+
+Before attempting a real login or SDK transfer, run the offline preflight:
+
+```bash
+proton-drive doctor --credential-provider git-credential --data-credential-provider git-credential
+```
+
+The doctor command checks local credential entries, session-file hygiene, stale
+secret environment variables, and the bridge entry point without contacting
+Proton.
 
 ## Credential Providers
 
@@ -354,7 +368,7 @@ proton-drive-cli credential verify
 
 Or, if using the tray app: select "Git Credential Manager" in the Credential Store menu, then click "Connect to Proton...".
 
-**How it works:** The adapter sends `{ "credentialProvider": "git-credential" }` to proton-drive-cli, which resolves credentials locally via `git credential fill`. Credentials never leave the local machine.
+**How it works:** The adapter sends `{ "credentialProvider": "git-credential" }` to proton-drive-cli, which resolves credentials locally via `git credential fill`. If `--data-credential-provider git-credential` is configured, the mailbox/data password is resolved from the separate `proton-data.proton-lfs-cli.local` host. Credentials never leave the local machine.
 
 ### Proton Pass (pass-cli)
 
@@ -376,7 +390,7 @@ proton-drive credential store --provider pass-cli   # Create entry interactively
 proton-drive credential verify --provider pass-cli  # Verify entry exists
 ```
 
-**How it works:** The adapter sends `{ "credentialProvider": "pass-cli" }` to proton-drive-cli, which resolves credentials by searching Proton Pass vaults internally. The Go adapter never sees raw credentials.
+**How it works:** The adapter sends `{ "credentialProvider": "pass-cli" }` to proton-drive-cli, which resolves credentials by searching Proton Pass vaults internally. If `--data-credential-provider pass-cli` is configured, the mailbox/data password is resolved from a separate Proton Pass login item with URL `https://proton-data.proton-lfs-cli.local`. The Go adapter never sees raw credentials.
 
 The `PROTON_PASS_CLI_BIN` environment variable can override the pass-cli binary path (default: `pass-cli`).
 
@@ -430,6 +444,8 @@ The adapter reads JSON messages from stdin and writes JSON responses to stdout, 
 | --- | --- | --- | --- |
 | `--backend` | `PROTON_LFS_BACKEND` | `local` | Transfer backend: `local` or `sdk` |
 | `--credential-provider` | `PROTON_CREDENTIAL_PROVIDER` | `pass-cli` | Credential provider: `pass-cli` or `git-credential` |
+| `--data-credential-provider` | `PROTON_DATA_CREDENTIAL_PROVIDER` | (none) | Optional separate mailbox/data password provider |
+| `--data-credential-host` | `PROTON_DATA_CREDENTIAL_HOST` | `proton-data.proton-lfs-cli.local` | Credential host/key for mailbox/data password lookup |
 | `--drive-cli-bin` | `PROTON_DRIVE_CLI_BIN` | (auto-detected) | Path to the proton-drive-cli binary (sdk backend only) |
 | `--local-store-dir` | `PROTON_LFS_LOCAL_STORE_DIR` | (none) | Directory for local object storage (local backend only) |
 | `--allow-mock-transfers` | `ADAPTER_ALLOW_MOCK_TRANSFERS` | `false` | Enable mock transfer simulation (testing only) |

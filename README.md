@@ -2,7 +2,7 @@
 
 End-to-end encrypted Git LFS backend for Proton Drive.
 
-[![Documentation](https://img.shields.io/badge/docs-unified-blue)](https://sevenofnine-ai.github.io/proton-lfs-cli/) [![Go Reference](https://pkg.go.dev/badge/github.com/SevenOfNine-ai/proton-lfs-cli.svg)](https://pkg.go.dev/github.com/SevenOfNine-ai/proton-lfs-cli) [![Tests](https://github.com/SevenOfNine-ai/proton-lfs-cli/actions/workflows/test.yml/badge.svg)](https://github.com/SevenOfNine-ai/proton-lfs-cli/actions/workflows/test.yml)
+[![Documentation](https://img.shields.io/badge/docs-unified-blue)](https://sevenofnine-labs.github.io/proton-lfs-cli/) [![Go Reference](https://pkg.go.dev/badge/github.com/SevenOfNine-labs/proton-lfs-cli.svg)](https://pkg.go.dev/github.com/SevenOfNine-labs/proton-lfs-cli) [![Tests](https://github.com/SevenOfNine-labs/proton-lfs-cli/actions/workflows/test.yml/badge.svg)](https://github.com/SevenOfNine-labs/proton-lfs-cli/actions/workflows/test.yml)
 
 ## Current State (2026-02-10)
 
@@ -24,11 +24,11 @@ No .NET SDK required.
 
 ## Documentation
 
-📚 **[Unified Documentation](https://sevenofnine-ai.github.io/proton-lfs-cli/)** - Complete documentation site with:
+📚 **[Unified Documentation](https://sevenofnine-labs.github.io/proton-lfs-cli/)** - Complete documentation site with:
 
-- **[Architecture & Guides](https://sevenofnine-ai.github.io/proton-lfs-cli/guides/)** - Project overview, architecture, testing, security
-- **[Go API Reference](https://pkg.go.dev/github.com/SevenOfNine-ai/proton-lfs-cli)** - Go package documentation
-- **[TypeScript Bridge API](https://sevenofnine-ai.github.io/proton-drive-cli/)** - proton-drive-cli documentation
+- **[Architecture & Guides](https://sevenofnine-labs.github.io/proton-lfs-cli/guides/)** - Project overview, architecture, testing, security
+- **[Go API Reference](https://pkg.go.dev/github.com/SevenOfNine-labs/proton-lfs-cli)** - Go package documentation
+- **[TypeScript Bridge API](https://sevenofnine-labs.github.io/proton-drive-cli/)** - proton-drive-cli documentation
 
 ## Usage
 
@@ -84,11 +84,16 @@ pass-cli login
 make test-integration-sdk
 ```
 
-If your account requires dedicated data password or 2FA code, set:
+If your account requires two-factor authentication, complete an interactive
+`proton-drive login` before SDK transfers. Browser-fork sessions normally use
+the stored UID-scoped key password for Drive unlocks, including accounts that
+Proton reports as two-password mode. Configure a separate mailbox/data
+credential only if `proton-drive doctor` or bridge `auth-state` explicitly
+reports `needs_data_password`:
 
 ```bash
-export PROTON_DATA_PASSWORD='...'
-export PROTON_SECOND_FACTOR_CODE='...'
+git config lfs.customtransfer.proton.args \
+  "--backend=sdk --data-credential-provider git-credential"
 ```
 
 If your Node binary is managed in shell startup (for example `nvm` in `~/.zshrc`), pass it explicitly:
@@ -103,7 +108,7 @@ make test-integration-sdk NODE="$(command -v node)"
 make test-integration-sdk JS_PM=npm
 ```
 
-If you use non-default vault/item references, set `PROTON_PASS_*` first, then run:
+If you use a non-default `pass-cli` binary, export it before running:
 
 ```bash
 eval "$(make -s pass-env)"
@@ -112,14 +117,16 @@ make test-integration-sdk
 
 ## Credentials
 
-Use Proton Pass references, not plaintext credentials:
+Use browser-fork login for account authorization. Proton Pass or
+`git-credential` is used only as the local key-password/data-password provider:
 
 ```bash
 pass-cli login
 eval "$(./scripts/export-pass-env.sh)"
 ```
 
-Canonical reference root is `pass://Personal/Proton LFS`.
+`export-pass-env.sh` exports `PROTON_PASS_CLI_BIN` and unsets legacy account
+credential references; it does not export Proton usernames or passwords.
 
 ## Repository Layout
 

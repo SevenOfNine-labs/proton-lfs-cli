@@ -202,6 +202,8 @@ graph LR
 ```json
 {
   "credentialProvider": "pass-cli",
+  "dataCredentialProvider": "",
+  "dataCredentialHost": "proton-data.proton-lfs-cli.local",
   "autostart": true,
   "enableNotifications": true
 }
@@ -271,7 +273,11 @@ sequenceDiagram
 
 ```
 
-### 2. Credential Resolution Flow
+`credentialProvider` is retained as the tray/helper key-password provider
+preference for browser-fork login. It is not sent by Git LFS transfer bridge
+requests.
+
+### 2. Browser-Fork Session Flow
 
 ```mermaid
 sequenceDiagram
@@ -279,33 +285,20 @@ sequenceDiagram
     participant Tray as Tray App
     participant Config as config.json
     participant Adapter as Go Adapter
-    participant Bridge as proton-drive-cli
-    participant Provider as Credential Provider
+    participant DriveCLI as proton-drive-cli
+    participant Provider as Key-password Provider
 
     User->>Tray: Click "Connect to Proton"
-    Tray->>Config: Read credentialProvider
+    Tray->>Config: Read key-password provider preference
+    Tray->>DriveCLI: proton-drive login --key-password-provider <provider>
+    DriveCLI->>User: Browser-fork authorization
+    DriveCLI->>Provider: Store UID-scoped key password
+    DriveCLI-->>Tray: Session saved
 
-    alt credentialProvider = pass-cli
-        Tray->>User: Show "Using Proton Pass"
-        Tray->>Bridge: proton-drive credential verify --provider pass-cli
-        Bridge->>Provider: Search Pass vaults for proton.me
-        Provider-->>Bridge: Credentials found
-        Bridge-->>Tray: Verified ✓
-    else credentialProvider = git-credential
-        Tray->>User: Show "Using Git Credential Manager"
-        Tray->>Bridge: proton-drive credential verify --provider git-credential
-        Bridge->>Provider: git credential fill
-        Provider-->>Bridge: Credentials found
-        Bridge-->>Tray: Verified ✓
-    end
-
-    Tray->>User: Connection successful
-
-    Note over Adapter,Bridge: Later, during Git LFS operation
-    Adapter->>Bridge: {credentialProvider: "pass-cli"}
-    Bridge->>Provider: Resolve credentials
-    Provider-->>Bridge: {username, password}
-    Bridge->>Bridge: Authenticate with Proton
+    Note over Adapter,DriveCLI: Later, during Git LFS operation
+    Adapter->>DriveCLI: bridge auth-state (offline)
+    DriveCLI-->>Adapter: ready (local readiness only)
+    Adapter->>DriveCLI: bridge upload/download (no account login fields)
 
 ```
 
@@ -400,7 +393,8 @@ stateDiagram-v2
   "oid": "abc123...",
   "localPath": "/tmp/lfs-abc123",
   "remotePath": "/LFS/ab/c1/abc123...",
-  "credentialProvider": "pass-cli"
+  "dataCredentialProvider": "pass-cli",
+  "dataCredentialHost": "proton-data.proton-lfs-cli.local"
 }
 
 // Bridge → Adapter (stdout)
@@ -583,7 +577,7 @@ graph TB
 ```mermaid
 flowchart LR
     subgraph "User Credentials"
-        User[User: email + password]
+        User[User]
     end
 
     subgraph "Credential Storage"
@@ -596,29 +590,35 @@ flowchart LR
     end
 
     subgraph "Proton Drive CLI"
-        Bridge[Bridge<br/>Resolves credentials]
-        Auth[Auth Service<br/>SRP authentication]
+        Bridge[Bridge<br/>Uses saved session]
+        Auth[Browser-fork Session<br/>Key unlock]
     end
 
-    User -.store via pass-cli.-> PassVault
-    User -.store via git credential.-> Keychain
+    User -.browser-fork login stores key password.-> PassVault
+    User -.browser-fork login stores key password.-> Keychain
 
-    Adapter --> | {credentialProvider} | Bridge
-    Bridge -.pass-cli mode.-> PassVault
-    Bridge -.git-credential mode.-> Keychain
+    Adapter --> | {dataCredentialProvider?} | Bridge
+    Bridge -.key-password lookup.-> PassVault
+    Bridge -.key-password lookup.-> Keychain
 
     Bridge --> Auth
-    Auth --> ProtonAPI[Proton API<br/>SRP Authentication]
+    Auth --> ProtonAPI[Proton API<br/>Session Reuse]
 
 ```
 
 **Security Principles:**
 
-1. ✅ **Adapter never sees credentials**: Only passes provider name
-2. ✅ **Credentials in stdin only**: Never in env vars or CLI args
+1. ✅ **Adapter never sees account credentials**: Transfers only pass optional local unlock selectors
+2. ✅ **No transfer-time login**: Git LFS commands fail closed unless auth-state is ready
 3. ✅ **Environment allowlist**: Only safe vars passed to subprocess
 4. ✅ **Session isolation**: Per-user session files (mode 0600)
 5. ✅ **Input validation**: OID and path validation before subprocess spawn
+
+`auth-state=ready` is deliberately local-only. It proves that saved session
+metadata, local expiry, permissions, and unlock-provider configuration look
+usable, but not that Proton has not revoked the browser session remotely. A
+remote auth rejection during the first guarded SDK call is surfaced as an auth
+error and must not trigger a transfer-time login loop.
 
 ### Validation & Sanitization
 
@@ -664,13 +664,13 @@ flowchart LR
 
     subgraph "Artifacts"
         AdapterBin[git-lfs-proton-adapter]
-        TrayBin[proton-lfs-cli-tray]
+        TrayBin[proton-lfs-tray]
         CLIBin[proton-drive-cli<br/>SEA executable]
     end
 
     subgraph "Distribution"
         Bundle[Bundle Script<br/>scripts/package-bundle.sh]
-        macOSApp[ProtonGitLFS.app]
+        macOSApp[ProtonLFS.app]
         LinuxTar[proton-lfs-cli.tar.gz]
     end
 
@@ -711,10 +711,10 @@ make install        # Install bundle to system
 
 ```
 
-ProtonGitLFS.app/
+ProtonLFS.app/
 └── Contents/
     ├── MacOS/
-    │   ├── proton-lfs-cli-tray  # Tray app binary
+    │   ├── proton-lfs-tray  # Tray app binary
     │   ├── git-lfs-proton-adapter
     │   └── proton-drive-cli     # SEA executable
     └── Info.plist
@@ -727,7 +727,7 @@ ProtonGitLFS.app/
 
 proton-lfs-cli/
 ├── bin/
-│   ├── proton-lfs-cli-tray
+│   ├── proton-lfs-tray
 │   ├── git-lfs-proton-adapter
 │   └── proton-drive-cli
 └── share/
@@ -762,7 +762,7 @@ flowchart TB
 
     Checksums --> Release[GitHub Release<br/>Attach artifacts]
 
-    Release --> Artifacts[Artifacts:<br/>- ProtonGitLFS-{os}-{arch}.{ext}<br/>- checksums.txt]
+    Release --> Artifacts[Artifacts:<br/>- ProtonLFS-{os}-{arch}.{ext}<br/>- checksums.txt]
 
 ```
 
@@ -866,7 +866,7 @@ make test-e2e-real                  # Real Proton API (requires auth)
 | ----------- | ------------ | --------------- | ------- |
 | Upload (1MB) | ~2-3s | ~1s | Includes encryption |
 | Download (1MB) | ~2-3s | ~1s | Includes decryption |
-| Auth (SRP) | ~3-5s | ~0.1s (session reuse) | 90% faster with reuse |
+| Auth-state gate | local-only | local-only | No Proton network request |
 | List files | ~1-2s | - | Depends on folder size |
 
 ### Optimization Strategies

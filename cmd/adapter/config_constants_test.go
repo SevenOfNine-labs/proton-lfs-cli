@@ -9,6 +9,9 @@ func TestDefaultConstants(t *testing.T) {
 	if DefaultStorageBase != "LFS" {
 		t.Fatalf("unexpected DefaultStorageBase: %q", DefaultStorageBase)
 	}
+	if DefaultDataCredentialHost != "proton-data.proton-lfs-cli.local" {
+		t.Fatalf("unexpected DefaultDataCredentialHost: %q", DefaultDataCredentialHost)
+	}
 }
 
 func TestEnvVarNames(t *testing.T) {
@@ -23,6 +26,12 @@ func TestEnvVarNames(t *testing.T) {
 	}
 	if EnvAppVersion != "PROTON_APP_VERSION" {
 		t.Fatalf("unexpected EnvAppVersion: %q", EnvAppVersion)
+	}
+	if EnvDataCredentialProvider != "PROTON_DATA_CREDENTIAL_PROVIDER" {
+		t.Fatalf("unexpected EnvDataCredentialProvider: %q", EnvDataCredentialProvider)
+	}
+	if EnvDataCredentialHost != "PROTON_DATA_CREDENTIAL_HOST" {
+		t.Fatalf("unexpected EnvDataCredentialHost: %q", EnvDataCredentialHost)
 	}
 }
 

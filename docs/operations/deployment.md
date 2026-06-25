@@ -14,12 +14,18 @@ No .NET SDK required.
 ## Local Bring-Up
 
 ```bash
-git submodule update --init --recursive
+git submodule update --init submodules/git-lfs submodules/pass-cli submodules/proton-drive-cli
+git -C submodules/proton-drive-cli submodule update --init submodules/sdk
+make check-submodules
 make setup
 make build-all    # Builds Go adapter, Git LFS, and proton-drive-cli
 make test
 make test-integration
 ```
+
+`make check-submodules` avoids recursive descent into the Proton SDK because
+the current upstream SDK commit contains nested gitlinks that are not declared
+in its `.gitmodules` file.
 
 Build proton-drive-cli:
 
@@ -34,10 +40,15 @@ pass-cli login
 make test-integration-sdk
 ```
 
-Optional environment variables for accounts that need explicit data password or 2FA:
+For accounts that need two-factor authentication, complete interactive
+`proton-drive login` before SDK transfers. Browser-fork sessions normally use
+the stored UID-scoped key password for Drive unlocks. Configure a separate
+mailbox/data password credential provider only if offline doctor reports
+`needs_data_password`, and never use secret environment variables:
 
-- `PROTON_DATA_PASSWORD`
-- `PROTON_SECOND_FACTOR_CODE`
+```bash
+git config lfs.customtransfer.proton.args "--backend=sdk --data-credential-provider git-credential"
+```
 
 If `node` is not visible to non-interactive shells, pass an explicit binary path:
 

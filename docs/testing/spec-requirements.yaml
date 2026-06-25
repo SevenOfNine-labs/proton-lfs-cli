@@ -137,7 +137,9 @@ requirements:
     tests:
       - tests/integration/git_lfs_sdk_backend_test.go
     gaps:
-      - real mode requires valid Proton credentials via pass-cli or git-credential
+      - real mode requires an existing browser-fork Proton session plus
+        optional mailbox/data-password unlock material in pass-cli or
+        git-credential
 
   - id: CT-SDK-003
     source: docs/architecture/proton-sdk-bridge.md
@@ -155,7 +157,7 @@ requirements:
     tests:
       - tests/integration/git_lfs_sdk_backend_test.go
     gaps:
-      - requires valid Proton credentials and built proton-drive-cli
+      - requires a browser-fork-ready local session and built proton-drive-cli
 
   - id: CT-SDK-005
     source: docs/architecture/proton-sdk-bridge.md
@@ -219,6 +221,143 @@ requirements:
     tests:
       - cmd/adapter/bridge_test.go
       - tests/integration/git_lfs_sdk_backend_test.go
+
+  - id: AUTH-001
+    source: https://proton.me/blog/proton-drive-cli
+    clause: browser-sign-in-no-password-on-command-line
+    scope: proton-drive-cli
+    status: covered
+    tests:
+      - submodules/proton-drive-cli/src/auth/flow-safety.test.ts
+      - submodules/proton-drive-cli/src/cli/login.test.ts
+      - cmd/tray/connect_test.go
+      - cmd/tray/cli_test.go
+    requirement: >-
+      Account login must use browser-fork sign-in. The tray/helper
+      and root adapter must not prompt for or pass Proton account usernames,
+      account passwords, TOTP codes, or legacy account credential selectors.
+
+  - id: AUTH-002
+    source: RFC 8252
+    clause: native-apps-use-external-user-agent
+    scope: proton-drive-cli
+    status: covered
+    tests:
+      - submodules/proton-drive-cli/src/auth/browser-fork.test.ts
+      - submodules/proton-drive-cli/src/auth/flow-safety.test.ts
+    requirement: >-
+      Interactive account authorization must happen through the
+      Proton browser-fork flow, not embedded username/password automation or a
+      transfer-time SRP login path.
+
+  - id: AUTH-003
+    source: submodules/proton-drive-cli/schemas/bridge/v1/request.schema.json
+    clause: bridge-requests-have-no-account-login-fields
+    scope: adapter-bridge
+    status: covered
+    tests:
+      - cmd/adapter/bridge_contract_test.go
+      - cmd/adapter/bridge_test.go
+      - cmd/adapter/backend_test.go
+      - cmd/adapter/gitcred_test.go
+    requirement: >-
+      Root bridge requests may include only bridge operation fields
+      and local unlock selectors. They must not include `credentialProvider`,
+      `allowLogin`, username, password, mailbox password, or second-factor
+      login fields.
+
+  - id: AUTH-004
+    source: submodules/proton-drive-cli/schemas/bridge/v1/auth-state-payload.schema.json
+    clause: auth-state-is-offline-and-fail-closed
+    scope: adapter-sdk-bridge
+    status: covered
+    tests:
+      - submodules/proton-drive-cli/src/cli/bridge.test.ts
+      - cmd/adapter/bridge_contract_test.go
+      - cmd/adapter/backend_test.go
+      - tests/integration/git_lfs_e2e_mock_test.go
+    requirement: >-
+      Transfer setup must call `bridge auth-state` before `init`,
+      reject any `willAttemptNetwork=true` payload, and fail closed for every
+      non-ready state without invoking any login command.
+
+  - id: AUTH-005
+    source: submodules/proton-drive-cli/schemas/bridge/v1/auth-state-payload.schema.json
+    clause: every-auth-state-has-root-machine-error
+    scope: adapter-sdk-bridge
+    status: covered
+    tests:
+      - cmd/adapter/bridge_contract_test.go
+      - cmd/adapter/backend_test.go
+      - internal/preflight/doctor_test.go
+      - tests/integration/git_lfs_e2e_mock_test.go
+    requirement: >-
+      `ready`, `needs_login`, `needs_data_password`,
+      `needs_key_password`, `session_expired`, `session_invalid`, and
+      `configuration_error` must each have deterministic root classification.
+
+  - id: AUTH-006
+    source: NIST SP 800-63B
+    clause: session-secret-storage-and-invalidation
+    scope: proton-drive-cli
+    status: covered
+    tests:
+      - submodules/proton-drive-cli/src/auth/session.test.ts
+      - submodules/proton-drive-cli/src/auth/key-password-store.test.ts
+      - submodules/proton-drive-cli/src/auth/browser-fork.test.ts
+      - tests/integration/credential_security_test.go
+    requirement: >-
+      Session tokens and browser-fork key passwords must be stored
+      only in owner-restricted session files or the configured secure local
+      provider, and failed persistence must clean up derived key-password
+      material.
+
+  - id: AUTH-007
+    source: docs/operations/live-canary-runbook.md
+    clause: no-default-real-proton-login
+    scope: live-canary
+    status: covered
+    tests:
+      - scripts/browser_fork_canary_test.go
+      - internal/preflight/doctor_test.go
+      - tests/integration/git_lfs_e2e_real_test.go
+    requirement: >-
+      No default, CI, mocked, or transfer command may touch a real
+      Proton account. Real canaries require exact acknowledgement, explicit
+      offline doctor args, and structured readiness gates.
+
+  - id: AUTH-008
+    source: docs/operations/live-canary-runbook.md
+    clause: browser-fork-canary-arg-allowlist
+    scope: live-canary
+    status: covered
+    tests:
+      - scripts/browser_fork_canary_test.go
+    requirement: >-
+      `LIVE_BROWSER_FORK_LOGIN_ARGS` may pass only
+      `--key-password-provider` and `--key-password-host`. Legacy account
+      credential flags, username flags, auth-mode flags, and unknown options
+      must fail before proton-drive-cli is invoked.
+
+  - id: AUTH-009
+    source: https://proton.me/support/log-out-all-other-sessions
+    clause: session-revocation-and-expiry
+    scope: adapter-sdk-bridge
+    status: partially_covered
+    tests:
+      - cmd/adapter/backend_test.go
+      - internal/preflight/doctor_test.go
+      - tests/integration/git_lfs_e2e_mock_test.go
+    gaps:
+      - >-
+        offline `ready` proves only local session shape and local unlock
+        material; remote revocation can only be discovered by a guarded live
+        metadata/transfer call
+    requirement: >-
+      Documentation and tests must distinguish offline readiness
+      from remote session validity. A remotely revoked session may pass local
+      preflight and must then fail as an authenticated SDK/API error, not start
+      a new login loop.
 
   - id: API-BATCH-001
     source: submodules/git-lfs/docs/api/batch.md

@@ -23,10 +23,10 @@ func TestDriveCLIBackendRoundTrip(t *testing.T) {
 
 	// Use exists=false so upload doesn't skip via dedup
 	bc := helperBridgeClient(t, "MOCK_BRIDGE_EXISTS_RESULT=false", "MOCK_BRIDGE_DOWNLOAD_CONTENT="+string(payload))
-	backend := NewDriveCLIBackend(bc, CredentialProviderPassCLI)
+	backend := NewDriveCLIBackend(bc)
 	session := &Session{Initialized: true, CreatedAt: time.Now()}
 
-	// Initialize (auth + init)
+	// Initialize (offline auth-state + init)
 	if err := backend.Initialize(session); err != nil {
 		t.Fatalf("Initialize returned error: %v", err)
 	}
@@ -67,14 +67,81 @@ func TestDriveCLIBackendRoundTrip(t *testing.T) {
 
 func TestDriveCLIBackendInitializeWithEmptyProvider(t *testing.T) {
 	bc := helperBridgeClient(t)
-	backend := NewDriveCLIBackend(bc, "")
+	backend := NewDriveCLIBackend(bc)
 	session := &Session{Initialized: true, CreatedAt: time.Now()}
 
-	// With empty provider, auth is delegated to proton-drive-cli
-	// which will attempt resolution and succeed (mock bridge returns ok)
+	// With empty provider, a ready local session can initialize without
+	// allowing a full login attempt from the transfer path.
 	err := backend.Initialize(session)
 	if err != nil {
-		t.Fatalf("Initialize with empty provider should succeed (delegated): %v", err)
+		t.Fatalf("Initialize with empty provider should succeed when ready: %v", err)
+	}
+}
+
+func TestDriveCLIBackendInitializeUsesOfflineGateBeforeInit(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "bridge-commands.log")
+	bc := helperBridgeClient(t, "MOCK_BRIDGE_COMMAND_LOG="+logPath)
+	backend := NewDriveCLIBackend(bc)
+	session := &Session{Initialized: true, CreatedAt: time.Now()}
+
+	if err := backend.Initialize(session); err != nil {
+		t.Fatalf("Initialize returned error: %v", err)
+	}
+
+	commands := readLoggedBridgeCommands(t, logPath)
+	assertBridgeCommands(t, commands, "auth-state", "init")
+
+	if _, ok := commands[0].Request["allowLogin"]; ok {
+		t.Fatalf("auth-state request should not include allowLogin, got %v", commands[0].Request)
+	}
+	if _, ok := commands[1].Request["allowLogin"]; ok {
+		t.Fatalf("init request should not include allowLogin, got %v", commands[1].Request)
+	}
+	if _, ok := commands[1].Request["credentialProvider"]; ok {
+		t.Fatalf("init request should not include credentialProvider, got %v", commands[1].Request)
+	}
+}
+
+func TestDriveCLIBackendInitializeBlocksAllNonReadyStatesBeforeInitOrAuth(t *testing.T) {
+	cases := []struct {
+		state     string
+		code      int
+		errorCode ErrorCode
+	}{
+		{state: "needs_login", code: 401, errorCode: ErrCodeAuthRequired},
+		{state: "needs_data_password", code: 401, errorCode: ErrCodeDataPasswordRequired},
+		{state: "needs_key_password", code: 401, errorCode: ErrCodeKeyPasswordRequired},
+		{state: "session_expired", code: 401, errorCode: ErrCodeAuthRequired},
+		{state: "session_invalid", code: 401, errorCode: ErrCodeAuthRequired},
+		{state: "configuration_error", code: 400, errorCode: ErrCodeInvalidRequest},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.state, func(t *testing.T) {
+			logPath := filepath.Join(t.TempDir(), "bridge-commands.log")
+			bc := helperBridgeClient(t,
+				"MOCK_BRIDGE_AUTH_STATE="+tc.state,
+				"MOCK_BRIDGE_COMMAND_LOG="+logPath,
+			)
+			backend := NewDriveCLIBackend(bc)
+			session := &Session{Initialized: true, CreatedAt: time.Now()}
+
+			err := backend.Initialize(session)
+			var backendErr *BackendError
+			if !errors.As(err, &backendErr) {
+				t.Fatalf("expected BackendError, got %T %v", err, err)
+			}
+			if backendErr.Code != tc.code || backendErr.ErrorCode != tc.errorCode {
+				t.Fatalf("state %s mapped to code=%d errorCode=%s, want code=%d errorCode=%s",
+					tc.state, backendErr.Code, backendErr.ErrorCode, tc.code, tc.errorCode)
+			}
+			if backend.authenticated {
+				t.Fatalf("state %s must not mark backend authenticated", tc.state)
+			}
+
+			commands := readLoggedBridgeCommands(t, logPath)
+			assertBridgeCommands(t, commands, "auth-state")
+		})
 	}
 }
 
@@ -84,7 +151,7 @@ func TestDriveCLIBackendUploadMapsNotFoundError(t *testing.T) {
 		"MOCK_BRIDGE_ERROR=not found",
 		"MOCK_BRIDGE_ERROR_CODE=404",
 	)
-	backend := NewDriveCLIBackend(bc, CredentialProviderPassCLI)
+	backend := NewDriveCLIBackend(bc)
 	backend.authenticated = true
 
 	session := &Session{Initialized: true, Token: "direct-bridge"}
@@ -101,7 +168,7 @@ func TestDriveCLIBackendDownloadMapsAuthErrorAndCleansOutput(t *testing.T) {
 		"MOCK_BRIDGE_ERROR=unauthorized",
 		"MOCK_BRIDGE_ERROR_CODE=401",
 	)
-	backend := NewDriveCLIBackend(bc, CredentialProviderPassCLI)
+	backend := NewDriveCLIBackend(bc)
 	backend.authenticated = true
 
 	session := &Session{Initialized: true, Token: "direct-bridge"}
@@ -125,7 +192,7 @@ func TestDriveCLIBackendUploadDedup(t *testing.T) {
 
 	// Mock bridge says exists=true, so upload should be skipped
 	bc := helperBridgeClient(t)
-	backend := NewDriveCLIBackend(bc, CredentialProviderPassCLI)
+	backend := NewDriveCLIBackend(bc)
 	backend.authenticated = true
 
 	session := &Session{Initialized: true, Token: "direct-bridge"}
@@ -139,11 +206,48 @@ func TestDriveCLIBackendUploadDedup(t *testing.T) {
 	}
 }
 
+func TestDriveCLIBackendUploadFailsClosedWhenExistsCheckFails(t *testing.T) {
+	payload := []byte("exists-check-failure")
+	oidBytes := sha256.Sum256(payload)
+	oid := hex.EncodeToString(oidBytes[:])
+
+	uploadPath := filepath.Join(t.TempDir(), "upload.bin")
+	if err := os.WriteFile(uploadPath, payload, 0o600); err != nil {
+		t.Fatalf("failed to create upload file: %v", err)
+	}
+
+	logPath := filepath.Join(t.TempDir(), "bridge-commands.log")
+	bc := helperBridgeClient(t,
+		"MOCK_BRIDGE_COMMAND_LOG="+logPath,
+		"MOCK_BRIDGE_ERROR_COMMAND=exists",
+		"MOCK_BRIDGE_ERROR=drive service is unavailable",
+		"MOCK_BRIDGE_ERROR_CODE=503",
+	)
+	backend := NewDriveCLIBackend(bc)
+	backend.authenticated = true
+
+	session := &Session{Initialized: true, Token: "direct-bridge"}
+	_, err := backend.Upload(session, oid, uploadPath, int64(len(payload)))
+
+	var backendErr *BackendError
+	if !errors.As(err, &backendErr) {
+		t.Fatalf("expected BackendError, got %T %v", err, err)
+	}
+	if backendErr.Code != 503 || backendErr.ErrorCode != ErrCodeServerError {
+		t.Fatalf("unexpected backend error classification: %+v", backendErr)
+	}
+	if !backendErr.Retryable || !backendErr.Temporary {
+		t.Fatalf("exists-check outage should be retryable and temporary: %+v", backendErr)
+	}
+
+	commands := readLoggedBridgeCommands(t, logPath)
+	assertBridgeCommands(t, commands, "exists")
+}
+
 func TestDriveCLIBackendGitCredentialMode(t *testing.T) {
 	bc := helperBridgeClient(t)
 	backend := &DriveCLIBackend{
-		bridge:             bc,
-		credentialProvider: CredentialProviderGitCredential,
+		bridge: bc,
 	}
 
 	session := &Session{Initialized: true, CreatedAt: time.Now()}
@@ -172,6 +276,10 @@ func TestMapBridgeError(t *testing.T) {
 		{"429 prefix", "[429] rate limited", 429},
 		{"text captcha", "captcha verification required", 407},
 		{"text rate limit", "rate limit exceeded", 429},
+		{"text two factor", "Two-factor authentication code required", 401},
+		{"text data password", "Mailbox/data password required for this two-password Proton account", 401},
+		{"text key password", "Browser-fork session is missing its stored key password", 401},
+		{"text key unlock", "Failed to decrypt any keys", 401},
 		{"concurrency limit", "bridge concurrency limit reached (10)", 503},
 		{"unknown error", "something unexpected", 502},
 	}
@@ -186,6 +294,94 @@ func TestMapBridgeError(t *testing.T) {
 	}
 }
 
+func TestMapStructuredBridgeErrorAuthStates(t *testing.T) {
+	cases := []struct {
+		name      string
+		err       *BridgeError
+		wantCode  int
+		wantClass ErrorCode
+	}{
+		{
+			name: "totp required",
+			err: &BridgeError{
+				Code:    401,
+				Message: "Two-factor authentication code required",
+				Details: `{"errorCode":"TWO_FACTOR_REQUIRED","twoFactorType":"totp","totpAllowed":true}`,
+			},
+			wantCode:  401,
+			wantClass: ErrCodeTwoFactorRequired,
+		},
+		{
+			name: "fido2 required",
+			err: &BridgeError{
+				Code:    401,
+				Message: "FIDO2 two-factor authentication is required",
+				Details: `{"errorCode":"TWO_FACTOR_REQUIRED","twoFactorType":"fido2","fido2Available":true}`,
+			},
+			wantCode:  401,
+			wantClass: ErrCodeTwoFactorRequired,
+		},
+		{
+			name: "data password required",
+			err: &BridgeError{
+				Code:    401,
+				Message: "Mailbox/data password required for this two-password Proton account",
+				Details: `{"errorCode":"DATA_PASSWORD_REQUIRED","passwordMode":2}`,
+			},
+			wantCode:  401,
+			wantClass: ErrCodeDataPasswordRequired,
+		},
+		{
+			name: "key password required",
+			err: &BridgeError{
+				Code:    401,
+				Message: "Browser-fork session is missing its stored key password",
+				Details: `{"errorCode":"KEY_PASSWORD_REQUIRED"}`,
+			},
+			wantCode:  401,
+			wantClass: ErrCodeKeyPasswordRequired,
+		},
+		{
+			name: "key unlock failed",
+			err: &BridgeError{
+				Code:    500,
+				Message: "Failed to decrypt any keys",
+			},
+			wantCode:  401,
+			wantClass: ErrCodeKeyUnlockFailed,
+		},
+		{
+			name: "insufficient scope",
+			err: &BridgeError{
+				Code:    403,
+				Message: "API Error (9101): Access token does not have sufficient scope",
+				Details: `{"errorCode":"INSUFFICIENT_SCOPE","protonCode":9101}`,
+			},
+			wantCode:  403,
+			wantClass: ErrCodeInsufficientScope,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := mapBridgeError(tc.err, "fallback")
+			var backendErr *BackendError
+			if !errors.As(err, &backendErr) {
+				t.Fatalf("expected BackendError, got %T", err)
+			}
+			if backendErr.Code != tc.wantCode {
+				t.Fatalf("expected code %d, got %d (%v)", tc.wantCode, backendErr.Code, err)
+			}
+			if backendErr.ErrorCode != tc.wantClass {
+				t.Fatalf("expected class %s, got %s", tc.wantClass, backendErr.ErrorCode)
+			}
+			if backendErr.Retryable || backendErr.Temporary {
+				t.Fatalf("auth state should not be retryable/temporary: %+v", backendErr)
+			}
+		})
+	}
+}
+
 func TestMapBridgeErrorNil(t *testing.T) {
 	if err := mapBridgeError(nil, "fallback"); err != nil {
 		t.Fatalf("expected nil, got %v", err)
@@ -194,7 +390,7 @@ func TestMapBridgeErrorNil(t *testing.T) {
 
 func TestDriveCLIBackendUploadNotAuthenticated(t *testing.T) {
 	bc := helperBridgeClient(t)
-	backend := NewDriveCLIBackend(bc, CredentialProviderPassCLI)
+	backend := NewDriveCLIBackend(bc)
 	// NOT authenticated
 
 	session := &Session{Initialized: true, Token: "direct-bridge"}
@@ -207,7 +403,7 @@ func TestDriveCLIBackendUploadNotAuthenticated(t *testing.T) {
 
 func TestDriveCLIBackendDownloadNotAuthenticated(t *testing.T) {
 	bc := helperBridgeClient(t)
-	backend := NewDriveCLIBackend(bc, CredentialProviderPassCLI)
+	backend := NewDriveCLIBackend(bc)
 	// NOT authenticated
 
 	session := &Session{Initialized: true, Token: "direct-bridge"}
@@ -223,7 +419,7 @@ func TestDriveCLIBackendInitializeCaptchaError(t *testing.T) {
 		"MOCK_BRIDGE_ERROR=captcha verification required",
 		"MOCK_BRIDGE_ERROR_CODE=407",
 	)
-	backend := NewDriveCLIBackend(bc, CredentialProviderPassCLI)
+	backend := NewDriveCLIBackend(bc)
 	session := &Session{Initialized: true, CreatedAt: time.Now()}
 	err := backend.Initialize(session)
 	code, _ := backendErrorDetails(err)
@@ -237,12 +433,63 @@ func TestDriveCLIBackendInitializeRateLimitError(t *testing.T) {
 		"MOCK_BRIDGE_ERROR=rate limited by proton api",
 		"MOCK_BRIDGE_ERROR_CODE=429",
 	)
-	backend := NewDriveCLIBackend(bc, CredentialProviderPassCLI)
+	backend := NewDriveCLIBackend(bc)
 	session := &Session{Initialized: true, CreatedAt: time.Now()}
 	err := backend.Initialize(session)
 	code, _ := backendErrorDetails(err)
 	if code != 429 {
 		t.Fatalf("expected 429, got %d (%v)", code, err)
+	}
+}
+
+func TestDriveCLIBackendInitializeBlocksNeedsLoginState(t *testing.T) {
+	bc := helperBridgeClient(t, "MOCK_BRIDGE_AUTH_STATE=needs_login")
+	backend := NewDriveCLIBackend(bc)
+	session := &Session{Initialized: true, CreatedAt: time.Now()}
+
+	err := backend.Initialize(session)
+	var backendErr *BackendError
+	if !errors.As(err, &backendErr) {
+		t.Fatalf("expected BackendError, got %T", err)
+	}
+	if backendErr.Code != 401 || backendErr.ErrorCode != ErrCodeAuthRequired {
+		t.Fatalf("expected auth_required 401, got %+v", backendErr)
+	}
+	if backend.authenticated {
+		t.Fatal("backend must not authenticate when offline auth-state is not ready")
+	}
+}
+
+func TestDriveCLIBackendInitializeMapsDataPasswordState(t *testing.T) {
+	bc := helperBridgeClient(t, "MOCK_BRIDGE_AUTH_STATE=needs_data_password")
+	backend := NewDriveCLIBackend(bc)
+	session := &Session{Initialized: true, CreatedAt: time.Now()}
+
+	err := backend.Initialize(session)
+	var backendErr *BackendError
+	if !errors.As(err, &backendErr) {
+		t.Fatalf("expected BackendError, got %T", err)
+	}
+	if backendErr.Code != 401 || backendErr.ErrorCode != ErrCodeDataPasswordRequired {
+		t.Fatalf("expected data_password_required 401, got %+v", backendErr)
+	}
+}
+
+func TestDriveCLIBackendInitializeMapsKeyPasswordState(t *testing.T) {
+	bc := helperBridgeClient(t, "MOCK_BRIDGE_AUTH_STATE=needs_key_password")
+	backend := NewDriveCLIBackend(bc)
+	session := &Session{Initialized: true, CreatedAt: time.Now()}
+
+	err := backend.Initialize(session)
+	var backendErr *BackendError
+	if !errors.As(err, &backendErr) {
+		t.Fatalf("expected BackendError, got %T", err)
+	}
+	if backendErr.Code != 401 || backendErr.ErrorCode != ErrCodeKeyPasswordRequired {
+		t.Fatalf("expected key_password_required 401, got %+v", backendErr)
+	}
+	if backend.authenticated {
+		t.Fatal("backend must not authenticate when key-password auth-state is not ready")
 	}
 }
 
@@ -393,6 +640,92 @@ func TestLocalStoreBackendDownloadNotFound(t *testing.T) {
 	}
 }
 
+func TestLocalStoreBackendUploadReportsProgress(t *testing.T) {
+	var _ ProgressTransferBackend = (*LocalStoreBackend)(nil)
+
+	b := NewLocalStoreBackend(t.TempDir())
+	session := &Session{Initialized: true}
+	payload := []byte(strings.Repeat("u", int(progressChunkSize*2+7)))
+	oidBytes := sha256.Sum256(payload)
+	oid := hex.EncodeToString(oidBytes[:])
+	uploadPath := filepath.Join(t.TempDir(), "upload.bin")
+	if err := os.WriteFile(uploadPath, payload, 0o600); err != nil {
+		t.Fatalf("failed to write upload payload: %v", err)
+	}
+
+	var calls []int64
+	size, err := b.UploadWithProgress(session, oid, uploadPath, int64(len(payload)), func(bytesSoFar, bytesSinceLast int64) error {
+		if bytesSinceLast <= 0 {
+			t.Fatalf("bytesSinceLast must be positive, got %d", bytesSinceLast)
+		}
+		if len(calls) > 0 && bytesSoFar <= calls[len(calls)-1] {
+			t.Fatalf("progress must increase, got previous=%d current=%d", calls[len(calls)-1], bytesSoFar)
+		}
+		calls = append(calls, bytesSoFar)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("UploadWithProgress returned error: %v", err)
+	}
+	if size != int64(len(payload)) {
+		t.Fatalf("uploaded size=%d, want %d", size, len(payload))
+	}
+	if len(calls) != 3 {
+		t.Fatalf("expected 3 progress callbacks, got %d (%v)", len(calls), calls)
+	}
+	if calls[len(calls)-1] != int64(len(payload)) {
+		t.Fatalf("final progress=%d, want %d", calls[len(calls)-1], len(payload))
+	}
+}
+
+func TestLocalStoreBackendDownloadReportsProgress(t *testing.T) {
+	b := NewLocalStoreBackend(t.TempDir())
+	session := &Session{Initialized: true}
+	payload := []byte(strings.Repeat("d", int(progressChunkSize+13)))
+	oidBytes := sha256.Sum256(payload)
+	oid := hex.EncodeToString(oidBytes[:])
+
+	objectPath := b.objectPath(oid)
+	if err := os.MkdirAll(filepath.Dir(objectPath), 0o700); err != nil {
+		t.Fatalf("failed to prepare object directory: %v", err)
+	}
+	if err := os.WriteFile(objectPath, payload, 0o600); err != nil {
+		t.Fatalf("failed to seed object: %v", err)
+	}
+
+	var calls []int64
+	downloadPath, size, err := b.DownloadWithProgress(session, oid, func(bytesSoFar, bytesSinceLast int64) error {
+		if bytesSinceLast <= 0 {
+			t.Fatalf("bytesSinceLast must be positive, got %d", bytesSinceLast)
+		}
+		if len(calls) > 0 && bytesSoFar <= calls[len(calls)-1] {
+			t.Fatalf("progress must increase, got previous=%d current=%d", calls[len(calls)-1], bytesSoFar)
+		}
+		calls = append(calls, bytesSoFar)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("DownloadWithProgress returned error: %v", err)
+	}
+	defer os.Remove(downloadPath)
+	if size != int64(len(payload)) {
+		t.Fatalf("download size=%d, want %d", size, len(payload))
+	}
+	if len(calls) != 2 {
+		t.Fatalf("expected 2 progress callbacks, got %d (%v)", len(calls), calls)
+	}
+	if calls[len(calls)-1] != int64(len(payload)) {
+		t.Fatalf("final progress=%d, want %d", calls[len(calls)-1], len(payload))
+	}
+	downloaded, err := os.ReadFile(downloadPath)
+	if err != nil {
+		t.Fatalf("failed to read staged download: %v", err)
+	}
+	if string(downloaded) != string(payload) {
+		t.Fatal("downloaded payload mismatch")
+	}
+}
+
 func TestClassifyErrorCode(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -453,7 +786,7 @@ func TestIsTemporaryCode(t *testing.T) {
 		{500, true},
 		{502, true},
 		{504, true},
-		{429, false},
+		{429, true},
 		{404, false},
 		{401, false},
 		{200, false},
@@ -521,5 +854,8 @@ func TestNewBackendErrorRateLimited(t *testing.T) {
 	}
 	if backendErr.Retryable {
 		t.Error("expected Retryable = false for 429")
+	}
+	if !backendErr.Temporary {
+		t.Error("expected Temporary = true for 429")
 	}
 }

@@ -200,10 +200,10 @@ jobs:
               <h2>📘 Go API Reference <span class="badge external-badge">pkg.go.dev</span></h2>
               <p>Complete Go API documentation automatically generated from Go doc comments.</p>
               <ul>
-                <li><a href="https://pkg.go.dev/github.com/SevenOfNine-ai/proton-lfs-cli">Go Package Documentation</a></li>
-                <li><a href="https://pkg.go.dev/github.com/SevenOfNine-ai/proton-lfs-cli/cmd/adapter">Adapter Package</a></li>
-                <li><a href="https://pkg.go.dev/github.com/SevenOfNine-ai/proton-lfs-cli/cmd/tray">Tray App Package</a></li>
-                <li><a href="https://pkg.go.dev/github.com/SevenOfNine-ai/proton-lfs-cli/internal/config">Config Package</a></li>
+                <li><a href="https://pkg.go.dev/github.com/SevenOfNine-labs/proton-lfs-cli">Go Package Documentation</a></li>
+                <li><a href="https://pkg.go.dev/github.com/SevenOfNine-labs/proton-lfs-cli/cmd/adapter">Adapter Package</a></li>
+                <li><a href="https://pkg.go.dev/github.com/SevenOfNine-labs/proton-lfs-cli/cmd/tray">Tray App Package</a></li>
+                <li><a href="https://pkg.go.dev/github.com/SevenOfNine-labs/proton-lfs-cli/internal/config">Config Package</a></li>
                 <li>Coverage: Git LFS Adapter, System Tray, Configuration, Status Reporting</li>
               </ul>
             </div>
@@ -212,7 +212,7 @@ jobs:
               <h2>📙 TypeScript Bridge API <span class="badge external-badge">Submodule</span></h2>
               <p>TypeScript CLI and bridge protocol documentation for the proton-drive-cli submodule.</p>
               <ul>
-                <li><a href="https://sevenofnine-ai.github.io/proton-drive-cli/">TypeScript API Documentation</a></li>
+                <li><a href="https://sevenofnine-labs.github.io/proton-drive-cli/">TypeScript API Documentation</a></li>
                 <li>Coverage: CLI Commands, Authentication, Drive Operations, Bridge Protocol, Utilities</li>
               </ul>
             </div>
@@ -220,11 +220,11 @@ jobs:
             <div class="section">
               <h2>🔗 Quick Links</h2>
               <ul>
-                <li><a href="https://github.com/SevenOfNine-ai/proton-lfs-cli">GitHub Repository</a></li>
-                <li><a href="https://github.com/SevenOfNine-ai/proton-lfs-cli/blob/main/README.md">README</a></li>
-                <li><a href="https://github.com/SevenOfNine-ai/proton-lfs-cli/blob/main/USAGE.md">Usage Guide</a></li>
-                <li><a href="https://github.com/SevenOfNine-ai/proton-lfs-cli/blob/main/docs/DOCUMENTATION_GUIDE.md">Go Documentation Guide</a></li>
-                <li><a href="https://github.com/SevenOfNine-ai/proton-drive-cli">Submodule: proton-drive-cli</a></li>
+                <li><a href="https://github.com/SevenOfNine-labs/proton-lfs-cli">GitHub Repository</a></li>
+                <li><a href="https://github.com/SevenOfNine-labs/proton-lfs-cli/blob/main/README.md">README</a></li>
+                <li><a href="https://github.com/SevenOfNine-labs/proton-lfs-cli/blob/main/USAGE.md">Usage Guide</a></li>
+                <li><a href="https://github.com/SevenOfNine-labs/proton-lfs-cli/blob/main/docs/DOCUMENTATION_GUIDE.md">Go Documentation Guide</a></li>
+                <li><a href="https://github.com/SevenOfNine-labs/proton-drive-cli">Submodule: proton-drive-cli</a></li>
               </ul>
             </div>
 
@@ -232,14 +232,14 @@ jobs:
               <h2>🚀 Getting Started</h2>
               <ul>
                 <li><a href="guides/index.html">Read the Documentation</a></li>
-                <li><a href="https://github.com/SevenOfNine-ai/proton-lfs-cli#installation">Installation Instructions</a></li>
+                <li><a href="https://github.com/SevenOfNine-labs/proton-lfs-cli#installation">Installation Instructions</a></li>
                 <li><a href="guides/docs/operations/adapter-configuration.html">Configure the Adapter</a></li>
                 <li><a href="guides/docs/testing/integration-testing.html">Run Tests</a></li>
               </ul>
             </div>
 
             <footer>
-              <p>Generated with Honkit | Go docs via <a href="https://pkg.go.dev">pkg.go.dev</a> | <a href="https://github.com/SevenOfNine-ai/proton-lfs-cli">GitHub</a></p>
+              <p>Generated with Honkit | Go docs via <a href="https://pkg.go.dev">pkg.go.dev</a> | <a href="https://github.com/SevenOfNine-labs/proton-lfs-cli">GitHub</a></p>
             </footer>
           </body>
           </html>

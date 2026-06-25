@@ -760,6 +760,7 @@ func TestSpecProgressFinalBytesSoFarEqualsFileSize(t *testing.T) {
 	}
 	if lastProgress == nil {
 		t.Fatal("expected at least one progress message")
+		return
 	}
 	if lastProgress.BytesSoFar != int64(len(payload)) {
 		t.Fatalf("last progress bytesSoFar=%d, expected %d", lastProgress.BytesSoFar, len(payload))

@@ -52,15 +52,16 @@ const (
 
 // Adapter manages the transfer session with Git LFS
 type Adapter struct {
-	driveCLIBin        string
-	logger             *log.Logger
-	session            *Session
-	currentOperation   Direction
-	allowMockTransfers bool
-	localStoreDir      string
-	backendKind        string
-	backend            TransferBackend
-	credentialProvider string
+	driveCLIBin            string
+	logger                 *log.Logger
+	session                *Session
+	currentOperation       Direction
+	allowMockTransfers     bool
+	localStoreDir          string
+	backendKind            string
+	backend                TransferBackend
+	dataCredentialProvider string
+	dataCredentialHost     string
 }
 
 // Message received from Git LFS
@@ -222,13 +223,13 @@ func (a *Adapter) handleUpload(msg *InboundMessage, enc *json.Encoder) error {
 		return a.sendTransferError(enc, msg.OID, 409, "upload content hash does not match oid")
 	}
 
-	storedSize, err := a.backend.Upload(a.session, normalizedOID, msg.Path, sourceSize)
+	progress := newTransferProgress(enc, normalizedOID)
+	storedSize, err := a.uploadWithProgress(normalizedOID, msg.Path, sourceSize, progress.report)
 	if err != nil {
-		code, message := backendErrorDetails(err)
-		return a.sendTransferError(enc, msg.OID, code, message)
+		return a.sendBackendTransferError(enc, msg.OID, err)
 	}
 
-	if err := a.sendProgressSequence(enc, normalizedOID, storedSize); err != nil {
+	if err := progress.finish(a, storedSize); err != nil {
 		return err
 	}
 
@@ -256,10 +257,10 @@ func (a *Adapter) handleDownload(msg *InboundMessage, enc *json.Encoder) error {
 	}
 
 	normalizedOID := strings.ToLower(msg.OID)
-	stagedPath, stagedSize, err := a.backend.Download(a.session, normalizedOID)
+	progress := newTransferProgress(enc, normalizedOID)
+	stagedPath, stagedSize, err := a.downloadWithProgress(normalizedOID, progress.report)
 	if err != nil {
-		code, message := backendErrorDetails(err)
-		return a.sendTransferError(enc, msg.OID, code, message)
+		return a.sendBackendTransferError(enc, msg.OID, err)
 	}
 
 	objectHash, objectSize, err := calculateFileSHA256(stagedPath)
@@ -279,7 +280,7 @@ func (a *Adapter) handleDownload(msg *InboundMessage, enc *json.Encoder) error {
 		stagedSize = objectSize
 	}
 
-	if err := a.sendProgressSequence(enc, normalizedOID, stagedSize); err != nil {
+	if err := progress.finish(a, stagedSize); err != nil {
 		_ = os.Remove(stagedPath)
 		return err
 	}
@@ -340,6 +341,7 @@ func classifyError(code int, message string) (state string, errorCode string, er
 	state = config.StateError // default
 	errorCode = "unknown_error"
 	errorDetail = ""
+	lowerMessage := strings.ToLower(message)
 
 	// Check for CAPTCHA (code 407)
 	if code == 407 || strings.Contains(message, "CAPTCHA") {
@@ -354,6 +356,25 @@ func classifyError(code int, message string) (state string, errorCode string, er
 		state = config.StateRateLimited
 		errorCode = "rate_limited"
 		errorDetail = "Wait before retrying operations. The Proton API has rate-limited requests."
+		return
+	}
+
+	if strings.Contains(lowerMessage, "two-factor") ||
+		strings.Contains(lowerMessage, "2fa") ||
+		strings.Contains(lowerMessage, "fido2") {
+		state = config.StateAuthRequired
+		errorCode = "two_factor_required"
+		errorDetail = "Complete Proton two-factor authentication with proton-drive login"
+		return
+	}
+
+	if strings.Contains(lowerMessage, "mailbox/data password") ||
+		strings.Contains(lowerMessage, "data password") ||
+		strings.Contains(lowerMessage, "key decryption") ||
+		strings.Contains(lowerMessage, "unlock proton keys") {
+		state = config.StateAuthRequired
+		errorCode = "data_password_required"
+		errorDetail = "Provide the Proton mailbox/data password; do not retry account login"
 		return
 	}
 
@@ -389,10 +410,26 @@ func classifyError(code int, message string) (state string, errorCode string, er
 }
 
 func (a *Adapter) sendTransferError(enc *json.Encoder, oid string, code int, message string) error {
+	return a.sendTransferErrorWithMetadata(enc, oid, code, message, "", false, false)
+}
+
+func (a *Adapter) sendBackendTransferError(enc *json.Encoder, oid string, err error) error {
+	code, message := backendErrorDetails(err)
+	var backendErr *BackendError
+	if errors.As(err, &backendErr) {
+		return a.sendTransferErrorWithMetadata(enc, oid, code, message, backendErr.ErrorCode, backendErr.Retryable, backendErr.Temporary)
+	}
+	return a.sendTransferError(enc, oid, code, message)
+}
+
+func (a *Adapter) sendTransferErrorWithMetadata(enc *json.Encoder, oid string, code int, message string, backendErrorCode ErrorCode, retryable, temporary bool) error {
 	a.logger.Printf("Error [%d]: %s", code, message)
 
 	// Classify error to determine appropriate status state and metadata
 	state, errorCode, errorDetail := classifyError(code, message)
+	if backendErrorCode != "" && backendErrorCode != ErrCodeUnknown {
+		errorCode = string(backendErrorCode)
+	}
 
 	_ = config.WriteStatus(config.StatusReport{
 		State:       state,
@@ -400,6 +437,8 @@ func (a *Adapter) sendTransferError(enc *json.Encoder, oid string, code int, mes
 		Error:       message,
 		ErrorCode:   errorCode,
 		ErrorDetail: errorDetail,
+		Retryable:   retryable,
+		Temporary:   temporary,
 	})
 
 	return enc.Encode(OutboundMessage{
@@ -451,6 +490,64 @@ func (a *Adapter) sendProgressSequence(enc *json.Encoder, oid string, totalSize 
 			return err
 		}
 		bytesSoFar = nextBytes
+	}
+	return nil
+}
+
+func (a *Adapter) uploadWithProgress(oid, sourcePath string, expectedSize int64, progress ProgressFunc) (int64, error) {
+	if backend, ok := a.backend.(ProgressTransferBackend); ok {
+		return backend.UploadWithProgress(a.session, oid, sourcePath, expectedSize, progress)
+	}
+	return a.backend.Upload(a.session, oid, sourcePath, expectedSize)
+}
+
+func (a *Adapter) downloadWithProgress(oid string, progress ProgressFunc) (string, int64, error) {
+	if backend, ok := a.backend.(ProgressTransferBackend); ok {
+		return backend.DownloadWithProgress(a.session, oid, progress)
+	}
+	return a.backend.Download(a.session, oid)
+}
+
+type transferProgress struct {
+	enc        *json.Encoder
+	oid        string
+	bytesSoFar int64
+	emitted    bool
+}
+
+func newTransferProgress(enc *json.Encoder, oid string) *transferProgress {
+	return &transferProgress{enc: enc, oid: oid}
+}
+
+func (p *transferProgress) report(bytesSoFar, bytesSinceLast int64) error {
+	if bytesSoFar < p.bytesSoFar {
+		return fmt.Errorf("progress moved backwards: previous=%d current=%d", p.bytesSoFar, bytesSoFar)
+	}
+	if bytesSinceLast < 0 {
+		return fmt.Errorf("progress increment is negative: %d", bytesSinceLast)
+	}
+	if expected := bytesSoFar - p.bytesSoFar; bytesSinceLast != expected {
+		return fmt.Errorf("progress increment mismatch: got=%d expected=%d", bytesSinceLast, expected)
+	}
+	p.bytesSoFar = bytesSoFar
+	p.emitted = true
+	return p.enc.Encode(OutboundMessage{
+		Event:      EventProgress,
+		OID:        p.oid,
+		BytesSoFar: bytesSoFar,
+		BytesSince: bytesSinceLast,
+	})
+}
+
+func (p *transferProgress) finish(a *Adapter, totalSize int64) error {
+	if !p.emitted {
+		return a.sendProgressSequence(p.enc, p.oid, totalSize)
+	}
+	if totalSize < p.bytesSoFar {
+		return fmt.Errorf("progress total %d exceeds transferred size %d", p.bytesSoFar, totalSize)
+	}
+	if totalSize > p.bytesSoFar {
+		return p.report(totalSize, totalSize-p.bytesSoFar)
 	}
 	return nil
 }
@@ -523,50 +620,94 @@ func calculateFileSHA256(path string) (string, int64, error) {
 }
 
 func copyFile(srcPath, dstPath string) error {
+	_, err := copyFileWithProgress(srcPath, dstPath, nil)
+	return err
+}
+
+func copyFileWithProgress(srcPath, dstPath string, progress ProgressFunc) (int64, error) {
 	src, err := os.Open(srcPath)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	defer func() { _ = src.Close() }()
 
 	tmpPath := fmt.Sprintf("%s.tmp-%d", dstPath, time.Now().UnixNano())
 	dst, err := os.OpenFile(tmpPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 	if err != nil {
-		return err
+		return 0, err
 	}
 
-	if _, err := io.Copy(dst, src); err != nil {
+	n, err := copyWithProgress(dst, src, progress)
+	if err != nil {
 		_ = dst.Close()
 		_ = os.Remove(tmpPath)
-		return err
+		return n, err
 	}
 	if err := dst.Sync(); err != nil {
 		_ = dst.Close()
 		_ = os.Remove(tmpPath)
-		return err
+		return n, err
 	}
 	if err := dst.Close(); err != nil {
 		_ = os.Remove(tmpPath)
-		return err
+		return n, err
 	}
 	if err := os.Rename(tmpPath, dstPath); err != nil {
 		_ = os.Remove(tmpPath)
-		return err
+		return n, err
 	}
-	return nil
+	return n, nil
 }
 
 func copyIntoOpenFile(srcPath string, dst *os.File) error {
+	_, err := copyIntoOpenFileWithProgress(srcPath, dst, nil)
+	return err
+}
+
+func copyIntoOpenFileWithProgress(srcPath string, dst *os.File, progress ProgressFunc) (int64, error) {
 	src, err := os.Open(srcPath)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	defer func() { _ = src.Close() }()
 
-	if _, err := io.Copy(dst, src); err != nil {
-		return err
+	n, err := copyWithProgress(dst, src, progress)
+	if err != nil {
+		return n, err
 	}
-	return dst.Sync()
+	return n, dst.Sync()
+}
+
+func copyWithProgress(dst io.Writer, src io.Reader, progress ProgressFunc) (int64, error) {
+	buf := make([]byte, progressChunkSize)
+	var total int64
+	for {
+		nr, er := src.Read(buf)
+		if nr > 0 {
+			nw, ew := dst.Write(buf[:nr])
+			if nw > 0 {
+				total += int64(nw)
+				if progress != nil {
+					if err := progress(total, int64(nw)); err != nil {
+						return total, err
+					}
+				}
+			}
+			if ew != nil {
+				return total, ew
+			}
+			if nw != nr {
+				return total, io.ErrShortWrite
+			}
+		}
+		if er != nil {
+			if er == io.EOF {
+				break
+			}
+			return total, er
+		}
+	}
+	return total, nil
 }
 
 // createTempFile creates a temporary file for downloads
@@ -632,14 +773,14 @@ PROTOCOL COMPLIANCE (submodules/git-lfs/docs/custom-transfers.md)
       - init (upload/download operation)
       - upload with SHA-256 integrity verification
       - download with temp file path return
-      - progress reporting (64KB chunks)
+      - progress reporting (64KB chunks; local backend streams during copy)
       - complete with per-object error handling
       - terminate with credential zeroing
       - standalone mode (action: null, no batch API)
       - concurrent instances (git-lfs spawns multiple adapter processes)
 
     Not implemented:
-      - Real-time streaming progress (progress is post-transfer)
+      - SDK real-time streaming progress (SDK progress is post-transfer)
       - Resume/retry on transient failure
       - Verify action (not required per spec)
 
@@ -650,21 +791,24 @@ BACKENDS
             Objects stored at: /LFS/<oid[0:2]>/<oid[2:4]>/<oid>
             Upload deduplication via existence check before transfer.
 
-CREDENTIAL PROVIDERS (sdk backend only)
-    pass-cli (default)
-            Credentials resolved by proton-drive-cli via Proton Pass CLI.
-            Setup: pass-cli login && proton-drive credential store --provider pass-cli
-    git-credential
-            Credentials resolved by proton-drive-cli via git credential fill.
-            Setup: proton-drive credential store -u <email>
+	AUTH AND LOCAL UNLOCK (sdk backend only)
+	    Account login is browser-fork-only and must be completed before Git LFS
+	    transfers. Transfer commands first run offline bridge auth-state and
+	    refuse every non-ready state.
+
+	    mailbox/data password
+	            Optional separate provider for two-password Proton accounts.
+	            Configure --data-credential-provider and store the mailbox
+	            password in a distinct secure credential entry. It is never
+	            passed as a command-line argument.
 
 SECURITY
     - SHA-256 verification on upload and download
     - OID validation: /^[a-f0-9]{64}$/i
     - Path traversal prevention (.. segments, null bytes rejected)
-    - Credentials passed via stdin JSON (not visible in ps)
-    - Credential buffers zeroed on terminate
-    - Subprocess environment filtered via allowlist
+	    - No account username/password is accepted by transfer commands
+	    - Local data-password selectors passed via stdin JSON (not visible in ps)
+	    - Subprocess environment filtered via allowlist
     - Subprocess concurrency limit: 10 max, 5-min timeout
 
 FLAGS
@@ -675,7 +819,9 @@ FLAGS
 ENVIRONMENT VARIABLES
     PROTON_LFS_BACKEND             Backend: local or sdk (default: local)
     PROTON_LFS_LOCAL_STORE_DIR     Local store directory
-    PROTON_CREDENTIAL_PROVIDER     Credential provider: pass-cli or git-credential
+	    PROTON_CREDENTIAL_PROVIDER     Legacy no-op for transfer commands
+	    PROTON_DATA_CREDENTIAL_PROVIDER Optional mailbox/data password provider
+    PROTON_DATA_CREDENTIAL_HOST    Host/key for data password entry
     PROTON_DRIVE_CLI_BIN           proton-drive-cli path
     NODE_BIN                       Node.js binary path
     LFS_STORAGE_BASE               Remote storage base folder (default: LFS)
@@ -693,10 +839,9 @@ EXAMPLES
     git config lfs.customtransfer.proton.args  "--backend sdk"
     git config lfs.standalonetransferagent     proton
 
-    # Proton Drive with git-credential
-    git config lfs.customtransfer.proton.path  ./bin/git-lfs-proton-adapter
-    git config lfs.customtransfer.proton.args  "--backend sdk --credential-provider git-credential"
-    git config lfs.standalonetransferagent     proton
+	    # Two-password Proton account with separate mailbox password entry
+	    git config lfs.customtransfer.proton.args \
+	      "--backend sdk --data-credential-provider git-credential"
 `)
 }
 
@@ -711,7 +856,9 @@ func main() {
 	allowMockTransfers := flag.Bool("allow-mock-transfers", envBoolOrDefault(EnvAllowMockTransfers, false), "Allow mock upload/download behavior (simulation only)")
 	localStoreDir := flag.String("local-store-dir", envTrim(EnvLocalStoreDir), "Local object store directory used for standalone transfers")
 	defaultCredProvider := envOrDefault(EnvCredentialProvider, DefaultCredentialProvider)
-	credentialProvider := flag.String("credential-provider", defaultCredProvider, "Credential provider: pass-cli (default) or git-credential")
+	_ = flag.String("credential-provider", defaultCredProvider, "Legacy compatibility option; ignored by transfer commands")
+	dataCredentialProvider := flag.String("data-credential-provider", envTrim(EnvDataCredentialProvider), "Optional mailbox/data password credential provider: pass-cli or git-credential")
+	dataCredentialHost := flag.String("data-credential-host", envOrDefault(EnvDataCredentialHost, DefaultDataCredentialHost), "Credential host/key for mailbox/data password provider")
 	debug := flag.Bool("debug", false, "Enable debug logging")
 	showVersion := flag.Bool("version", false, "Print version information")
 	flag.Usage = func() { printUsage(os.Stderr) }
@@ -730,10 +877,8 @@ func main() {
 	if adapter.backendKind == "" {
 		adapter.backendKind = BackendLocal
 	}
-	adapter.credentialProvider = strings.ToLower(strings.TrimSpace(*credentialProvider))
-	if adapter.credentialProvider == "" {
-		adapter.credentialProvider = DefaultCredentialProvider
-	}
+	adapter.dataCredentialProvider = strings.ToLower(strings.TrimSpace(*dataCredentialProvider))
+	adapter.dataCredentialHost = strings.TrimSpace(*dataCredentialHost)
 
 	switch adapter.backendKind {
 	case BackendLocal:
@@ -745,7 +890,10 @@ func main() {
 			AppVersion:  envTrim(EnvAppVersion),
 		}
 		bridge := NewBridgeClient(bridgeCfg)
-		adapter.backend = NewDriveCLIBackend(bridge, adapter.credentialProvider)
+		adapter.backend = NewDriveCLIBackend(bridge, DriveCLIBackendOptions{
+			DataCredentialProvider: adapter.dataCredentialProvider,
+			DataCredentialHost:     adapter.dataCredentialHost,
+		})
 	default:
 		fmt.Fprintf(os.Stderr, "invalid backend %q (supported: local, sdk)\n", adapter.backendKind)
 		os.Exit(2)

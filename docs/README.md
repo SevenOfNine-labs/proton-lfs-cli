@@ -4,11 +4,15 @@ Project-owned docs live here. Upstream/vendor docs remain under `submodules/` an
 
 ## Start Here
 
-1. `docs/project/goal.md`
-2. `docs/project/current-state.md`
-3. `docs/project/project-plan.md`
-4. `docs/architecture/sdk-capability-matrix.md`
-5. `docs/testing/spec-gap-analysis.md`
+1. `docs/project/current-state.md`
+2. `docs/architecture/feature-audit.md`
+3. `docs/architecture/sdk-capability-matrix.md`
+4. `docs/architecture/proton-auth-hardening-plan.md`
+5. `docs/architecture/proton-auth-news-audit-2026-06-22.md`
+6. `docs/architecture/proton-auth-news-audit-2026-06-21.md`
+7. `docs/operations/live-canary-runbook.md`
+8. `docs/operations/tray-platform-release-checklist.md`
+9. `docs/architecture/tray-ux-plan.md`
 
 ## Structure
 
@@ -16,7 +20,6 @@ Project-owned docs live here. Upstream/vendor docs remain under `submodules/` an
 - `docs/architecture/`: component boundaries and protocol contracts.
 - `docs/operations/`: runtime configuration, deployment, and release guidance.
 - `docs/testing/`: test strategy, coverage gaps, and requirement traceability.
-- `docs/reference/`: concise scope references to external specs.
 
 Machine-readable requirement mapping: `docs/testing/spec-requirements.yaml`.
 

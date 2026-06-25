@@ -27,6 +27,8 @@ type StatusReport struct {
 	Error       string    `json:"error,omitempty"`       // Human-readable error message
 	ErrorCode   string    `json:"errorCode,omitempty"`   // Machine-readable error code (e.g., "rate_limited", "auth_failed", "captcha_required")
 	ErrorDetail string    `json:"errorDetail,omitempty"` // Additional error context or recovery suggestions
+	Retryable   bool      `json:"retryable,omitempty"`   // Whether retry may succeed without user action
+	Temporary   bool      `json:"temporary,omitempty"`   // Whether the failure is expected to be transient
 	RetryCount  int       `json:"retryCount,omitempty"`  // Number of retry attempts (for transient errors)
 	Timestamp   time.Time `json:"timestamp"`             // Timestamp of this status update
 }

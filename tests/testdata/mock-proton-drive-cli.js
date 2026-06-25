@@ -62,15 +62,34 @@ function storagePath(oid) {
   return path.join(STORAGE_DIR, prefix, second, String(oid));
 }
 
-if (command === 'auth') {
-  if (request.username === 'bad-user') {
-    write({ ok: false, code: 401, error: 'invalid credentials' }, 1);
-  }
+if (command === 'auth-state') {
+  const state = process.env.MOCK_BRIDGE_AUTH_STATE || 'ready';
+  const hasSession = state !== 'needs_login';
+  const sessionValid = state === 'ready' || state === 'needs_data_password' || state === 'needs_key_password';
+  const keyPasswordPersisted = process.env.MOCK_BRIDGE_KEY_PASSWORD_PERSISTED === 'true' || state === 'needs_key_password';
+  const keyPasswordAvailable =
+    process.env.MOCK_BRIDGE_KEY_PASSWORD_AVAILABLE === 'true' ||
+    (keyPasswordPersisted && state !== 'needs_key_password');
   write({
     ok: true,
     payload: {
-      authenticated: true,
-      username: request.username
+      state,
+      hasSession,
+      sessionValid,
+      sessionExpired: state === 'session_expired',
+      sessionUidPresent: hasSession,
+      passwordMode: Number(process.env.MOCK_BRIDGE_PASSWORD_MODE || (state === 'needs_data_password' ? 2 : 1)),
+      authMode: process.env.MOCK_BRIDGE_AUTH_MODE || (state === 'needs_key_password' ? 'browser-fork' : undefined),
+      keyPasswordPersisted,
+      keyPasswordAvailable,
+      keyPasswordProvider: process.env.MOCK_BRIDGE_KEY_PASSWORD_PROVIDER || (keyPasswordPersisted ? 'git-credential' : undefined),
+      keyPasswordHost: process.env.MOCK_BRIDGE_KEY_PASSWORD_HOST || (keyPasswordPersisted ? 'proton-drive-key.proton-lfs-cli.local' : undefined),
+      hasExplicitDataPassword: Boolean(request.dataPassword),
+      dataCredentialProvider: request.dataCredentialProvider,
+      dataCredentialHost: request.dataCredentialHost,
+      willAttemptNetwork: false,
+      errors: [],
+      actions: []
     }
   });
 }

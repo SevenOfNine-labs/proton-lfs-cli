@@ -1,6 +1,6 @@
 //go:build ignore
 
-// gen-icons generates 64x64 PNG tray icons for Proton Git LFS.
+// gen-icons generates 64x64 PNG tray icons for Proton LFS.
 // Each icon shows a pair of vertical arrows (upload ↑ download ↓) forming
 // a cycle motif, rendered in a state-specific color on a transparent background.
 //

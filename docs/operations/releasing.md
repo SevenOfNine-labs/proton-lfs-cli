@@ -11,11 +11,16 @@ This project has two independently versioned artifacts:
 
 The build workflow cross-compiles for five targets (linux/darwin amd64+arm64, windows amd64), uploads them as artifacts, and — on `v*` tags — creates a GitHub Release with all binaries attached.
 
+Before tagging a release that changes tray/helper behavior, run
+`docs/operations/tray-platform-release-checklist.md`.
+
 ### Steps
 
 ```bash
-# 1. Ensure tests pass
+# 1. Ensure submodule pins and tests pass
+make check-submodules
 make test && make test-integration
+make live-canary-preflight
 
 # 2. Tag the release
 git tag v0.2.0
@@ -23,6 +28,12 @@ git push origin v0.2.0
 ```
 
 The `build.yml` workflow runs automatically. When the tag matches `v*`, the `release` job creates a GitHub Release with the binaries.
+
+`make check-submodules` intentionally verifies only the root-owned
+submodules and the `proton-drive-cli` SDK gitlink. Do not use
+`git submodule status --recursive` as release evidence while the upstream
+Proton SDK commit contains nested gitlinks without a matching `.gitmodules`
+entry, such as `kt/sdk/src/main/jniLibs`.
 
 ### Verifying
 
@@ -35,7 +46,7 @@ gh release view v0.2.0
 Users install via the install script:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/SevenOfNine-ai/proton-lfs-cli/main/scripts/install-adapter.sh | bash
+curl -fsSL https://raw.githubusercontent.com/SevenOfNine-labs/proton-lfs-cli/main/scripts/install-adapter.sh | bash
 ```
 
 Or pin a version:
@@ -57,7 +68,7 @@ Trusted Publishing must be configured on npmjs.com:
 
 1. Go to npmjs.com → `@sevenofnine-ai/proton-drive-cli` → **Settings** → **Publishing access**
 2. Add trusted publisher:
-   - **Repository owner**: `SevenOfNine-ai`
+   - **Repository owner**: `SevenOfNine-labs`
    - **Repository name**: `proton-lfs-cli`
    - **Workflow filename**: `npm-publish.yml`
    - **Environment name**: *(blank)*
