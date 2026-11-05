@@ -1,6 +1,6 @@
 # Current State
 
-Date: 2026-06-25
+Date: 2026-11-05
 
 ## Implemented
 
@@ -49,6 +49,14 @@ Date: 2026-06-25
   results. Recoverable refresh failures back off; non-recoverable refresh-token
   rejection is shown as reconnect required and is not retried for the same
   saved session.
+- The vendored Proton Drive SDK was updated to `js/v0.23.0` on 2026-11-05
+  (`docs/architecture/proton-sdk-update-2026-11-05.md`). Its dist is now ESM
+  and upstream ships no npm lockfile, so `make build-sdk` builds it with
+  `npm install --no-package-lock`. proton-drive-cli now reports the pinned SDK
+  release in `x-pm-drive-sdk-version`, validates `x-pm-appversion` against
+  Proton's published third-party grammar, dates OpenPGP operations with the
+  Proton server clock, verifies address-key token signatures with the user
+  keys, and logs Proton's SDK update-required notices.
 
 ## Architecture
 

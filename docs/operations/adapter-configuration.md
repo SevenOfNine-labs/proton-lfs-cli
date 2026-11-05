@@ -105,11 +105,19 @@ The Go adapter spawns `proton-drive-cli bridge <command>` directly as a subproce
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `PROTON_APP_VERSION` | empty | Optional Proton client app version override forwarded by the Go adapter |
-| `PROTON_DRIVE_CLI_APP_VERSION` | `external-drive-protonlfscli@0.1.2` | proton-drive-cli default Proton app-version header |
+| `PROTON_APP_VERSION` | empty | Optional Proton `x-pm-appversion` override forwarded by the Go adapter as the bridge `appVersion` field; must follow the third-party grammar below or proton-drive-cli rejects the request before any network call |
+| `PROTON_DRIVE_CLI_APP_VERSION` | `external-drive-protonlfscli@<cli version>` | proton-drive-cli default Proton app-version header (version part follows its package.json) |
 | `PROTON_DRIVE_CLI_BIN` | `submodules/proton-drive-cli/dist/index.js` | Path to proton-drive-cli entry point |
 | `PROTON_DRIVE_CLI_TIMEOUT_MS` | `300000` | Subprocess command timeout |
 | `PROTON_DRIVE_CLI_SESSION_DIR` | `~/.proton-drive-cli` | Session file storage directory |
+
+Proton's SDK README requires third-party clients to identify as
+`external-drive-{name}@{major.minor.patch}[-stable|beta|alpha][+build]`, where
+`{name}` uses lowercase letters and underscores. The official `cli-drive`
+identity is reserved for Proton's own CLI and is rejected by proton-drive-cli.
+The Go default `DefaultDriveCLIAppVersion` must equal proton-drive-cli's
+default; `internal/config` tests check it against the submodule's
+`package.json` version.
 
 Two-factor challenges are handled by interactive `proton-drive login`. Transfer commands surface `TWO_FACTOR_REQUIRED` and stop instead of attempting repeated logins.
 

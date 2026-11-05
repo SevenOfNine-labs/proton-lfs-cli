@@ -15,7 +15,7 @@ End-to-end encrypted Git LFS backend for Proton Drive.
 ## Prerequisites
 
 - Go 1.25+
-- Node.js 25+ (for SEA binary build)
+- Node.js 22+ for proton-drive-cli and the vendored Proton SDK; Node.js 25+ for the SEA binary build
 - Yarn 4+ (via Corepack) or npm
 - git-lfs
 - pass-cli (for credential management, or use git-credential)
@@ -39,7 +39,7 @@ See **[USAGE.md](USAGE.md)** for the complete user guide — installation, repos
 ```bash
 git submodule update --init --recursive
 make setup
-make build-all    # Builds Go adapter, tray app, Git LFS, and proton-drive-cli
+make build-all    # Builds Go adapter, tray app, Git LFS, vendored Proton SDK, and proton-drive-cli
 make test
 make test-integration
 make install      # Install .app bundle (macOS) or binaries (Linux)
@@ -63,9 +63,13 @@ make setup
 make setup JS_PM=npm
 ```
 
-Build proton-drive-cli bridge:
+Build proton-drive-cli bridge (the vendored Proton SDK in
+`submodules/proton-drive-cli/submodules/sdk/client/js` is built once by
+`make build-sdk`; it needs Node.js 22+ and npm, because upstream no longer
+ships an npm lockfile):
 
 ```bash
+make build-sdk
 make build-drive-cli
 ```
 

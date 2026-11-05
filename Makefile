@@ -14,11 +14,12 @@ LDFLAGS_VERSION := -X main.Version=$(VERSION)
 ADAPTER_LDFLAGS := -X main.GitCommit=$(GIT_COMMIT) -X main.BuildTime=$(BUILD_TIME)
 GIT_LFS_DIR := submodules/git-lfs
 DRIVE_CLI_DIR := submodules/proton-drive-cli
+SDK_JS_DIR := $(DRIVE_CLI_DIR)/submodules/sdk/client/js
 GO_CACHE_DIR := .cache/go-build
 LIVE_CANARY_ACK_VALUE := I_UNDERSTAND_THIS_TOUCHES_A_REAL_PROTON_ACCOUNT
 
 .PHONY: help setup setup-env install-deps \
-	build build-adapter build-tray build-lfs build-drive-cli build-sea build-all build-bundle \
+	build build-adapter build-tray build-lfs build-sdk build-drive-cli build-sea build-all build-bundle \
 	install uninstall \
 	test test-adapter test-tray test-lfs test-integration test-integration-timeout test-integration-stress test-integration-sdk test-e2e-mock test-e2e-real test-all \
 	live-canary-preflight live-drive-scope-canary browser-fork-canary pass-env check-submodules check-live-canary-ack check-live-canary-doctor-args check-browser-fork-canary-args check-sdk-prereqs check-sdk-real-prereqs \
@@ -71,7 +72,7 @@ install-deps: ## Install Go dependencies and JS dependencies (default: yarn via 
 
 build: build-adapter ## Build first-party binaries
 
-build-all: check-submodules build-adapter build-tray build-lfs build-drive-cli ## Build adapter, tray app, Git LFS submodule, and proton-drive-cli
+build-all: check-submodules build-adapter build-tray build-lfs build-drive-cli ## Build adapter, tray app, Git LFS submodule, vendored SDK, and proton-drive-cli
 
 build-adapter: ## Build the custom transfer adapter
 	@mkdir -p bin
@@ -175,7 +176,23 @@ build-lfs: ## Build Git LFS submodule
 	fi
 	@$(MAKE) -C $(GIT_LFS_DIR)
 
-build-drive-cli: ## Build proton-drive-cli TypeScript bridge
+build-sdk: ## Build the vendored Proton Drive SDK (client/js) consumed by proton-drive-cli
+	@if [ ! -f $(SDK_JS_DIR)/package.json ]; then \
+		echo "$(SDK_JS_DIR) not initialized."; \
+		echo "Run: git -C $(DRIVE_CLI_DIR) submodule update --init submodules/sdk"; \
+		exit 1; \
+	fi
+	@# Upstream dropped its npm lockfile when it moved to Bun (js/v0.19+), so
+	@# 'npm ci' no longer works there; install without writing a lockfile to keep
+	@# the SDK checkout clean for check-submodules.
+	cd $(SDK_JS_DIR) && npm install --no-package-lock --no-audit --no-fund && npm run build
+
+# File target so build-drive-cli builds the SDK exactly once when its dist is
+# missing (safe under make -j); run `make build-sdk` to rebuild after a bump.
+$(SDK_JS_DIR)/dist/index.js:
+	@$(MAKE) build-sdk
+
+build-drive-cli: $(SDK_JS_DIR)/dist/index.js ## Build proton-drive-cli TypeScript bridge (builds the vendored SDK first if missing)
 	@if [ ! -d $(DRIVE_CLI_DIR) ]; then \
 		echo "$(DRIVE_CLI_DIR) not found."; \
 		echo "Run the Local Bring-Up submodule commands in docs/operations/deployment.md,"; \
