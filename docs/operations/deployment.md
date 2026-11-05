@@ -27,9 +27,11 @@ make test-integration
 the current upstream SDK commit contains nested gitlinks that are not declared
 in its `.gitmodules` file.
 
-Build proton-drive-cli:
+Build proton-drive-cli (the vendored Proton SDK is built once by
+`make build-sdk`; `make build-all` runs both):
 
 ```bash
+make build-sdk
 make build-drive-cli
 ```
 

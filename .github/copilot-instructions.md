@@ -27,7 +27,7 @@ From project root:
 - Commands: Organize discrete features in `commands/command_*.go` modules
 - Custom adapter: Implemented as standalone subprocess in `cmd/adapter/main.go`
 - SDK operations: All Proton Drive interactions must route through SDK—no direct API calls
-- HTTP headers: SDKs require `x-pm-appversion: external-drive-protonlfs@{version}` header for all requests
+- HTTP headers: Proton requires an honest `x-pm-appversion` header on every request; this project identifies as `external-drive-protonlfscli@{major.minor.patch}` (grammar: `external-drive-{name}@{semver}[-{channel}][+{suffix}]`, never `cli-drive`)
 - Documentation: See [Documentation Maintenance](#documentation-maintenance) section below
 
 ## Custom Transfer Adapter Integration
@@ -64,7 +64,7 @@ From project root:
 - SDK is pre-production: validate authentication flows before production deployment
 - Credential helpers: Integrate with Git's native credential systems (see [SECURITY.md](../submodules/git-lfs/SECURITY.md))
 - Never hardcode auth tokens; always use secure credential providers (git-credential, environment, SSH agent)
-- App version header: `x-pm-appversion: external-drive-protonlfs@v1.0.0` required by Proton SDK
+- App version header: `x-pm-appversion: external-drive-protonlfscli@<proton-drive-cli package.json version>` (third-party identity required by Proton; see SDK README "Identify your application")
 - Event-based sync: Subscribe to Proton Drive events; do NOT poll file listings
 - Session tokens: Short-lived (typically hours/days); implement refresh before expiry
 

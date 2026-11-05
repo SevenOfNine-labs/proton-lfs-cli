@@ -115,7 +115,7 @@ jobs:
         shell: bash
         run: |
           cd submodules/proton-drive-cli/submodules/sdk/client/js
-          npm ci
+          npm install --no-package-lock --no-audit --no-fund
           npm run build
 
       - name: Build proton-drive-cli runtime

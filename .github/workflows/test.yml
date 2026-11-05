@@ -28,6 +28,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # The bridge contract tests in cmd/adapter read the JSON schemas shipped
+      # in submodules/proton-drive-cli/schemas/bridge/v1.
+      - name: Init proton-drive-cli submodule (schemas only, non-recursive)
+        run: git submodule update --init --depth=1 submodules/proton-drive-cli
+
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
@@ -335,7 +340,7 @@ jobs:
 
       - name: Build vendored SDK
         working-directory: submodules/proton-drive-cli/submodules/sdk/client/js
-        run: npm ci && npm run build
+        run: npm install --no-package-lock --no-audit --no-fund && npm run build
 
       - name: Install dependencies
         working-directory: submodules/proton-drive-cli

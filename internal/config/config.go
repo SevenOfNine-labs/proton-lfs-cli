@@ -32,6 +32,10 @@ const (
 	DefaultStorageBase        = "LFS"
 	DefaultCredentialProvider = CredentialProviderPassCLI
 	DefaultDataCredentialHost = "proton-data.proton-lfs-cli.local"
+	// DefaultDriveCLIAppVersion mirrors proton-drive-cli's built-in
+	// x-pm-appversion identity (external-drive-protonlfscli@<package.json
+	// version>). Bump it together with the submodule's package version;
+	// TestDefaultDriveCLIAppVersionMatchesSubmodule enforces the sync.
 	DefaultDriveCLIAppVersion = "external-drive-protonlfscli@0.1.2"
 )
 
