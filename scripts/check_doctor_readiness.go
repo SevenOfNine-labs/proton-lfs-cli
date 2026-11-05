@@ -1,3 +1,6 @@
+// Package main holds the repository helper programs: the doctor-readiness
+// checker the Makefile runs before live canaries, and the guarded live
+// canary tests.
 package main
 
 import (
