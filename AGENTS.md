@@ -21,7 +21,7 @@
 - `make setup`: Prepare `.env` and install Go + JS dependencies.
 - `make build`: Build adapter binary to `bin/git-lfs-proton-adapter`.
 - `make test`: Run the Go unit tests for `./cmd/...` and `./internal/...`.
-- `yarn workspace @sevenofnine-ai/proton-drive-cli test`: Run the proton-drive-cli Jest tests.
+- `cd submodules/proton-drive-cli && yarn test`: Run the proton-drive-cli Jest tests.
 - `make test-integration`: Run Go integration tests (`-tags integration`).
 - `make check-sdk-prereqs && make test-integration-sdk`: Validate/pass-cli-driven SDK integration path.
 - `make build-drive-cli`: Build the proton-drive-cli TypeScript bridge.

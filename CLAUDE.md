@@ -156,27 +156,20 @@ The `proton-drive-cli` submodule (`submodules/proton-drive-cli/`) provides:
 
 - `.env` / `.env.example`: Environment configuration (credentials, backend modes)
 - `Makefile`: Build orchestration, test runners, prerequisite checks
-- `package.json`: Root Yarn 4 workspace with `proton-drive-cli`
+- `submodules/proton-drive-cli/package.json` and `yarn.lock`: the JavaScript dependencies (the root has no JS project)
 - `go.mod`: Go 1.25 module (deps: `fyne.io/systray`)
 - `docs/reference/adapter.md`: every adapter flag and environment variable
 
 ## JavaScript Package Management
 
-Uses **Yarn 4** (Berry) via Corepack:
+proton-drive-cli owns its JavaScript dependencies: `package.json` and
+`yarn.lock` live in `submodules/proton-drive-cli/`, which Yarn treats as its
+own project. Yarn 4 comes from Corepack through `packageManager`; npm cannot
+install the `portal:` dependency on the vendored SDK.
 ```bash
 corepack enable
-corepack prepare yarn@4.1.1 --activate
-yarn install
-
-# Fallback to npm if Yarn unavailable
-make setup JS_PM=npm
-```
-
-Workspace structure:
-```json
-{
-  "workspaces": ["submodules/proton-drive-cli"]
-}
+make install-deps            # go mod download + yarn install in the submodule
+cd submodules/proton-drive-cli && yarn build && yarn test
 ```
 
 ## Testing Strategy

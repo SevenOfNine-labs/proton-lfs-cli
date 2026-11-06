@@ -101,6 +101,7 @@ jobs:
       # ── proton-drive-cli SEA ─────────────────────────────────
       - name: Install JS dependencies
         shell: bash
+        working-directory: submodules/proton-drive-cli
         run: yarn install --immutable
 
       - name: Build vendored SDK

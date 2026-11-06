@@ -22,13 +22,3 @@ updates:
       prefix: "build"
       include: "scope"
 
-  - package-ecosystem: "npm"
-    directory: "/"
-    schedule:
-      interval: "weekly"
-      day: "monday"
-    open-pull-requests-limit: 5
-    # Conventional Commits (commits.yml): "build(deps): bump …"
-    commit-message:
-      prefix: "build"
-      include: "scope"

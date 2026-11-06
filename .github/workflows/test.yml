@@ -343,16 +343,19 @@ jobs:
         working-directory: submodules/proton-drive-cli/submodules/sdk/client/js
         run: npm install --no-package-lock --no-audit --no-fund && npm run build
 
-      # Installs through the root workspace so the root yarn.lock (the one the
-      # release bundle is built from) is what gets tested.
+      # proton-drive-cli owns its dependencies (package.json and yarn.lock in
+      # the submodule); the release bundle installs from the same lockfile.
       - name: Install dependencies
+        working-directory: submodules/proton-drive-cli
         run: yarn install --immutable
 
       - name: Build
-        run: yarn workspace @sevenofnine-ai/proton-drive-cli build
+        working-directory: submodules/proton-drive-cli
+        run: yarn build
 
       - name: Run proton-drive-cli tests
-        run: yarn workspace @sevenofnine-ai/proton-drive-cli test
+        working-directory: submodules/proton-drive-cli
+        run: yarn test
 
   e2e-mocked:
     name: Mocked E2E pipeline

@@ -60,22 +60,12 @@ make test-integration
 make install      # .app bundle (macOS) or binaries in ~/.local/bin (Linux)
 ```
 
-Root JS dependency install (Yarn 4 via Corepack):
+JavaScript dependencies belong to proton-drive-cli (`package.json` and
+`yarn.lock` in `submodules/proton-drive-cli/`); Yarn 4 comes from Corepack:
 
 ```bash
 corepack enable
-corepack prepare yarn@4.1.1 --activate
-yarn install
-# fallback
-npm install
-```
-
-Make-based install:
-
-```bash
-make setup
-# fallback if you prefer npm
-make setup JS_PM=npm
+make setup        # creates .env, runs go mod download and yarn install in the submodule
 ```
 
 Build proton-drive-cli (the vendored Proton SDK in
@@ -113,12 +103,6 @@ If your Node binary is managed in shell startup (for example `nvm` in
 
 ```bash
 make test-integration-sdk NODE="$(command -v node)"
-```
-
-`make test-integration-sdk` uses `yarn` by default. Override only if needed:
-
-```bash
-make test-integration-sdk JS_PM=npm
 ```
 
 If you use a non-default `pass-cli` binary, export it before running:

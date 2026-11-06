@@ -2,7 +2,10 @@ SHELL := /bin/bash
 
 GO ?= go
 NODE ?= node
-JS_PM ?= yarn
+# proton-drive-cli owns its JavaScript dependencies (package.json and
+# yarn.lock in the submodule); Yarn 4 comes from Corepack through its
+# packageManager field. npm cannot install its `portal:` dependency.
+YARN ?= yarn
 COREPACK_HOME_DIR := $(CURDIR)/.cache/corepack
 # Pinned to the version bundled by DavidAnson/markdownlint-cli2-action in
 # .github/workflows/docs.yml so local and CI results match.
@@ -54,31 +57,20 @@ setup-env: ## Create .env from .env.example if needed
 		echo ".env already exists"; \
 	fi
 
-install-deps: ## Install Go dependencies and JS dependencies (default: yarn via JS_PM)
+install-deps: ## Install Go modules and proton-drive-cli's JS dependencies (Yarn 4 via Corepack)
 	$(GO) mod download
-	@if [ ! -f package.json ]; then \
-		echo "package.json not found; skipped JS dependency install"; \
-	elif [ "$(JS_PM)" = "yarn" ] && ! command -v yarn >/dev/null 2>&1; then \
+	@if [ ! -f $(DRIVE_CLI_DIR)/package.json ]; then \
+		echo "$(DRIVE_CLI_DIR) is not initialised; skipped JS dependency install (see make check-submodules)"; \
+	elif ! command -v $(YARN) >/dev/null 2>&1; then \
 		echo "yarn not found on PATH. Run: corepack enable"; \
-		echo "Fallback: make setup JS_PM=npm"; \
 		exit 1; \
-	elif command -v $(JS_PM) >/dev/null 2>&1; then \
-		if [ "$(JS_PM)" = "yarn" ]; then \
-			YARN_VERSION="$$(COREPACK_HOME=$(COREPACK_HOME_DIR) yarn --version)"; \
-			YARN_MAJOR="$${YARN_VERSION%%.*}"; \
-			if [ "$$YARN_MAJOR" -lt 4 ]; then \
-				echo "yarn $$YARN_VERSION detected; Yarn 4+ required for this repository."; \
-				echo "Run: corepack enable && corepack prepare yarn@4.1.1 --activate"; \
-				echo "Fallback: make setup JS_PM=npm"; \
-				exit 1; \
-			fi; \
-			COREPACK_HOME=$(COREPACK_HOME_DIR) $(JS_PM) install; \
-		else \
-			$(JS_PM) install; \
-		fi; \
 	else \
-		echo "$(JS_PM) not found; skipped JS dependency install"; \
-		echo "Install npm/yarn or run with JS_PM=<available-manager>"; \
+		YARN_VERSION="$$(cd $(DRIVE_CLI_DIR) && COREPACK_HOME=$(COREPACK_HOME_DIR) $(YARN) --version)"; \
+		if [ "$${YARN_VERSION%%.*}" -lt 4 ]; then \
+			echo "yarn $$YARN_VERSION detected; Yarn 4+ is required. Run: corepack enable"; \
+			exit 1; \
+		fi; \
+		cd $(DRIVE_CLI_DIR) && COREPACK_HOME=$(COREPACK_HOME_DIR) $(YARN) install; \
 	fi
 
 build: build-adapter ## Build first-party binaries
@@ -210,11 +202,7 @@ build-drive-cli: $(SDK_JS_DIR)/dist/index.js ## Build proton-drive-cli TypeScrip
 		echo "then run: make check-submodules"; \
 		exit 1; \
 	fi
-	@if [ "$(JS_PM)" = "yarn" ]; then \
-		COREPACK_HOME=$(COREPACK_HOME_DIR) $(JS_PM) workspace @sevenofnine-ai/proton-drive-cli build; \
-	else \
-		$(JS_PM) --workspace $(DRIVE_CLI_DIR) run build; \
-	fi
+	cd $(DRIVE_CLI_DIR) && COREPACK_HOME=$(COREPACK_HOME_DIR) $(YARN) build
 
 test: ## Run unit tests for cmd/... and internal/... (race detector, coverage)
 	@mkdir -p $(GO_CACHE_DIR)
@@ -276,13 +264,8 @@ live-canary-preflight: check-submodules build-adapter build-drive-cli ## Offline
 	@echo "Running offline live-canary preflight (no Proton login)..."
 	@mkdir -p $(GO_CACHE_DIR)
 	GOCACHE=$(CURDIR)/$(GO_CACHE_DIR) $(GO) test ./...
-	@if [ "$(JS_PM)" = "yarn" ]; then \
-		cd $(DRIVE_CLI_DIR) && COREPACK_HOME=$(COREPACK_HOME_DIR) $(JS_PM) lint && \
-			COREPACK_HOME=$(COREPACK_HOME_DIR) $(JS_PM) jest src/auth/flow-safety.test.ts src/cli/doctor.test.ts --runInBand; \
-	else \
-		cd $(DRIVE_CLI_DIR) && $(JS_PM) run lint && \
-			npx jest src/auth/flow-safety.test.ts src/cli/doctor.test.ts --runInBand; \
-	fi
+	cd $(DRIVE_CLI_DIR) && COREPACK_HOME=$(COREPACK_HOME_DIR) $(YARN) lint && \
+		COREPACK_HOME=$(COREPACK_HOME_DIR) $(YARN) jest src/auth/flow-safety.test.ts src/cli/doctor.test.ts --runInBand
 	@if [ -n "$${LIVE_CANARY_DOCTOR_ARGS:-}" ]; then \
 		echo "Running optional offline doctor with LIVE_CANARY_DOCTOR_ARGS..."; \
 		if ! DOCTOR_OUTPUT="$$( $(NODE) "$(CURDIR)/$(DRIVE_CLI_DIR)/dist/index.js" doctor --json $$LIVE_CANARY_DOCTOR_ARGS )"; then \
@@ -410,14 +393,10 @@ status: ## Print project status
 		else \
 			echo "Node: not found"; \
 		fi
-	@if command -v $(JS_PM) >/dev/null 2>&1; then \
-		if [ "$(JS_PM)" = "yarn" ]; then \
-			echo "JS PM ($(JS_PM)): $$(COREPACK_HOME=$(COREPACK_HOME_DIR) $(JS_PM) --version 2>/dev/null || echo unavailable)"; \
-		else \
-			echo "JS PM ($(JS_PM)): $$($(JS_PM) --version)"; \
-		fi; \
+	@if command -v $(YARN) >/dev/null 2>&1; then \
+		echo "Yarn ($(DRIVE_CLI_DIR)): $$(cd $(DRIVE_CLI_DIR) 2>/dev/null && COREPACK_HOME=$(COREPACK_HOME_DIR) $(YARN) --version 2>/dev/null || echo unavailable)"; \
 	else \
-		echo "JS PM ($(JS_PM)): not found"; \
+		echo "Yarn: not found (run: corepack enable)"; \
 	fi
 	@echo "Adapter binary: $$([ -f $(ADAPTER_BIN) ] && echo present || echo missing)"
 

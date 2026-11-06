@@ -9,7 +9,7 @@ Integration tests validate Git LFS client behavior against the adapter runtime a
 | Command | Scope |
 | --- | --- |
 | `make test` | Go unit tests (`./cmd/...`, `./internal/...`) |
-| `yarn workspace @sevenofnine-ai/proton-drive-cli test` | proton-drive-cli Jest tests (CI runs them on Node.js 22 and 26) |
+| `cd submodules/proton-drive-cli && yarn test` | proton-drive-cli Jest tests (CI runs them on Node.js 22 and 26) |
 | `make test-integration` | Git LFS + adapter integration suite |
 | `make test-integration-adapter-exit` | Adapter exits mid-transfer without completing |
 | `make test-integration-stress` | High-volume concurrent stress/soak |
