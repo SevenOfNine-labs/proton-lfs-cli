@@ -14,7 +14,7 @@ ignore (
 )
 
 require (
-	fyne.io/systray v1.12.0
+	fyne.io/systray v1.12.2
 	github.com/gofrs/flock v0.13.1
 )
 
