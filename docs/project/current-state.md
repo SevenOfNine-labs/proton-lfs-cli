@@ -80,9 +80,6 @@ Go Adapter -> proton-drive-cli subprocess (stdin/stdout JSON)
 Open items carried over from the SDK update audit of 2026-11-05
 (`docs/history/proton-sdk-update-2026-11-05.md`):
 
-- The pkg.go.dev page for `github.com/SevenOfNine-labs/proton-lfs-cli` appears
-  once the Go module proxy has served a version under that path; then remove
-  the matching exclusion from `.lychee.toml`.
 - Proton's cryptographic model migration (announced for end of 2026 / early
   2027): keep the SDK pin current and act on the
   `Proton Drive requires SDK ... or newer` notices that proton-drive-cli now
