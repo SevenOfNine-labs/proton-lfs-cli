@@ -1,18 +1,20 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"fyne.io/systray"
 
-	"proton-lfs-cli/internal/config"
+	"github.com/SevenOfNine-labs/proton-lfs-cli/internal/config"
 )
 
 const pollInterval = 5 * time.Second
@@ -84,6 +86,16 @@ type refreshDecision struct {
 	NextAttempt time.Time
 }
 
+// traySnapshot is everything one poll tick needs, read once: the adapter's
+// status file, the global git LFS registration and the derived auth
+// readiness.
+type traySnapshot struct {
+	report     config.StatusReport
+	hasReport  bool
+	lfsEnabled bool
+	readiness  authReadiness
+}
+
 func timeNow() time.Time {
 	return refreshNow()
 }
@@ -101,17 +113,12 @@ func watchLoop() {
 	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
 
-	// Initial read
-	applyStatus()
-	applyLoginStatus()
-	applyLFSStatus()
+	refreshTrayState()
 
 	for {
 		select {
 		case <-ticker.C:
-			applyStatus()
-			applyLoginStatus()
-			applyLFSStatus()
+			refreshTrayState()
 			maybeRefreshSession()
 		case <-stopCh:
 			return
@@ -128,15 +135,77 @@ func sessionFilePath() string {
 	return filepath.Join(home, ".proton-drive-cli", "session.json")
 }
 
-// applyLoginStatus checks local auth readiness and updates user-facing labels.
-func applyLoginStatus() {
-	applyAuthReadiness(inspectAuthReadiness(timeNow()))
+// takeTraySnapshot reads the status file and the git registration once and
+// derives the auth readiness from the same git values.
+func takeTraySnapshot(now time.Time) traySnapshot {
+	report, err := config.ReadStatus()
+	lfs := readGitLFSConfig()
+	return traySnapshot{
+		report:     report,
+		hasReport:  err == nil,
+		lfsEnabled: lfs.StandaloneAgent == gitStandaloneAgent,
+		readiness:  inspectAuthReadinessWith(now, lfs),
+	}
 }
 
-// applyLFSStatus checks whether the Proton LFS adapter is registered in
-// git global config and updates the Register menu item checkmark.
-func applyLFSStatus() {
-	applyRegisterStatus(isLFSEnabled())
+// refreshTrayState recomputes the tray from one snapshot and applies it:
+// menu labels, the Register checkmark, and exactly one icon and tooltip.
+func refreshTrayState() {
+	applyTraySnapshot(takeTraySnapshot(timeNow()))
+}
+
+func applyTraySnapshot(s traySnapshot) {
+	applyAuthReadinessLabels(s.readiness)
+	applyRegisterStatus(s.lfsEnabled)
+	icon, tooltip := resolveTrayIcon(s)
+	systray.SetIcon(icon)
+	systray.SetTemplateIcon(icon, icon)
+	systray.SetTooltip(tooltip)
+}
+
+// resolveTrayIcon picks the icon and tooltip for one snapshot. Auth
+// readiness wins while sign-in is missing or blocked and while no transfer
+// is active or failed; otherwise the adapter's last transfer state shows.
+func resolveTrayIcon(s traySnapshot) ([]byte, string) {
+	if authReadinessOverridesTransferStatus(s) {
+		switch {
+		case s.readiness.ready:
+			return iconOK, s.readiness.tooltip
+		case s.readiness.blocked:
+			return iconError, s.readiness.tooltip
+		default:
+			return iconIdle, s.readiness.tooltip
+		}
+	}
+	return transferStateIcon(s.report), statusTooltip(s.report)
+}
+
+func authReadinessOverridesTransferStatus(s traySnapshot) bool {
+	if s.readiness.blocked || !s.readiness.signedIn || !s.hasReport {
+		return true
+	}
+	switch s.report.State {
+	case config.StateIdle, config.StateOK:
+		return true
+	default:
+		return false
+	}
+}
+
+// transferStateIcon maps the adapter's status state to the four embedded
+// icons. rate_limited, auth_required and captcha share the error icon: all
+// three stop transfers until the user acts, and the tooltip names which.
+func transferStateIcon(report config.StatusReport) []byte {
+	switch report.State {
+	case config.StateIdle, config.StateOK:
+		return iconOK
+	case config.StateError, config.StateRateLimited, config.StateAuthRequired, config.StateCaptcha:
+		return iconError
+	case config.StateTransferring:
+		return iconSyncing
+	default:
+		return iconIdle
+	}
 }
 
 // maybeRefreshSession proactively refreshes the Proton session token near
@@ -152,34 +221,52 @@ func maybeRefreshSession() {
 		setRefreshNextAttempt(decision.NextAttempt)
 		return
 	}
-	driveCLI := discoverDriveCLIBinary()
+	driveCLI := findDriveCLI()
 	if driveCLI == "" {
 		recordRefreshFailure(now, meta.SessionID, "proton-drive-cli not found", true)
-		applyLoginStatus()
+		refreshTrayState()
 		return
 	}
 	if !markRefreshStarted(now) {
 		return
 	}
-	applyLoginStatus()
+	refreshTrayState()
 	go func() {
-		cmd := exec.Command(driveCLI, "session", "refresh", "--json")
-		out, err := cmd.CombinedOutput()
-		logSubprocessOutput("refresh", out)
-		finishedAt := timeNow()
-		if result, ok := parseRefreshCommandResult(out); ok && result.OK {
-			recordRefreshSuccess(finishedAt)
-			trayLog.Print("refresh: session token refreshed")
-		} else if err != nil || ok {
-			message, recoverable := refreshFailureFromCommand(result, ok, err)
-			recordRefreshFailure(finishedAt, meta.SessionID, message, recoverable)
-			trayLog.Printf("refresh: failed: %s", message)
-		} else {
-			recordRefreshSuccess(finishedAt)
-			trayLog.Print("refresh: session token refreshed")
-		}
-		applyLoginStatus()
+		performSessionRefresh(driveCLI, meta.SessionID)
+		refreshTrayState()
 	}()
+}
+
+// performSessionRefresh runs `session refresh --json` bounded by
+// driveCLITimeout and records the outcome. A timeout is a recoverable
+// failure: the state leaves "in progress" and the next attempt is scheduled
+// after refreshRetryInterval.
+func performSessionRefresh(driveCLI, sessionID string) {
+	ctx, cancel := context.WithTimeout(context.Background(), driveCLITimeout)
+	defer cancel()
+	cmd := driveCLICommand(ctx, driveCLI, "session", "refresh", "--json")
+	out, err := cmd.CombinedOutput()
+	logSubprocessOutput("refresh", out)
+	finishedAt := timeNow()
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		message := fmt.Sprintf("session refresh timed out after %s", driveCLITimeout)
+		recordRefreshFailure(finishedAt, sessionID, message, true)
+		trayLog.Printf("refresh: %s", message)
+		return
+	}
+	result, parsed := parseRefreshCommandResult(out)
+	switch {
+	case parsed && result.OK:
+		recordRefreshSuccess(finishedAt)
+		trayLog.Print("refresh: session token refreshed")
+	case err != nil || parsed:
+		message, recoverable := refreshFailureFromCommand(result, parsed, err)
+		recordRefreshFailure(finishedAt, sessionID, message, recoverable)
+		trayLog.Printf("refresh: failed: %s", message)
+	default:
+		recordRefreshSuccess(finishedAt)
+		trayLog.Print("refresh: session token refreshed")
+	}
 }
 
 func readSessionMetadata() (sessionMetadata, bool) {
@@ -214,7 +301,9 @@ func tokenExpiry(meta sessionMetadata) time.Time {
 	return time.UnixMilli(meta.TokenExpiresAt)
 }
 
-func hasConfiguredDataCredential() bool {
+// hasConfiguredDataCredential reports whether a mailbox/data password
+// provider is configured in prefs, the environment or the git LFS args.
+func hasConfiguredDataCredential(lfs gitLFSConfig) bool {
 	prefs := config.LoadPrefs()
 	if strings.TrimSpace(prefs.DataCredentialProvider) != "" {
 		return true
@@ -222,15 +311,7 @@ func hasConfiguredDataCredential() bool {
 	if config.EnvTrim(config.EnvDataCredentialProvider) != "" {
 		return true
 	}
-	return configuredDataCredentialProviderFromGit() != ""
-}
-
-func configuredDataCredentialProviderFromGit() string {
-	out, err := exec.Command("git", "config", "--global", "lfs.customtransfer.proton.args").Output()
-	if err != nil {
-		return ""
-	}
-	return parseFlagValue(string(out), "--data-credential-provider")
+	return parseFlagValue(lfs.TransferArgs, "--data-credential-provider") != ""
 }
 
 func browserForkKeyPasswordPersisted(meta sessionMetadata) bool {
@@ -250,7 +331,13 @@ func parseFlagValue(text string, flag string) string {
 	return ""
 }
 
+// inspectAuthReadiness derives the readiness from the session file, the
+// refresh state and the current git registration.
 func inspectAuthReadiness(now time.Time) authReadiness {
+	return inspectAuthReadinessWith(now, readGitLFSConfig())
+}
+
+func inspectAuthReadinessWith(now time.Time, lfs gitLFSConfig) authReadiness {
 	meta, hasSession := readSessionMetadata()
 	health := snapshotRefreshState()
 	base := authReadiness{
@@ -301,7 +388,7 @@ func inspectAuthReadiness(now time.Time) authReadiness {
 		base.blocked = true
 		return base
 	}
-	if !browserForkKeyPasswordPersisted(meta) && !hasConfiguredDataCredential() {
+	if !browserForkKeyPasswordPersisted(meta) && !hasConfiguredDataCredential(lfs) {
 		base.statusTitle = "Status: Setup needed"
 		base.transferTitle = "Transfers: Data password needed"
 		base.dataPasswordActive = true
@@ -316,7 +403,9 @@ func inspectAuthReadiness(now time.Time) authReadiness {
 	return base
 }
 
-func applyAuthReadiness(readiness authReadiness) {
+// applyAuthReadinessLabels updates the menu items derived from readiness.
+// The icon is set by applyTraySnapshot.
+func applyAuthReadinessLabels(readiness authReadiness) {
 	if mStatus != nil {
 		mStatus.SetTitle(readiness.statusTitle)
 	}
@@ -345,37 +434,6 @@ func applyAuthReadiness(readiness authReadiness) {
 		}
 	}
 	currentAuthAction = readiness.action
-	if !authReadinessShouldOverrideTransferStatus(readiness) {
-		return
-	}
-	switch {
-	case readiness.ready:
-		systray.SetIcon(iconOK)
-		systray.SetTemplateIcon(iconOK, iconOK)
-	case readiness.blocked:
-		systray.SetIcon(iconError)
-		systray.SetTemplateIcon(iconError, iconError)
-	default:
-		systray.SetIcon(iconIdle)
-		systray.SetTemplateIcon(iconIdle, iconIdle)
-	}
-	systray.SetTooltip(readiness.tooltip)
-}
-
-func authReadinessShouldOverrideTransferStatus(readiness authReadiness) bool {
-	if readiness.blocked || !readiness.signedIn {
-		return true
-	}
-	report, err := config.ReadStatus()
-	if err != nil {
-		return true
-	}
-	switch report.State {
-	case config.StateIdle, config.StateOK:
-		return true
-	default:
-		return false
-	}
 }
 
 func snapshotRefreshState() sessionRefreshState {
@@ -581,46 +639,6 @@ func compactDuration(d time.Duration) string {
 	}
 }
 
-func applyStatus() {
-	report, err := config.ReadStatus()
-	if err != nil {
-		systray.SetIcon(iconIdle)
-		systray.SetTemplateIcon(iconIdle, iconIdle)
-		systray.SetTooltip("Proton LFS")
-		return
-	}
-
-	// Set icon based on state
-	switch report.State {
-	case config.StateIdle, config.StateOK:
-		systray.SetIcon(iconOK)
-		systray.SetTemplateIcon(iconOK, iconOK)
-	case config.StateError:
-		systray.SetIcon(iconError)
-		systray.SetTemplateIcon(iconError, iconError)
-	case config.StateTransferring:
-		systray.SetIcon(iconSyncing)
-		systray.SetTemplateIcon(iconSyncing, iconSyncing)
-	case config.StateRateLimited:
-		// Orange/warning icon for rate-limiting (use error icon as fallback)
-		systray.SetIcon(iconError)
-		systray.SetTemplateIcon(iconError, iconError)
-	case config.StateAuthRequired:
-		// Yellow/alert icon for auth required (use error icon as fallback)
-		systray.SetIcon(iconError)
-		systray.SetTemplateIcon(iconError, iconError)
-	case config.StateCaptcha:
-		// Alert icon for CAPTCHA required (use error icon as fallback)
-		systray.SetIcon(iconError)
-		systray.SetTemplateIcon(iconError, iconError)
-	default:
-		systray.SetIcon(iconIdle)
-		systray.SetTemplateIcon(iconIdle, iconIdle)
-	}
-
-	systray.SetTooltip(statusTooltip(report))
-}
-
 func transferStatusText(report config.StatusReport) string {
 	switch report.State {
 	case config.StateTransferring:
@@ -745,9 +763,12 @@ func relativeTime(t time.Time) string {
 	}
 }
 
+// truncate shortens s to limit runes, ending with an ellipsis. It counts
+// runes, not bytes, so the result is always valid UTF-8.
 func truncate(s string, limit int) string {
-	if len(s) <= limit {
+	if utf8.RuneCountInString(s) <= limit {
 		return s
 	}
-	return s[:limit-1] + "…"
+	runes := []rune(s)
+	return string(runes[:limit-1]) + "…"
 }

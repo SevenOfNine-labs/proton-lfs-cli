@@ -1,6 +1,6 @@
 # Current State
 
-Date: 2026-11-05
+Date: 2026-11-06
 
 ## Implemented
 
@@ -8,9 +8,10 @@ Date: 2026-11-05
 - Local backend is usable for deterministic end-to-end integration tests.
 - SDK backend path is wired and covered with integration tests against `proton-drive-cli` (direct subprocess).
 - The Go adapter spawns `proton-drive-cli bridge <command>` directly via stdin/stdout JSON, replacing the former Node.js HTTP bridge layer.
-- SDK integration suite covers upload, download, list, token refresh, mocked
-  auth-state blockers, and large-object progress semantics without allocating
-  large payloads.
+- SDK integration suite covers the push and clone round trip (auth-state,
+  init, exists, upload, download); mocked auth-state blockers and
+  large-object progress semantics are covered without allocating large
+  payloads.
 - Transfers call `bridge auth-state` before `bridge init` and refuse every
   non-ready state without invoking `bridge auth` or allowing SRP login.
 - Shared bridge contract schemas are versioned in `proton-drive-cli` and
@@ -21,7 +22,7 @@ Date: 2026-11-05
 - Browser-fork login stores its derived key password through proton-drive-cli's
   key-password provider (`pass-cli` or `git-credential`). Git LFS transfers do
   not receive account credential selectors.
-- Security hardening: OID validation, path traversal prevention, subprocess pool (max 10), per-operation timeout (5 min).
+- Security hardening: OID validation, path traversal prevention, one bridge subprocess per command with a size-scaled timeout (`--bridge-timeout`, default 5 min, plus 1 s per 256 KiB) and process-group kill on expiry.
 - Security tests: command injection, rate limiting, credential flow, session file permissions.
 - Submodule pins are checked with `make check-submodules` instead of relying on
   recursive SDK traversal, because the official Proton SDK commit currently
@@ -40,8 +41,8 @@ Date: 2026-11-05
   that do not allocate or write large fixtures.
 - Bridge batch operations are private maintenance helpers and are rejected as
   Git LFS transfer events.
-- Bridge subprocess tests cover strict envelopes, typed timeouts, malformed
-  output, stderr redaction, and concurrency limits.
+- Bridge subprocess tests cover strict envelopes, size-scaled timeouts,
+  malformed output, stderr redaction, and environment filtering.
 - Helper CLI scope diagnostics provide redacted local auth/session evidence and
   an explicitly acknowledged one-read live Drive scope probe for API 9101
   investigations.
@@ -50,7 +51,7 @@ Date: 2026-11-05
   rejection is shown as reconnect required and is not retried for the same
   saved session.
 - The vendored Proton Drive SDK was updated to `js/v0.23.0` on 2026-11-05
-  (`docs/architecture/proton-sdk-update-2026-11-05.md`). Its dist is now ESM
+  (`docs/history/proton-sdk-update-2026-11-05.md`). Its dist is now ESM
   and upstream ships no npm lockfile, so `make build-sdk` builds it with
   `npm install --no-package-lock`. proton-drive-cli now reports the pinned SDK
   release in `x-pm-drive-sdk-version`, validates `x-pm-appversion` against
@@ -68,13 +69,24 @@ Go Adapter -> proton-drive-cli subprocess (stdin/stdout JSON)
 - **No .NET SDK or Node.js HTTP bridge required.** The Go adapter spawns `proton-drive-cli bridge <command>` directly.
 - The former `proton-lfs-bridge` Node.js HTTP layer has been removed.
 
-## Not Implemented Yet
+## Open Work
 
 - Real-account canary validation with a disposable account after mocked
   auth/session gates stay green and explicit canary acknowledgement is set.
 - Production observability baseline (metrics, SLOs, alerts, runbooks).
 - SDK streaming transfer progress and resume support where the SDK can expose
   it. The local backend streams progress during filesystem copies.
+
+Open items carried over from the SDK update audit of 2026-11-05
+(`docs/history/proton-sdk-update-2026-11-05.md`):
+
+- The pkg.go.dev page for `github.com/SevenOfNine-labs/proton-lfs-cli` appears
+  once the Go module proxy has served a version under that path; then remove
+  the matching exclusion from `.lychee.toml`.
+- Proton's cryptographic model migration (announced for end of 2026 / early
+  2027): keep the SDK pin current and act on the
+  `Proton Drive requires SDK ... or newer` notices that proton-drive-cli now
+  logs from the `x-pm-drive-requirements` headers.
 
 ## Local Baseline
 
@@ -88,19 +100,10 @@ make test
 make test-integration
 ```
 
-SDK integration path:
+SDK integration path (one real Proton Drive round trip per test):
 
 ```bash
-proton-drive login --key-password-provider pass-cli
-eval "$(make -s pass-env)"
-make check-submodules
-make test-integration-sdk
-```
-
-SDK backend with proton-drive-cli:
-
-```bash
-proton-drive login --key-password-provider pass-cli
+proton-drive-cli login --key-password-provider pass-cli
 eval "$(make -s pass-env)"
 make check-submodules
 make check-sdk-prereqs
@@ -113,7 +116,7 @@ to run unless `PROTON_LFS_LIVE_CANARY` matches the exact acknowledgement in the
 Makefile. The separate `make browser-fork-canary` path runs one forced
 browser-fork login only, then local status and offline doctor inspection before
 stopping without a transfer.
-`proton-lfs-cli scope-diagnostics` can be used before those live runs to collect
+`proton-lfs-tray scope-diagnostics` can be used before those live runs to collect
 redacted local evidence; `scope-diagnostics --live` is gated by the same
 acknowledgement and performs one read-only Drive metadata probe.
 If the tray log shows Proton `10013` / `Invalid refresh token`, the current

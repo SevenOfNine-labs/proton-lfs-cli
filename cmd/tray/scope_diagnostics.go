@@ -2,19 +2,19 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 
-	"proton-lfs-cli/internal/config"
+	"github.com/SevenOfNine-labs/proton-lfs-cli/internal/config"
 )
 
 const scopeLiveAckValue = "I_UNDERSTAND_THIS_TOUCHES_A_REAL_PROTON_ACCOUNT"
@@ -117,7 +117,7 @@ func cliScopeDiagnostics(w io.Writer, args []string) int {
 		Config: scopeDiagnosticsConfig{
 			DriveCLIFound:                  driveCLI != "",
 			DriveCLIPath:                   displayPath(driveCLI),
-			KeyPasswordProvider:            prefs.CredentialProvider,
+			KeyPasswordProvider:            prefs.KeyPasswordProvider,
 			DataCredentialProvider:         dataProvider,
 			DataCredentialHost:             dataHost,
 			DataCredentialSource:           dataSource,
@@ -229,7 +229,7 @@ func resolveScopeDataCredential(prefs config.Preferences) (provider, host, sourc
 		}
 		return provider, host, "prefs"
 	}
-	gitArgs := configuredDataCredentialArgsFromGit()
+	gitArgs := readGitLFSConfig().TransferArgs
 	if provider = parseFlagValue(gitArgs, "--data-credential-provider"); provider != "" {
 		host = parseFlagValue(gitArgs, "--data-credential-host")
 		if host == "" {
@@ -238,14 +238,6 @@ func resolveScopeDataCredential(prefs config.Preferences) (provider, host, sourc
 		return provider, host, "git-config"
 	}
 	return "", "", ""
-}
-
-func configuredDataCredentialArgsFromGit() string {
-	out, err := exec.Command("git", "config", "--global", "lfs.customtransfer.proton.args").Output()
-	if err != nil {
-		return ""
-	}
-	return string(out)
 }
 
 func buildScopeBridgeRequest(dataProvider, dataHost string) map[string]any {
@@ -274,13 +266,13 @@ func executeScopeBridgeRun(driveCLI, command string, network bool, target string
 	}
 	resp, err := runScopeBridge(driveCLI, command, request)
 	if err != nil {
-		run.ProcessError = redactDiagnosticString(err.Error())
+		run.ProcessError = redactSubprocessOutput(err.Error())
 		run.Error = run.ProcessError
 		return run
 	}
 	run.OK = resp.OK
 	run.Code = resp.Code
-	run.Error = redactDiagnosticString(resp.Error)
+	run.Error = redactSubprocessOutput(resp.Error)
 	run.Details = parseScopeDetails(resp.Details)
 	run.ErrorCode = stringFromAny(run.Details["errorCode"])
 	run.ProtonCode = intFromAny(run.Details["protonCode"])
@@ -298,7 +290,9 @@ func runDriveScopeBridgeCommand(driveCLI, command string, request map[string]any
 	if err != nil {
 		return scopeBridgeEnvelope{}, fmt.Errorf("marshal bridge request: %w", err)
 	}
-	cmd := exec.Command(driveCLI, "bridge", command)
+	ctx, cancel := context.WithTimeout(context.Background(), driveCLITimeout)
+	defer cancel()
+	cmd := driveCLICommand(ctx, driveCLI, "bridge", command)
 	cmd.Stdin = bytes.NewReader(body)
 	cmd.Env = os.Environ()
 	if passCLI := discoverPassCLIBinary(); passCLI != "" {
@@ -311,7 +305,7 @@ func runDriveScopeBridgeCommand(driveCLI, command string, request map[string]any
 	resp, parseErr := parseScopeBridgeOutput(stdout.Bytes())
 	if parseErr != nil {
 		if stderr.Len() > 0 {
-			return scopeBridgeEnvelope{}, fmt.Errorf("%w: %s", parseErr, redactDiagnosticString(stderr.String()))
+			return scopeBridgeEnvelope{}, fmt.Errorf("%w: %s", parseErr, redactSubprocessOutput(strings.TrimSpace(stderr.String())))
 		}
 		if runErr != nil {
 			return scopeBridgeEnvelope{}, fmt.Errorf("%w: %v", parseErr, runErr)
@@ -390,13 +384,13 @@ func parseScopeDetails(raw json.RawMessage) map[string]any {
 		if err := json.Unmarshal([]byte(detailsString), &details); err == nil {
 			return redactMap(details)
 		}
-		return map[string]any{"raw": redactDiagnosticString(detailsString)}
+		return map[string]any{"raw": redactSubprocessOutput(detailsString)}
 	}
 	var details map[string]any
 	if err := json.Unmarshal(raw, &details); err == nil {
 		return redactMap(details)
 	}
-	return map[string]any{"raw": redactDiagnosticString(string(raw))}
+	return map[string]any{"raw": redactSubprocessOutput(string(raw))}
 }
 
 func parseScopePayload(raw json.RawMessage) map[string]any {
@@ -405,7 +399,7 @@ func parseScopePayload(raw json.RawMessage) map[string]any {
 	}
 	var payload map[string]any
 	if err := json.Unmarshal(raw, &payload); err != nil {
-		return map[string]any{"raw": redactDiagnosticString(string(raw))}
+		return map[string]any{"raw": redactSubprocessOutput(string(raw))}
 	}
 	return redactMap(payload)
 }
@@ -466,7 +460,7 @@ func redactValue(key string, value any) any {
 	}
 	switch v := value.(type) {
 	case string:
-		return redactDiagnosticString(v)
+		return redactSubprocessOutput(v)
 	case map[string]any:
 		return redactMap(v)
 	case []any:
@@ -495,25 +489,6 @@ func isSensitiveDiagnosticKey(key string) bool {
 		strings.Contains(lowerKey, "secret") ||
 		strings.Contains(lowerKey, "sessionid") ||
 		lowerKey == "uid"
-}
-
-func redactDiagnosticString(raw string) string {
-	s := strings.TrimSpace(raw)
-	for _, marker := range []string{
-		"Bearer ",
-		"accessToken",
-		"refreshToken",
-		"AccessToken",
-		"RefreshToken",
-		"token=",
-		"password=",
-		"session=",
-	} {
-		if idx := strings.Index(s, marker); idx >= 0 {
-			return s[:idx] + "[redacted]"
-		}
-	}
-	return s
 }
 
 func cloneMap(in map[string]any) map[string]any {

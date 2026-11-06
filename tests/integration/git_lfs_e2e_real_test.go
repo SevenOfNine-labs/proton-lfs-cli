@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"proton-lfs-cli/internal/preflight"
+	"github.com/SevenOfNine-labs/proton-lfs-cli/internal/preflight"
 )
 
 const liveCanaryAckValue = "I_UNDERSTAND_THIS_TOUCHES_A_REAL_PROTON_ACCOUNT"

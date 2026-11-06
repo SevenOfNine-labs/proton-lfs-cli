@@ -4,6 +4,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -16,7 +17,8 @@ const (
 	BackendSDK   = "sdk"
 )
 
-// Credential providers
+// Credential provider kinds, used for the browser-fork key password and for
+// the optional mailbox/data password.
 const (
 	CredentialProviderPassCLI       = "pass-cli"
 	CredentialProviderGitCredential = "git-credential"
@@ -28,10 +30,10 @@ const ProtonCredentialHost = "proton.me"
 
 // Default values
 const (
-	DefaultDriveCLIBin        = "submodules/proton-drive-cli/dist/index.js"
-	DefaultStorageBase        = "LFS"
-	DefaultCredentialProvider = CredentialProviderPassCLI
-	DefaultDataCredentialHost = "proton-data.proton-lfs-cli.local"
+	DefaultDriveCLIBin         = "submodules/proton-drive-cli/dist/index.js"
+	DefaultStorageBase         = "LFS"
+	DefaultKeyPasswordProvider = CredentialProviderPassCLI
+	DefaultDataCredentialHost  = "proton-data.proton-lfs-cli.local"
 	// DefaultDriveCLIAppVersion mirrors proton-drive-cli's built-in
 	// x-pm-appversion identity (external-drive-protonlfscli@<package.json
 	// version>). Bump it together with the submodule's package version;
@@ -48,10 +50,10 @@ const (
 	EnvBackend                = "PROTON_LFS_BACKEND"
 	EnvAllowMockTransfers     = "ADAPTER_ALLOW_MOCK_TRANSFERS"
 	EnvLocalStoreDir          = "PROTON_LFS_LOCAL_STORE_DIR"
-	EnvCredentialProvider     = "PROTON_CREDENTIAL_PROVIDER"
 	EnvDataCredentialProvider = "PROTON_DATA_CREDENTIAL_PROVIDER"
 	EnvDataCredentialHost     = "PROTON_DATA_CREDENTIAL_HOST"
 	EnvStatusFile             = "PROTON_LFS_STATUS_FILE"
+	EnvBridgeTimeout          = "PROTON_LFS_BRIDGE_TIMEOUT"
 )
 
 // AppDir is the base directory for Proton LFS runtime files.
@@ -63,26 +65,37 @@ const StatusFileName = "status.json"
 // ConfigFileName is the filename for user preferences inside AppDir.
 const ConfigFileName = "config.json"
 
-// AppDirPath returns the absolute path to ~/.proton-lfs.
-func AppDirPath() string {
+// AppDirPath returns the absolute path to ~/.proton-lfs. It fails when the
+// home directory cannot be determined (for example HOME unset under cron or
+// systemd); callers must not fall back to the working directory, which is the
+// Git repository when git-lfs runs the adapter.
+func AppDirPath() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return filepath.Join(".", AppDir)
+		return "", fmt.Errorf("resolve home directory for %s: %w", AppDir, err)
 	}
-	return filepath.Join(home, AppDir)
+	return filepath.Join(home, AppDir), nil
 }
 
 // StatusFilePath returns the path to the status file, respecting EnvStatusFile.
-func StatusFilePath() string {
+func StatusFilePath() (string, error) {
 	if p := EnvTrim(EnvStatusFile); p != "" {
-		return p
+		return p, nil
 	}
-	return filepath.Join(AppDirPath(), StatusFileName)
+	dir, err := AppDirPath()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, StatusFileName), nil
 }
 
 // PrefsFilePath returns the path to the user preferences file.
-func PrefsFilePath() string {
-	return filepath.Join(AppDirPath(), ConfigFileName)
+func PrefsFilePath() (string, error) {
+	dir, err := AppDirPath()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, ConfigFileName), nil
 }
 
 // EnvTrim reads an environment variable and trims whitespace.

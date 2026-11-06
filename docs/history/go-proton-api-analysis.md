@@ -1,5 +1,7 @@
 # go-proton-api Analysis for proton-lfs-cli
 
+> Historical record as of 2026-02-16; superseded by the decision to use `proton-drive-cli` with the official Proton Drive SDK (`docs/architecture/proton-sdk-bridge.md`). The library survey is kept as the rationale for that decision.
+
 **Date**: 2026-02-16
 **Repository**: <https://github.com/ProtonMail/go-proton-api>
 **Status**: Official Proton AG library, actively maintained

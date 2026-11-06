@@ -3,27 +3,38 @@ SHELL := /bin/bash
 GO ?= go
 NODE ?= node
 JS_PM ?= yarn
-COREPACK_HOME_DIR := $(PWD)/.cache/corepack
+COREPACK_HOME_DIR := $(CURDIR)/.cache/corepack
+# Pinned to the version bundled by DavidAnson/markdownlint-cli2-action in
+# .github/workflows/docs.yml so local and CI results match.
+MARKDOWNLINT_CLI2_VERSION := 0.24.0
 
-ADAPTER_BIN := bin/git-lfs-proton-adapter
-TRAY_BIN := bin/proton-lfs-tray
-VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
-GIT_COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo dev)
-BUILD_TIME := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
-LDFLAGS_VERSION := -X main.Version=$(VERSION)
-ADAPTER_LDFLAGS := -X main.GitCommit=$(GIT_COMMIT) -X main.BuildTime=$(BUILD_TIME)
+# Cross-compile with GOOS=windows make build-adapter (binaries get .exe).
+GOOS ?= $(shell $(GO) env GOOS)
+GOARCH ?= $(shell $(GO) env GOARCH)
+EXE := $(if $(filter windows,$(GOOS)),.exe,)
+ADAPTER_BIN := bin/git-lfs-proton-adapter$(EXE)
+TRAY_BIN := bin/proton-lfs-tray$(EXE)
+DRIVE_CLI_SEA_BIN := bin/proton-drive-cli$(EXE)
+# One version source: the release tag in CI (VERSION=...), git describe
+# locally. scripts/build-go.sh stamps it together with the commit and a
+# reproducible BuildTime (SOURCE_DATE_EPOCH or the commit date).
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+export VERSION
 GIT_LFS_DIR := submodules/git-lfs
 DRIVE_CLI_DIR := submodules/proton-drive-cli
 SDK_JS_DIR := $(DRIVE_CLI_DIR)/submodules/sdk/client/js
 GO_CACHE_DIR := .cache/go-build
+GO_TEST_PKGS := ./cmd/... ./internal/...
 LIVE_CANARY_ACK_VALUE := I_UNDERSTAND_THIS_TOUCHES_A_REAL_PROTON_ACCOUNT
 
 .PHONY: help setup setup-env install-deps \
 	build build-adapter build-tray build-lfs build-sdk build-drive-cli build-sea build-all build-bundle \
 	install uninstall \
-	test test-adapter test-tray test-lfs test-integration test-integration-timeout test-integration-stress test-integration-sdk test-e2e-mock test-e2e-real test-all \
-	live-canary-preflight live-drive-scope-canary browser-fork-canary pass-env check-submodules check-live-canary-ack check-live-canary-doctor-args check-browser-fork-canary-args check-sdk-prereqs check-sdk-real-prereqs \
-	fmt lint lint-go \
+	test test-adapter test-tray test-lfs test-integration test-integration-adapter-exit test-integration-stress \
+	test-integration-failure-modes test-integration-config-matrix test-integration-credentials test-integration-sdk \
+	test-e2e-mock test-e2e-real test-all \
+	live-canary-preflight live-drive-scope-canary browser-fork-canary pass-env check-submodules check-live-canary-ack check-live-canary-doctor-args check-browser-fork-canary-args check-sdk-prereqs \
+	fmt fmt-check lint lint-go \
 	docs docs-lint \
 	clean status install-hooks
 
@@ -74,22 +85,18 @@ build: build-adapter ## Build first-party binaries
 
 build-all: check-submodules build-adapter build-tray build-lfs build-drive-cli ## Build adapter, tray app, Git LFS submodule, vendored SDK, and proton-drive-cli
 
-build-adapter: ## Build the custom transfer adapter
-	@mkdir -p bin
-	$(GO) build -trimpath -ldflags '$(ADAPTER_LDFLAGS)' -o $(ADAPTER_BIN) ./cmd/adapter
+build-adapter: ## Build the custom transfer adapter (pure Go; GOOS/GOARCH to cross-compile)
+	@GO="$(GO)" bash scripts/build-go.sh adapter "$(ADAPTER_BIN)"
 
-build-tray: ## Build the system tray application (requires CGO)
-	@mkdir -p bin
-	CGO_ENABLED=1 $(GO) build -trimpath -ldflags '$(LDFLAGS_VERSION)' -o $(TRAY_BIN) ./cmd/tray
+build-tray: ## Build the system tray application (cgo only on macOS)
+	@GO="$(GO)" bash scripts/build-go.sh tray "$(TRAY_BIN)"
 
-build-sea: build-drive-cli ## Build proton-drive-cli as a standalone Node.js SEA binary
-	@bash scripts/build-sea.sh
+build-sea: build-drive-cli ## Build proton-drive-cli as a standalone Node.js SEA binary (Node.js 26, see .node-version)
+	@NODE="$(NODE)" bash scripts/build-sea.sh
 
 build-bundle: check-submodules build-adapter build-tray build-sea ## Build all components into dist/ for packaging
 	@mkdir -p dist
-	@cp bin/git-lfs-proton-adapter dist/ 2>/dev/null || true
-	@cp bin/proton-lfs-tray dist/ 2>/dev/null || true
-	@cp bin/proton-drive-cli dist/ 2>/dev/null || true
+	cp "$(ADAPTER_BIN)" "$(TRAY_BIN)" "$(DRIVE_CLI_SEA_BIN)" dist/
 	@echo "Bundle assembled in dist/"
 
 # ---------- install / uninstall ----------
@@ -97,12 +104,16 @@ build-bundle: check-submodules build-adapter build-tray build-sea ## Build all c
 INSTALL_APP ?= /Applications/ProtonLFS.app
 INSTALL_BIN ?= $(HOME)/.local/bin
 
+# Help entries for the platform-specific rules below (one line each in
+# `make help`; the recipes are chosen by host OS).
+install: ## Install bundle (macOS: .app to INSTALL_APP; Linux: binaries to INSTALL_BIN)
+uninstall: ## Remove the installed bundle or binaries
+
 ifeq ($(shell uname -s),Darwin)
 
-install: build-bundle ## Install bundle (macOS: .app to /Applications, or set INSTALL_APP)
+install: build-bundle
 	@# Clean up old installation artifacts
 	@rm -rf /Applications/ProtonGitLFS.app 2>/dev/null || true
-	@rm -f "$(HOME)/Library/LaunchAgents/com.proton.git-lfs-tray.plist" 2>/dev/null || true
 	@mkdir -p "$(INSTALL_APP)/Contents/MacOS" "$(INSTALL_APP)/Contents/Helpers" "$(INSTALL_APP)/Contents/Resources"
 	@cp dist/proton-lfs-tray      "$(INSTALL_APP)/Contents/MacOS/proton-lfs-tray"
 	@cp dist/git-lfs-proton-adapter   "$(INSTALL_APP)/Contents/Helpers/git-lfs-proton-adapter"
@@ -123,22 +134,22 @@ install: build-bundle ## Install bundle (macOS: .app to /Applications, or set IN
 	@echo "CLI: $(INSTALL_BIN)/proton-lfs-cli"
 	@echo "CLI: $(INSTALL_BIN)/proton-drive-cli"
 
-uninstall: ## Remove installed .app bundle
+uninstall:
 	rm -rf "$(INSTALL_APP)"
 	rm -f "$(INSTALL_BIN)/proton-lfs-cli" "$(INSTALL_BIN)/proton-drive-cli"
 	@echo "Removed $(INSTALL_APP)"
 
 else
 
-install: build-bundle ## Install bundle (Linux: binaries to ~/.local/bin, or set INSTALL_BIN)
+install: build-bundle
 	@if uname -s | grep -qiE 'mingw|msys|cygwin'; then \
 		echo ""; \
-		echo "Error: 'make install' is not yet supported on Windows."; \
+		echo "Windows: unzip the release bundle onto PATH; make install targets macOS and Linux."; \
 		echo ""; \
 		echo "The built binaries are in dist/:"; \
-		echo "  dist/git-lfs-proton-adapter.exe"; \
-		echo "  dist/proton-lfs-tray.exe"; \
-		echo "  dist/proton-drive-cli.exe"; \
+		echo "  dist/git-lfs-proton-adapter$(EXE)"; \
+		echo "  dist/proton-lfs-tray$(EXE)"; \
+		echo "  dist/proton-drive-cli$(EXE)"; \
 		echo ""; \
 		echo "Copy them to a directory on your PATH, or use the .zip from GitHub Releases."; \
 		echo ""; \
@@ -154,9 +165,9 @@ install: build-bundle ## Install bundle (Linux: binaries to ~/.local/bin, or set
 	@ln -sf "$(INSTALL_BIN)/proton-lfs-tray" "$(INSTALL_BIN)/proton-lfs-cli"
 	@echo "Installed to $(INSTALL_BIN)"
 
-uninstall: ## Remove installed binaries
+uninstall:
 	@if uname -s | grep -qiE 'mingw|msys|cygwin'; then \
-		echo "Error: 'make uninstall' is not yet supported on Windows."; \
+		echo "Windows: unzip the release bundle onto PATH; make install targets macOS and Linux."; \
 		exit 1; \
 	fi
 	rm -f "$(INSTALL_BIN)/proton-lfs-tray" \
@@ -205,17 +216,19 @@ build-drive-cli: $(SDK_JS_DIR)/dist/index.js ## Build proton-drive-cli TypeScrip
 		$(JS_PM) --workspace $(DRIVE_CLI_DIR) run build; \
 	fi
 
-test: test-adapter test-tray ## Run core tests
-
-test-all: check-submodules test-adapter test-tray test-lfs test-integration test-e2e-mock ## Run all test suites
-
-test-adapter: ## Run adapter tests
+test: ## Run unit tests for cmd/... and internal/... (race detector, coverage)
 	@mkdir -p $(GO_CACHE_DIR)
-	GOCACHE=$(PWD)/$(GO_CACHE_DIR) $(GO) test -race -cover ./cmd/adapter/...
+	GOCACHE=$(CURDIR)/$(GO_CACHE_DIR) $(GO) test -race -cover $(GO_TEST_PKGS)
 
-test-tray: ## Run tray app tests (requires CGO)
+test-all: check-submodules test test-lfs test-integration test-e2e-mock ## Run all test suites
+
+test-adapter: ## Run adapter tests only
 	@mkdir -p $(GO_CACHE_DIR)
-	CGO_ENABLED=1 GOCACHE=$(PWD)/$(GO_CACHE_DIR) $(GO) test -race -cover ./cmd/tray/...
+	GOCACHE=$(CURDIR)/$(GO_CACHE_DIR) $(GO) test -race -cover ./cmd/adapter/...
+
+test-tray: ## Run tray app tests only (pure Go off macOS; -race needs a C toolchain)
+	@mkdir -p $(GO_CACHE_DIR)
+	GOCACHE=$(CURDIR)/$(GO_CACHE_DIR) $(GO) test -race -cover ./cmd/tray/...
 
 test-lfs: ## Run Git LFS submodule tests
 	@if [ ! -d $(GIT_LFS_DIR) ]; then \
@@ -226,43 +239,43 @@ test-lfs: ## Run Git LFS submodule tests
 
 test-integration: ## Run integration tests (requires git + git-lfs binaries)
 	@mkdir -p $(GO_CACHE_DIR)
-	GOCACHE=$(PWD)/$(GO_CACHE_DIR) $(GO) test -tags integration ./tests/integration/...
+	GO="$(GO)" GOCACHE=$(CURDIR)/$(GO_CACHE_DIR) $(GO) test -tags integration ./tests/integration/...
 
-test-integration-timeout: ## Run timeout semantics integration tests for stalled adapter behavior
+test-integration-adapter-exit: ## Run integration tests for an adapter that exits mid-transfer without completing
 	@mkdir -p $(GO_CACHE_DIR)
-	GOCACHE=$(PWD)/$(GO_CACHE_DIR) $(GO) test -tags integration ./tests/integration/... -run '^TestGitLFSCustomTransferTimeout' -v
+	GO="$(GO)" GOCACHE=$(CURDIR)/$(GO_CACHE_DIR) $(GO) test -tags integration ./tests/integration/... -run '^TestGitLFSCustomTransferAdapterExitsMid' -v
 
 test-integration-stress: ## Run high-volume concurrency stress/soak integration tests
 	@mkdir -p $(GO_CACHE_DIR)
-	GOCACHE=$(PWD)/$(GO_CACHE_DIR) $(GO) test -tags integration ./tests/integration/... -run '^TestGitLFSCustomTransferConcurrentStressSoak$$' -v
+	GO="$(GO)" GOCACHE=$(CURDIR)/$(GO_CACHE_DIR) $(GO) test -tags integration ./tests/integration/... -run '^TestGitLFSCustomTransferConcurrentStressSoak$$' -v
 
-test-integration-failure-modes: ## Run failure mode integration tests (wrong OID, crash, hang)
+test-integration-failure-modes: ## Run failure mode integration tests (wrong OID, crash, exit without response)
 	@mkdir -p $(GO_CACHE_DIR)
-	GOCACHE=$(PWD)/$(GO_CACHE_DIR) $(GO) test -tags integration ./tests/integration/... -run '^TestGitLFSCustomTransfer(RejectsWrongOID|FailsWhenAdapter)' -v
+	GO="$(GO)" GOCACHE=$(CURDIR)/$(GO_CACHE_DIR) $(GO) test -tags integration ./tests/integration/... -run '^TestGitLFSCustomTransfer(RejectsWrongOID|FailsWhenAdapter)' -v
 
 test-integration-config-matrix: ## Run direction config matrix integration tests
 	@mkdir -p $(GO_CACHE_DIR)
-	GOCACHE=$(PWD)/$(GO_CACHE_DIR) $(GO) test -tags integration ./tests/integration/... -run '^TestGitLFSCustomTransferDirection' -v
+	GO="$(GO)" GOCACHE=$(CURDIR)/$(GO_CACHE_DIR) $(GO) test -tags integration ./tests/integration/... -run '^TestGitLFSCustomTransferDirection' -v
 
 test-integration-credentials: ## Run credential flow security tests
 	@mkdir -p $(GO_CACHE_DIR)
-	GOCACHE=$(PWD)/$(GO_CACHE_DIR) $(GO) test -tags integration ./tests/integration/... -run Credential -v
+	GO="$(GO)" GOCACHE=$(CURDIR)/$(GO_CACHE_DIR) $(GO) test -tags integration ./tests/integration/... -run Credential -v
 
 test-integration-sdk: check-submodules check-sdk-prereqs ## Run sdk backend integration tests (requires proton-drive-cli and pass-cli)
 	@mkdir -p $(GO_CACHE_DIR)
 	@eval "$$(./scripts/export-pass-env.sh)" && \
 		PROTON_LFS_RUN_SDK_INTEGRATION=1 \
-		GOCACHE=$(PWD)/$(GO_CACHE_DIR) $(GO) test -tags integration ./tests/integration/... -run SDK -v
+		GO="$(GO)" GOCACHE=$(CURDIR)/$(GO_CACHE_DIR) $(GO) test -tags integration ./tests/integration/... -run SDK -v
 
 test-e2e-mock: build-adapter ## Mocked E2E pipeline (no real credentials)
 	@mkdir -p $(GO_CACHE_DIR)
-	PROTON_DRIVE_CLI_BIN=$(PWD)/tests/testdata/mock-proton-drive-cli.js \
-		GOCACHE=$(PWD)/$(GO_CACHE_DIR) $(GO) test -tags integration ./tests/integration/... -run E2EMocked -v
+	PROTON_DRIVE_CLI_BIN=$(CURDIR)/tests/testdata/mock-proton-drive-cli.js \
+		GO="$(GO)" GOCACHE=$(CURDIR)/$(GO_CACHE_DIR) $(GO) test -tags integration ./tests/integration/... -run E2EMocked -v
 
 live-canary-preflight: check-submodules build-adapter build-drive-cli ## Offline gate before any real Proton canary
 	@echo "Running offline live-canary preflight (no Proton login)..."
 	@mkdir -p $(GO_CACHE_DIR)
-	GOCACHE=$(PWD)/$(GO_CACHE_DIR) $(GO) test ./...
+	GOCACHE=$(CURDIR)/$(GO_CACHE_DIR) $(GO) test ./...
 	@if [ "$(JS_PM)" = "yarn" ]; then \
 		cd $(DRIVE_CLI_DIR) && COREPACK_HOME=$(COREPACK_HOME_DIR) $(JS_PM) lint && \
 			COREPACK_HOME=$(COREPACK_HOME_DIR) $(JS_PM) jest src/auth/flow-safety.test.ts src/cli/doctor.test.ts --runInBand; \
@@ -272,7 +285,7 @@ live-canary-preflight: check-submodules build-adapter build-drive-cli ## Offline
 	fi
 	@if [ -n "$${LIVE_CANARY_DOCTOR_ARGS:-}" ]; then \
 		echo "Running optional offline doctor with LIVE_CANARY_DOCTOR_ARGS..."; \
-		if ! DOCTOR_OUTPUT="$$( $(NODE) "$(PWD)/$(DRIVE_CLI_DIR)/dist/index.js" doctor --json $$LIVE_CANARY_DOCTOR_ARGS )"; then \
+		if ! DOCTOR_OUTPUT="$$( $(NODE) "$(CURDIR)/$(DRIVE_CLI_DIR)/dist/index.js" doctor --json $$LIVE_CANARY_DOCTOR_ARGS )"; then \
 			echo "$$DOCTOR_OUTPUT"; \
 			echo "Offline doctor failed; refusing live canary."; \
 			exit 2; \
@@ -318,15 +331,15 @@ check-browser-fork-canary-args: ## Require explicit browser-fork login args
 	fi
 
 browser-fork-canary: check-live-canary-ack check-live-canary-doctor-args check-browser-fork-canary-args live-canary-preflight ## One guarded browser-fork login canary; no transfer
-	@NODE_BIN="$(NODE)" GO_BIN="$(GO)" DRIVE_CLI_BIN="$(PWD)/$(DRIVE_CLI_DIR)/dist/index.js" ./scripts/browser-fork-canary.sh
+	@NODE_BIN="$(NODE)" GO_BIN="$(GO)" DRIVE_CLI_BIN="$(CURDIR)/$(DRIVE_CLI_DIR)/dist/index.js" ./scripts/browser-fork-canary.sh
 
 live-drive-scope-canary: check-live-canary-ack check-live-canary-doctor-args live-canary-preflight ## One guarded read-only Drive metadata canary; no transfer
-	@NODE_BIN="$(NODE)" DRIVE_CLI_BIN="$(PWD)/$(DRIVE_CLI_DIR)/dist/index.js" ./scripts/live-drive-scope-canary.sh
+	@NODE_BIN="$(NODE)" DRIVE_CLI_BIN="$(CURDIR)/$(DRIVE_CLI_DIR)/dist/index.js" ./scripts/live-drive-scope-canary.sh
 
 test-e2e-real: live-drive-scope-canary ## Real Proton Drive E2E (requires explicit live canary acknowledgement)
 	@mkdir -p $(GO_CACHE_DIR)
 	@eval "$$(./scripts/export-pass-env.sh)" && \
-		GOCACHE=$(PWD)/$(GO_CACHE_DIR) $(GO) test -tags integration ./tests/integration/... -run E2E -v
+		GO="$(GO)" GOCACHE=$(CURDIR)/$(GO_CACHE_DIR) $(GO) test -tags integration ./tests/integration/... -run E2E -v
 
 pass-env: ## Print Proton Pass CLI provider env (no account credentials)
 	@./scripts/export-pass-env.sh
@@ -358,16 +371,28 @@ check-sdk-prereqs: ## Verify prerequisites for sdk integration tests
 	@echo "SDK integration prerequisites OK"
 
 fmt: ## Format Go code
-	$(GO) fmt ./cmd/... ./internal/...
+	$(GO) fmt ./...
+
+fmt-check: ## Fail if any Go file is not gofmt-formatted
+	@unformatted="$$(gofmt -l cmd internal tests scripts)"; \
+	if [ -n "$$unformatted" ]; then \
+		echo "gofmt required for:"; echo "$$unformatted"; exit 1; \
+	fi
 
 lint: lint-go ## Run lint checks
 
-lint-go: ## Run Go vet and golangci-lint when available
-	$(GO) vet ./cmd/... ./internal/...
+lint-go: ## Run go vet and golangci-lint (golangci-lint is mandatory when CI=true)
+	$(GO) vet ./...
+	$(GO) vet -tags integration ./tests/...
 	@if command -v golangci-lint >/dev/null 2>&1; then \
-		golangci-lint run ./cmd/... ./internal/...; \
+		golangci-lint run ./...; \
+	elif [ "$${CI:-}" = "true" ]; then \
+		echo "golangci-lint is required in CI but is not installed."; \
+		echo "Install: https://golangci-lint.run/docs/welcome/install/"; \
+		exit 1; \
 	else \
-		echo "golangci-lint not installed; skipped"; \
+		echo "golangci-lint not installed; skipped (CI fails without it)."; \
+		echo "Install: https://golangci-lint.run/docs/welcome/install/"; \
 	fi
 
 install-hooks: ## Install pre-commit hooks
@@ -375,7 +400,7 @@ install-hooks: ## Install pre-commit hooks
 		echo "pre-commit is not installed"; \
 		exit 1; \
 	fi
-	pre-commit install
+	pre-commit install --hook-type pre-commit --hook-type commit-msg
 
 status: ## Print project status
 	@echo "Go: $$($(GO) version)"
@@ -404,11 +429,10 @@ docs-lint: ## Lint markdown files
 		echo "Error: npx not found. Install Node.js first."; \
 		exit 1; \
 	fi
-	@npx --yes markdownlint-cli2 \
+	@npx --yes markdownlint-cli2@$(MARKDOWNLINT_CLI2_VERSION) \
 		--config .markdownlint.json \
 		"README.md" "USAGE.md" "SECURITY.md" "docs/**/*.md"
 
-clean: ## Remove generated files
-	rm -rf bin
+clean: ## Remove generated files (project-local only; never the global Go caches)
+	rm -rf bin build dist
 	rm -rf $(GO_CACHE_DIR)
-	$(GO) clean -cache -testcache

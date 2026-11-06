@@ -12,7 +12,7 @@ func TestExportPassEnvEmitsOnlyProviderEnv(t *testing.T) {
 	fakePass := filepath.Join(t.TempDir(), "fake-pass-cli.sh")
 	if err := os.WriteFile(fakePass, []byte(`#!/usr/bin/env bash
 set -euo pipefail
-if [[ "${1:-}" == "test" ]]; then
+if [[ "${1:-}" == "info" ]]; then
   exit 0
 fi
 echo "unexpected pass-cli command: $*" >&2

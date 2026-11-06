@@ -1,7 +1,6 @@
 package config
 
 import (
-	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -10,13 +9,9 @@ import (
 func TestStatusReportPersistence(t *testing.T) {
 	// Create temp directory for test
 	tmpDir := t.TempDir()
-	originalPath := StatusFilePath()
-	defer func() {
-		os.Setenv("PROTON_LFS_STATUS_FILE", originalPath)
-	}()
 
 	testPath := filepath.Join(tmpDir, "status.json")
-	os.Setenv("PROTON_LFS_STATUS_FILE", testPath)
+	t.Setenv(EnvStatusFile, testPath)
 
 	// Write status
 	originalStatus := StatusReport{
@@ -64,13 +59,9 @@ func TestStatusReportPersistence(t *testing.T) {
 
 func TestStatusWithErrorFields(t *testing.T) {
 	tmpDir := t.TempDir()
-	originalPath := StatusFilePath()
-	defer func() {
-		os.Setenv("PROTON_LFS_STATUS_FILE", originalPath)
-	}()
 
 	testPath := filepath.Join(tmpDir, "status.json")
-	os.Setenv("PROTON_LFS_STATUS_FILE", testPath)
+	t.Setenv(EnvStatusFile, testPath)
 
 	// Write status with error fields
 	originalStatus := StatusReport{
@@ -130,15 +121,11 @@ func TestStatusStates(t *testing.T) {
 	}
 
 	tmpDir := t.TempDir()
-	originalPath := StatusFilePath()
-	defer func() {
-		os.Setenv("PROTON_LFS_STATUS_FILE", originalPath)
-	}()
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			testPath := filepath.Join(tmpDir, "status-"+tt.state+".json")
-			os.Setenv("PROTON_LFS_STATUS_FILE", testPath)
+			t.Setenv(EnvStatusFile, testPath)
 
 			status := StatusReport{
 				State:     tt.state,
@@ -164,13 +151,9 @@ func TestStatusStates(t *testing.T) {
 
 func TestReadStatusNonExistent(t *testing.T) {
 	tmpDir := t.TempDir()
-	originalPath := StatusFilePath()
-	defer func() {
-		os.Setenv("PROTON_LFS_STATUS_FILE", originalPath)
-	}()
 
 	testPath := filepath.Join(tmpDir, "nonexistent.json")
-	os.Setenv("PROTON_LFS_STATUS_FILE", testPath)
+	t.Setenv(EnvStatusFile, testPath)
 
 	_, err := ReadStatus()
 	if err == nil {
@@ -180,13 +163,9 @@ func TestReadStatusNonExistent(t *testing.T) {
 
 func TestStatusAtomicWrite(t *testing.T) {
 	tmpDir := t.TempDir()
-	originalPath := StatusFilePath()
-	defer func() {
-		os.Setenv("PROTON_LFS_STATUS_FILE", originalPath)
-	}()
 
 	testPath := filepath.Join(tmpDir, "status.json")
-	os.Setenv("PROTON_LFS_STATUS_FILE", testPath)
+	t.Setenv(EnvStatusFile, testPath)
 
 	// Write multiple times to ensure atomic writes don't corrupt
 	for i := 0; i < 10; i++ {

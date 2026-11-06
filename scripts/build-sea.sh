@@ -1,64 +1,89 @@
 #!/usr/bin/env bash
 # build-sea.sh — Build proton-drive-cli as a Node.js Single Executable Application.
 #
-# Uses Node.js 25.5+ native --build-sea (no postject required).
+# Uses the native `node --build-sea` (Node.js 25.5+; this project builds with
+# the Node.js 26 LTS line pinned in .node-version). The SEA configuration is
+# the tracked submodules/proton-drive-cli/sea-config.json; the only build-time
+# input is the running node binary, which --build-sea uses by default.
 #
 # Prerequisites:
-#   - Node.js >= 25.5
-#   - proton-drive-cli already compiled (yarn build / npm run build)
+#   - Node.js matching .node-version
+#   - proton-drive-cli already compiled (make build-drive-cli)
 #
-# Output: proton-drive-cli (or proton-drive-cli.exe on Windows) in bin/.
+# Output: bin/proton-drive-cli (proton-drive-cli.exe on Windows), or
+# $SEA_OUTPUT_DIR when set.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 DRIVE_CLI_DIR="${ROOT_DIR}/submodules/proton-drive-cli"
-OUTPUT_DIR="${ROOT_DIR}/bin"
+OUTPUT_DIR="${SEA_OUTPUT_DIR:-${ROOT_DIR}/bin}"
+NODE="${NODE:-node}"
+SEA_CONFIG="sea-config.json"
+
+# A relative SEA_OUTPUT_DIR is taken from the caller's directory (POSIX form
+# everywhere, including Git Bash on Windows), not from the submodule.
+case "$OUTPUT_DIR" in
+  /*) ;;
+  *) OUTPUT_DIR="$(pwd)/${OUTPUT_DIR}" ;;
+esac
 
 cd "$DRIVE_CLI_DIR"
 
-echo "==> Step 1: esbuild bundle"
-if [ ! -f dist/index.js ]; then
-  echo "Error: dist/index.js not found. Run 'npm run build' first." >&2
+if [ ! -f "$SEA_CONFIG" ]; then
+  echo "Error: ${DRIVE_CLI_DIR}/${SEA_CONFIG} not found." >&2
   exit 1
 fi
-node esbuild.config.mjs
+
+# "main" and "output" come from the tracked config so this script and the
+# config cannot disagree.
+sea_config_value() {
+  "$NODE" -e 'const c = require(process.argv[1]); process.stdout.write(String(c[process.argv[2]] ?? ""))' "./${SEA_CONFIG}" "$1"
+}
+BUNDLE_FILE="$(sea_config_value main)"
+SEA_OUTPUT="$(sea_config_value output)"
+if [ -z "$BUNDLE_FILE" ] || [ -z "$SEA_OUTPUT" ]; then
+  echo "Error: ${SEA_CONFIG} must define \"main\" and \"output\"." >&2
+  exit 1
+fi
+
+# Intermediate files never outlive the script, whether it succeeds or fails.
+cleanup() {
+  rm -f "$BUNDLE_FILE" "$SEA_OUTPUT"
+}
+trap cleanup EXIT
+
+NODE_VERSION="$("$NODE" --version)"
+NODE_MAJOR="${NODE_VERSION#v}"
+NODE_MAJOR="${NODE_MAJOR%%.*}"
+if [ "$NODE_MAJOR" -lt 26 ]; then
+  echo "Error: node ${NODE_VERSION} is too old for this build; use Node.js $(cat "${ROOT_DIR}/.node-version") (see .node-version)." >&2
+  exit 1
+fi
+echo "    Using node: $(command -v "$NODE") (${NODE_VERSION})"
+
+echo "==> Step 1: esbuild bundle"
+if [ ! -f dist/index.js ]; then
+  echo "Error: dist/index.js not found. Run 'make build-drive-cli' first." >&2
+  exit 1
+fi
+"$NODE" esbuild.config.mjs
 
 echo "==> Step 2: Build SEA binary"
-OUTPUT_NAME="proton-drive-cli"
+"$NODE" --build-sea "$SEA_CONFIG"
+
+OUTPUT_NAME="$SEA_OUTPUT"
 if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "cygwin" || "$OSTYPE" == "win32" ]]; then
-  OUTPUT_NAME="proton-drive-cli.exe"
+  OUTPUT_NAME="${SEA_OUTPUT}.exe"
 fi
 
-NODE_BIN="$(command -v node)"
-NODE_VERSION="$(node --version)"
-echo "    Using node: ${NODE_BIN} (${NODE_VERSION})"
-
-# Generate build-time sea config with correct paths
-SEA_BUILD_CONFIG="$(mktemp sea-config-build-XXXX.json)"
-cat > "$SEA_BUILD_CONFIG" <<SEACFG
-{
-  "main": "sea-bundle.cjs",
-  "output": "${OUTPUT_NAME}",
-  "executable": "${NODE_BIN}",
-  "disableExperimentalSEAWarning": true,
-  "useCodeCache": true
-}
-SEACFG
-
-node --build-sea "$SEA_BUILD_CONFIG"
-rm -f "$SEA_BUILD_CONFIG"
-
-# macOS: ad-hoc re-sign after build
+# macOS: the injected binary needs a fresh ad-hoc signature to run.
 if [[ "$OSTYPE" == "darwin"* ]]; then
-  codesign --sign - "$OUTPUT_NAME"
+  codesign --force --sign - "$SEA_OUTPUT"
 fi
 
-# Move to output directory
 mkdir -p "$OUTPUT_DIR"
-mv "$OUTPUT_NAME" "$OUTPUT_DIR/$OUTPUT_NAME"
-
-# Clean up intermediate files
-rm -f sea-bundle.cjs
+mv "$SEA_OUTPUT" "$OUTPUT_DIR/$OUTPUT_NAME"
+chmod +x "$OUTPUT_DIR/$OUTPUT_NAME"
 
 echo "==> SEA binary ready: $OUTPUT_DIR/$OUTPUT_NAME"

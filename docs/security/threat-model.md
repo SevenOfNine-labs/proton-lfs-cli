@@ -71,12 +71,12 @@
 
 **Mitigations**:
 
-- Non-blocking channel-based semaphore: maximum 10 concurrent operations
-- Immediate error return when semaphore is full (no queuing)
-- Per-operation timeout: 5 minutes (configurable via `exec.CommandContext`)
-- Process killed on timeout
+- One bridge subprocess per command; the number of adapter processes, and therefore of concurrent bridge subprocesses, is bounded by git-lfs (`lfs.concurrenttransfers`)
+- Per-command timeout: `--bridge-timeout` / `PROTON_LFS_BRIDGE_TIMEOUT` (default 5 minutes) plus one second per 256 KiB for uploads and downloads
+- On expiry the subprocess's process group is killed with `SIGKILL`, so helpers it spawned (git credential, pass-cli) die with it; `WaitDelay` (5 s) bounds the wait for its pipes
+- proton-drive-cli bounds its own stdin read (30 s), each request of its own API client (30 s), and SDK requests with the per-request timeout the SDK sets
 
-**Tests**: `cmd/adapter/bridge_test.go` (TestBridgeClientSemaphoreExhaustion)
+**Tests**: `cmd/adapter/bridge_test.go` (timeout scaling, process handling)
 
 ### 5. Session Token Theft
 
@@ -88,7 +88,7 @@
 - Directory permissions: `0700` (set by `ensureDir`)
 - File permissions: `0600` (set by atomic write)
 - Session stored in user home directory, not shared locations
-- Tokens can be revoked server-side via `proton-drive logout`
+- `proton-drive-cli logout` deletes the local session file; it makes no API call, so a token that may have leaked is revoked in the Proton account settings ("log out all other sessions")
 
 **Validation**: `TestCredentialSessionFilePermissions` in integration tests
 
@@ -110,8 +110,8 @@
 **Mitigations**:
 
 - Environment allowlist in `bridge.go` — only approved prefixes/names forwarded
-- Allowed: PATH, HOME, USER, SHELL, LANG, LC_*, NODE_*, XDG_*, MOCK_BRIDGE_*, PROTON_*, LFS_*, SDK_*, TMPDIR
-- Credential environment variables (if set) are only forwarded if they match the allowlist
+- Allowed: `PATH`, `HOME`, `USER`, `SHELL`, `LANG`, `LC_*`, `TERM`, `NODE_ENV`, `NODE_OPTIONS`, `NODE_PATH`, `NODE_BIN`, `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_CACHE_HOME`, `XDG_RUNTIME_DIR`, `TMPDIR`, `TMP`, `TEMP`, the Windows profile and system variables (`USERPROFILE`, `HOMEDRIVE`, `HOMEPATH`, `APPDATA`, `LOCALAPPDATA`, `SYSTEMROOT`, `WINDIR`, `COMSPEC`, `PATHEXT`), `MOCK_BRIDGE_*`, and the variables proton-drive-cli reads: `PROTON_DRIVE_CLI_APP_VERSION`, `PROTON_KEY_PASSWORD_PROVIDER`, `PROTON_KEY_PASSWORD_HOST`, `PROTON_DATA_CREDENTIAL_PROVIDER`, `PROTON_DATA_CREDENTIAL_HOST`, `PROTON_PASS_CLI_BIN`, `PROTON_AUTH_TRACE`, `PROTON_AUTH_TRACE_ID`
+- Secret-shaped variables (`PROTON_PASSWORD`, `PROTON_DATA_PASSWORD`, `PROTON_SECOND_FACTOR_CODE`) are not on the allowlist and are never forwarded; `proton-drive-cli doctor` fails when the last two are set in its own environment
 - Test coverage verifies allowlist behavior
 
 **Tests**: `cmd/adapter/bridge_test.go` (TestFilteredEnv, TestMatchesAllowlist)
@@ -132,7 +132,7 @@
   password is stored entirely within proton-drive-cli's key-password flow; it
   never passes through the Go adapter.
 - When `dataCredentialProvider=git-credential` is used, the mailbox/data password is resolved from a separate host/key (`proton-data.proton-lfs-cli.local` by default)
-- The Go adapter skips pass-cli resolution entirely in git-credential mode, eliminating that attack surface
+- The Go adapter resolves no credentials from any provider; proton-drive-cli does, and only for the key password and the optional data password
 
 **Note**: The security of stored credentials depends on the underlying credential helper (macOS Keychain, Windows Credential Manager, etc.). The git credential protocol itself does not encrypt data in transit between git and the helper.
 

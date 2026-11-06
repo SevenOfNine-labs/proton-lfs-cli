@@ -1,209 +1,235 @@
 # Usage Guide
 
-Proton LFS Backend stores Git LFS objects on Proton Drive with end-to-end encryption, using a custom Git LFS transfer adapter.
+Proton LFS stores Git LFS objects on Proton Drive with end-to-end encryption
+through a custom Git LFS transfer adapter.
 
-> **Status:** Pre-alpha. The local backend is stable for testing. The SDK (Proton Drive) backend works but depends on proton-drive-cli, which is under active development.
+> **Status:** Pre-alpha. The local backend is stable for testing. The SDK
+> (Proton Drive) backend works and depends on `proton-drive-cli`, which is
+> under active development.
 
 ## Prerequisites
 
-| Requirement | Local backend | SDK backend | System tray app |
+| Requirement | Local backend | SDK backend | Tray app |
 | --- | --- | --- | --- |
 | Git + git-lfs | Required | Required | Required |
 | Go 1.25+ | Build from source only | Build from source only | Build from source only |
-| Node.js 25+ | — | Required | Required (for SEA build) |
-| Yarn 4+ (via Corepack) | — | Required | Required |
-| pass-cli | — | If using Proton Pass | If using Proton Pass |
+| Node.js 22+ | — | Required to run `proton-drive-cli` from `dist/index.js`; not needed with the bundled standalone binary | Same as SDK backend |
+| Node.js 26 (`.node-version`) | — | Build the standalone `proton-drive-cli` binary (`make build-sea`) | Same |
+| Yarn 4 (via Corepack) | — | Build from source only | Build from source only |
+| pass-cli 2.7.0 | — | When Proton Pass stores the key password | Same |
 
-Pre-built adapter binaries are available from GitHub Releases and do not require Go.
+Pre-built adapter binaries and platform bundles come from GitHub Releases
+and need neither Go nor Node.js.
 
 ## Installation
 
-### Go Adapter only (one-line install)
+### Adapter only (one-line install)
 
-If you only need the transfer adapter (no system tray app):
+If you only need the transfer adapter (no tray app, no Proton Drive):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/SevenOfNine-ai/proton-lfs-cli/main/scripts/install-adapter.sh | bash
+curl -fsSL https://raw.githubusercontent.com/SevenOfNine-labs/proton-lfs-cli/main/scripts/install-adapter.sh | bash
 ```
 
-Override the install directory or version:
+Options are environment variables: `INSTALL_DIR` (default `/usr/local/bin`),
+`VERSION` (a release tag, default latest) and `VERIFY_CHECKSUM`
+(`auto` verifies against the release's `SHA256SUMS.txt` and warns when no
+entry exists; `required` fails without a matching checksum; `skip`).
 
 ```bash
-INSTALL_DIR=~/.local/bin VERSION=v0.1.0 curl -fsSL \
-  https://raw.githubusercontent.com/SevenOfNine-ai/proton-lfs-cli/main/scripts/install-adapter.sh | bash
+curl -fsSL https://raw.githubusercontent.com/SevenOfNine-labs/proton-lfs-cli/main/scripts/install-adapter.sh \
+  | INSTALL_DIR=~/.local/bin VERSION=v0.2.0 VERIFY_CHECKSUM=required bash
 ```
 
-> **Note:** The one-line install only installs the Go adapter binary. The local backend works with just this binary. For the SDK backend (Proton Drive) or the system tray app, use the full bundle install below.
+> **Note:** The script installs only the Go adapter binary, which is all the
+> local backend needs. For the SDK backend (Proton Drive) or the tray app use
+> a release bundle or build the full bundle below.
 
-### Full bundle (adapter + tray app + proton-drive-cli)
+### Release bundle (adapter + tray + proton-drive-cli)
 
-The full bundle includes all three components needed for a complete Proton Drive LFS setup:
+Each release ships one archive per platform, listed in `SHA256SUMS.txt`:
 
-- **git-lfs-proton-adapter** — the Git LFS custom transfer adapter
-- **proton-lfs-tray** — system tray app for status, credential setup, and login
-- **proton-drive-cli** — Proton Drive client (handles auth, encryption, file transfer)
+| Asset | Contents |
+| --- | --- |
+| `proton-lfs-cli-darwin-arm64.zip` | `ProtonLFS.app` with `Contents/MacOS/proton-lfs-tray`, `Contents/Helpers/git-lfs-proton-adapter`, `Contents/Helpers/proton-drive-cli` |
+| `proton-lfs-cli-linux-amd64.tar.gz` | `proton-lfs-tray`, `git-lfs-proton-adapter`, `proton-drive-cli`, `proton-lfs.desktop` |
+| `proton-lfs-cli-windows-amd64.zip` | the same three programs as `.exe` |
+| `git-lfs-proton-adapter-<os>-<arch>[.exe]` | standalone adapter for linux amd64/arm64, darwin amd64/arm64, windows amd64 |
 
-#### Build and install
+Verify, then install:
 
 ```bash
-git clone --recurse-submodules https://github.com/<owner>/proton-lfs-cli.git
+sha256sum -c --ignore-missing SHA256SUMS.txt      # shasum -a 256 -c on macOS
+```
+
+- macOS: unzip, move `ProtonLFS.app` to `/Applications`, then clear the
+  quarantine attribute once (`xattr -dr com.apple.quarantine /Applications/ProtonLFS.app`);
+  the app is ad-hoc signed, not notarized.
+- Linux and Windows: extract and put the three programs on `PATH`.
+
+See [Deployment](docs/operations/deployment.md) for details.
+
+### Full bundle from source
+
+```bash
+git clone --recurse-submodules https://github.com/SevenOfNine-labs/proton-lfs-cli.git
 cd proton-lfs-cli
 
-make setup            # Install Go + JS dependencies, create .env
-make install          # Build all components and install
+make setup            # Go + JS dependencies, .env from .env.example
+make install          # build adapter, tray and the proton-drive-cli SEA, then install
 ```
-
-`make install` builds the adapter, tray app, and proton-drive-cli SEA binary, then installs them:
 
 | Platform | Default location | Override |
 | --- | --- | --- |
 | macOS | `/Applications/ProtonLFS.app` | `INSTALL_APP=/path/to/App.app make install` |
 | Linux | `~/.local/bin/` | `INSTALL_BIN=/usr/local/bin make install` |
+| Windows | not supported by `make install`; use the release `.zip` | — |
 
-On both platforms, `make install` also places a `proton-lfs-cli` CLI entry point on your PATH (`~/.local/bin/proton-lfs-cli`):
+`make install` also links the tray binary as `~/.local/bin/proton-lfs-cli`
+(`INSTALL_BIN`), the name under which its command-line helpers are usually
+invoked:
 
 ```bash
 proton-lfs-cli --version
 ```
 
-To uninstall:
+`make uninstall` removes everything `make install` placed.
 
-```bash
-make uninstall
-```
+The macOS bundle layout:
 
-#### macOS .app bundle
-
-On macOS, `make install` creates a standard `.app` bundle:
-
-```
+```text
 ProtonLFS.app/
   Contents/
-    MacOS/proton-lfs-tray       ← system tray executable
-    Helpers/git-lfs-proton-adapter  ← transfer adapter
-    Helpers/proton-drive-cli        ← Proton Drive client (SEA binary)
+    MacOS/proton-lfs-tray            system tray executable
+    Helpers/git-lfs-proton-adapter   transfer adapter
+    Helpers/proton-drive-cli         Proton Drive client (standalone Node.js build)
+    Resources/AppIcon.icns
     Info.plist
 ```
 
-Launch the app from `/Applications` or Spotlight. The tray icon appears in the menu bar.
-
-#### Linux
-
-On Linux, the three binaries are installed to `~/.local/bin/` (or your chosen `INSTALL_BIN`). Run the tray app manually or set it to autostart (the tray app includes an autostart toggle in its menu).
+Launch the app from `/Applications` or Spotlight; the icon appears in the
+menu bar. On Linux run `proton-lfs-tray` by hand or enable "Start at System
+Login" in its menu.
 
 ### Adapter only (build from source)
 
-If you don't need the tray app or proton-drive-cli SEA binary:
-
 ```bash
 make setup
-make build-adapter    # Builds bin/git-lfs-proton-adapter only
-```
-
-Optionally, place it on your PATH:
-
-```bash
+make build-adapter    # bin/git-lfs-proton-adapter
 ln -s "$(pwd)/bin/git-lfs-proton-adapter" ~/.local/bin/git-lfs-proton-adapter
 ```
 
-### GitHub Release binary
-
-1. Download the binary for your platform from the GitHub Releases page. Available targets:
-   - `git-lfs-proton-adapter-linux-amd64`
-   - `git-lfs-proton-adapter-linux-arm64`
-   - `git-lfs-proton-adapter-darwin-amd64`
-   - `git-lfs-proton-adapter-darwin-arm64`
-   - `git-lfs-proton-adapter-windows-amd64.exe`
-
-2. Make it executable and move it onto your PATH:
-
-   ```bash
-   chmod +x git-lfs-proton-adapter-darwin-arm64
-   mv git-lfs-proton-adapter-darwin-arm64 ~/.local/bin/git-lfs-proton-adapter
-   ```
-
-3. Verify:
-
-   ```bash
-   git-lfs-proton-adapter --version
-   ```
-
-> **Note:** The release binary is only the Go adapter. If you plan to use the SDK backend (Proton Drive), clone the repository and build proton-drive-cli from source (`make build-drive-cli`). The local backend works with just the binary.
+Building `proton-drive-cli` as well: `make build-drive-cli` (produces
+`submodules/proton-drive-cli/dist/index.js`, run with Node.js 22+), or
+`make build-sea` for the standalone binary (needs Node.js 26).
 
 ## System Tray App
 
-The system tray app provides a menu bar interface for managing Proton LFS. It monitors transfer status, handles credential setup, and manages Proton login sessions.
+The tray app shows readiness and transfer status, runs the browser sign-in,
+keeps the session token fresh, and registers the adapter in git. Everything
+below is detailed in the [Tray Reference](docs/reference/tray.md).
 
-### Menu overview
+### Menu
 
-```
-Proton LFS v...
+```text
+Proton LFS <version>
 ─────────────────────────────
-Credential Store              >
-  ✓ Git Credential Manager
-    Proton Pass
+Status: Ready
+Session: Signed in
+Transfers: Ready
+Refresh: Due in 23h
 ─────────────────────────────
-  Connect to Proton…
-  Enable LFS Backend
+Disconnect from Proton          (Connect to Proton... when signed out)
+Configure Data Password...      (enabled only when a data password is missing)
+Recheck Status
 ─────────────────────────────
-  Start at System Login
+✓ Use Proton Pass
+  Use Git Credential Manager
 ─────────────────────────────
-Quit
-```
-
-After connecting and enabling LFS, the checkmarks update automatically:
-
-```
-✓ Connected to Proton
-✓ LFS Backend Enabled
+✓ LFS Backend Enabled           (Enable LFS Backend before registration)
+─────────────────────────────
+Open Logs
+Run Doctor...
 ✓ Start at System Login
+─────────────────────────────
+Quit Proton LFS
 ```
+
+`Status` is `Ready` only when a browser-fork session is saved, its token is
+not expired, its key password is recorded, and no local blocker is known;
+otherwise it reads `Setup needed` (signed in but blocked) or `Not connected`.
 
 ### Status indicators
 
-**Tray icon** changes color based on the adapter's state:
+The icon has four images; the adapter's status file has seven states:
 
-| Icon | State | Meaning |
+| Icon | States | Meaning |
 | --- | --- | --- |
-| Grey | idle | No recent transfers |
-| Green | ok | Last transfer succeeded |
-| Red | error | Last transfer failed |
-| Blue | transferring | Transfer in progress |
+| Grey | `idle` while not signed in | No session, or nothing reported yet |
+| Green | `idle`, `ok` | Ready; the tooltip names the last transfer |
+| Blue | `transferring` | Transfer in progress (tooltip: Uploading…/Downloading…) |
+| Red | `error`, `rate_limited`, `auth_required`, `captcha` | The tooltip names which; also shown while sign-in is missing or blocked |
 
-**Menu checkmarks** next to "Connect to Proton" and "Enable LFS Backend" update every 5 seconds based on session file and git config state. Transfer direction (uploading/downloading) is shown in the tray tooltip.
+Status is read from `~/.proton-lfs/status.json` every 5 seconds; see
+[Status File Reference](docs/reference/status-file.md).
 
-Status is read from `~/.proton-lfs-cli/status.json`, polled every 5 seconds.
+### Key-password provider
 
-### Credential Store
+`Use Proton Pass` and `Use Git Credential Manager` choose where
+`proton-drive-cli login` stores the browser-derived key password:
 
-Choose where your Proton credentials are stored:
+- Proton Pass: through `pass-cli` (run `pass-cli login` first).
+- Git Credential Manager: the system git credential helper (macOS Keychain,
+  Windows Credential Manager, Linux Secret Service).
 
-- **Git Credential Manager** — uses the system's git credential helper (macOS Keychain, Windows Credential Manager, or Linux Secret Service)
-- **Proton Pass** — uses Proton Pass CLI (`pass-cli`) for encrypted credential storage
-
-See [Credential providers](#credential-providers) below for setup details.
+The choice is saved as `keyPasswordProvider` in `~/.proton-lfs/config.json`
+(default `pass-cli`). See [Key-password providers](#key-password-providers).
 
 ### Connect to Proton
 
-The "Connect to Proton..." button handles the full authentication flow automatically:
+`Connect to Proton...` runs
+`proton-drive-cli login --key-password-provider <provider> -q`. A browser
+window opens on Proton's sign-in page; after approval the CLI saves session
+tokens to `~/.proton-drive-cli/session.json` and stores the key password in
+the chosen provider. The tray then shows `Proton LFS Ready`, or
+`Signed in; setup needed` when a local blocker remains. If Proton
+rate-limited the sign-in, the tray refuses another attempt for one hour.
 
-1. **Checks** if credentials are already stored (silent subprocess)
-2. **If missing** — opens a Terminal window for interactive credential setup
-3. **If present** — logs in to Proton silently in the background
-4. **Shows feedback** via native OS notification ("Connected to Proton", "Login failed", etc.)
-
-After a successful connection, the checkmark appears within 5 seconds. The tray app also refreshes the session token every 15 minutes to keep it alive.
+The tray refreshes the session token 10 minutes before it expires (every 12
+hours when no expiry is known). A recoverable failure is retried after one
+minute; a rejected refresh token (Proton code 10013) stops the refresh for
+that session and the menu shows `Reconnect required` until you connect again.
 
 ### Enable LFS Backend
 
-Registers the adapter and proton-drive-cli with Git's global config. This is equivalent to running the three `git config --global` commands manually (see [Register the custom transfer adapter](#3-register-the-custom-transfer-adapter)).
+Writes the three `git config --global` keys described in
+[Register the custom transfer adapter](#3-register-the-custom-transfer-adapter)
+with `--backend sdk --drive-cli-bin <bundled proton-drive-cli>` and, when a
+data-credential provider is configured, the `--data-credential-*` flags.
+`proton-lfs-tray register` does the same from the command line.
+
+### Open Logs and Run Doctor
+
+`Open Logs` tails `~/.proton-lfs/tray.log` in a terminal. `Run Doctor...`
+runs `proton-drive-cli doctor` with the configured providers; the doctor is
+offline and reports whether a transfer can be attempted.
 
 ### Start at System Login
 
-Toggles automatic launch at login:
+macOS: creates or removes `~/Library/LaunchAgents/com.proton.lfs-tray.plist`.
+Linux: creates or removes `~/.config/autostart/proton-lfs.desktop`.
 
-- **macOS**: creates/removes a LaunchAgent plist
-- **Linux**: creates/removes an XDG autostart `.desktop` file
+### Command-line helpers
+
+```text
+proton-lfs-tray login             browser sign-in with the configured provider
+proton-lfs-tray logout            clear the session
+proton-lfs-tray register          write the global git LFS registration
+proton-lfs-tray status            session, LFS, provider, transfer, readiness, refresh
+proton-lfs-tray scope-diagnostics [--live]
+                                  redacted auth/scope evidence
+proton-lfs-tray config [provider] show or set the key-password provider
+```
 
 ## Configuring a Git Repository
 
@@ -227,22 +253,24 @@ git add .gitattributes
 # Point Git LFS to the adapter binary
 git config lfs.customtransfer.proton.path /path/to/git-lfs-proton-adapter
 
-# Configure adapter arguments (choose one backend — see sections below)
-git config lfs.customtransfer.proton.args "--backend=local --local-store-dir=/path/to/store"
+# Configure adapter arguments (choose one backend; see the sections below)
+git config lfs.customtransfer.proton.args "--backend local --local-store-dir /path/to/store"
 
-# Tell Git LFS to use the proton adapter for all transfers
+# Route all transfers through the proton adapter (standalone mode, no LFS server)
 git config lfs.standalonetransferagent proton
 ```
 
-Replace `/path/to/git-lfs-proton-adapter` with the actual path (e.g., `~/.local/bin/git-lfs-proton-adapter` or the absolute path to `bin/git-lfs-proton-adapter` in the cloned repo).
+Replace `/path/to/git-lfs-proton-adapter` with the real path, for example
+`~/.local/bin/git-lfs-proton-adapter` or the adapter inside the `.app`
+bundle.
 
-> **Tip:** If you installed via `make install` and launched the tray app, click "Enable LFS Backend" to run these commands automatically.
+> **Tip:** With the tray app running, "Enable LFS Backend" writes these keys
+> globally for the SDK backend.
 
 ## Local Backend (testing / offline)
 
-The local backend stores LFS objects on the local filesystem. No network access, no credentials, no bridge service. Use it to verify the adapter works before configuring Proton Drive.
-
-### Quick walkthrough
+The local backend stores objects on the filesystem under
+`<store-dir>/<oid[0:2]>/<oid[2:4]>/<oid>`. No network, no credentials.
 
 ```bash
 # 1. Create a bare remote (simulates a Git server)
@@ -258,7 +286,7 @@ mkdir -p /tmp/lfs-store
 
 # 4. Configure the adapter
 git config lfs.customtransfer.proton.path /path/to/git-lfs-proton-adapter
-git config lfs.customtransfer.proton.args "--backend=local --local-store-dir=/tmp/lfs-store --debug"
+git config lfs.customtransfer.proton.args "--backend local --local-store-dir /tmp/lfs-store --debug"
 git config lfs.standalonetransferagent proton
 
 # 5. Add a remote and track a file type
@@ -277,7 +305,7 @@ cd /tmp
 git clone /tmp/lfs-remote.git lfs-clone
 cd lfs-clone
 git config lfs.customtransfer.proton.path /path/to/git-lfs-proton-adapter
-git config lfs.customtransfer.proton.args "--backend=local --local-store-dir=/tmp/lfs-store --debug"
+git config lfs.customtransfer.proton.args "--backend local --local-store-dir /tmp/lfs-store --debug"
 git config lfs.standalonetransferagent proton
 git lfs pull
 
@@ -287,35 +315,50 @@ diff /tmp/lfs-test/test.bin /tmp/lfs-clone/test.bin && echo "Roundtrip OK"
 
 ## SDK Backend (Proton Drive)
 
-The SDK backend uploads and downloads LFS objects through Proton Drive with end-to-end encryption. The Go adapter spawns `proton-drive-cli bridge` as a subprocess, communicating via JSON over stdin/stdout.
+The SDK backend uploads and downloads objects through Proton Drive with
+end-to-end encryption. For every bridge command the adapter starts
+`proton-drive-cli bridge <command>` as a subprocess and exchanges JSON over
+stdin/stdout. Objects are stored at `/LFS/<oid[0:2]>/<oid[2:4]>/<oid>`
+(`LFS_STORAGE_BASE` changes the base folder).
 
-### 1. Build proton-drive-cli (if not done already)
+### 1. Get proton-drive-cli
+
+Use the binary from a release bundle, or build it:
 
 ```bash
-cd /path/to/proton-lfs-cli
-make build-all    # or: make build-adapter && make build-drive-cli
+make build-drive-cli      # submodules/proton-drive-cli/dist/index.js (Node.js 22+)
+make build-sea            # bin/proton-drive-cli standalone binary (Node.js 26)
 ```
 
-### 2. Set up credentials
+### 2. Sign in once
 
-The adapter resolves credentials through one of two providers. Direct username/password environment variables are not supported. See [Credential providers](#credential-providers) below for setup instructions.
+Account login is browser-based and happens before any transfer:
+
+```bash
+pass-cli login                                        # only for the pass-cli provider
+proton-drive-cli login --key-password-provider pass-cli   # or git-credential
+proton-drive-cli doctor                               # offline readiness check
+```
+
+`login` saves session tokens to `~/.proton-drive-cli/session.json` and
+stores the browser-derived key password in the provider (see
+[Key-password providers](#key-password-providers)). The tray's
+"Connect to Proton..." runs the same command.
 
 ### 3. Configure the adapter
 
 ```bash
 cd your-repo
 git config lfs.customtransfer.proton.path /path/to/git-lfs-proton-adapter
-git config lfs.customtransfer.proton.args "--backend=sdk --drive-cli-bin=/path/to/proton-drive-cli"
+git config lfs.customtransfer.proton.args "--backend sdk --drive-cli-bin /path/to/proton-drive-cli"
 git config lfs.standalonetransferagent proton
 ```
 
-To use git-credential instead of pass-cli, add the credential provider flag:
+`--drive-cli-bin` accepts the standalone binary or `dist/index.js` (run with
+`node`, or `NODE_BIN`). The key-password provider is not an adapter flag:
+the adapter never logs in, it reuses the saved session.
 
-```bash
-git config lfs.customtransfer.proton.args "--backend=sdk --credential-provider git-credential --drive-cli-bin=/path/to/proton-drive-cli"
-```
-
-### 4. Use Git normally
+### 4. Use git normally
 
 ```bash
 git add large-file.psd
@@ -323,133 +366,158 @@ git commit -m "Add design file"
 git push
 ```
 
-LFS objects are encrypted and uploaded to Proton Drive automatically.
+Before each transfer session the adapter runs the offline
+`bridge auth-state` check and refuses to transfer unless it reports `ready`;
+the error names what to do (see [Troubleshooting](#troubleshooting)).
 
-### 2FA and data password
+### Two-factor authentication and CAPTCHA
 
-If your Proton account uses two-factor authentication, run interactive `proton-drive login` first. Transfer commands surface `TWO_FACTOR_REQUIRED` and stop instead of repeatedly trying to log in.
+Both are completed in the browser during `proton-drive-cli login`. Transfer
+commands never prompt; they stop with `two_factor_required` or
+`captcha_required`.
 
-If your Proton account uses a separate mailbox/data password, store that password as a distinct secure credential entry and opt into a separate data credential provider. Do not reuse the login password unless Proton itself uses the same password mode for the account.
+### Two-password accounts (mailbox/data password)
+
+Browser-fork sessions unlock Drive with the stored key password, also for
+accounts in two-password mode. Configure a separate data-password entry only
+when `proton-drive-cli doctor` or `bridge auth-state` reports
+`needs_data_password`. The entry lives under the host
+`proton-data.proton-lfs-cli.local`:
 
 ```bash
+# git credential helper
 printf "protocol=https\nhost=proton-data.proton-lfs-cli.local\nusername=your.email@proton.me\npassword=<mailbox-data-password>\n\n" | git credential approve
-git config lfs.customtransfer.proton.args "--backend=sdk --credential-provider git-credential --data-credential-provider git-credential --drive-cli-bin=/path/to/proton-drive-cli"
+git config lfs.customtransfer.proton.args "--backend sdk --drive-cli-bin /path/to/proton-drive-cli --data-credential-provider git-credential"
 ```
 
-For Proton Pass, create a second login item with URL `https://proton-data.proton-lfs-cli.local`, then add `--data-credential-provider pass-cli`.
-
-Before attempting a real login or SDK transfer, run the offline preflight:
+For Proton Pass, create a login item with URL
+`https://proton-data.proton-lfs-cli.local` in any vault and use
+`--data-credential-provider pass-cli`. Check the result offline:
 
 ```bash
-proton-drive doctor --credential-provider git-credential --data-credential-provider git-credential
+proton-drive-cli doctor --key-password-provider pass-cli --data-credential-provider pass-cli --require-data-password
 ```
 
-The doctor command checks local credential entries, session-file hygiene, stale
-secret environment variables, and the bridge entry point without contacting
-Proton.
+## Key-password providers
 
-## Credential Providers
+`proton-drive-cli login` derives a key password during browser sign-in and
+stores it, keyed by the session UID, under the host
+`proton-drive-key.proton-lfs-cli.local` in one of two providers. The CLI
+creates and verifies that entry itself; you never create it by hand.
 
-The adapter supports two credential providers, controlled by `PROTON_CREDENTIAL_PROVIDER` or `--credential-provider`:
+### Proton Pass (pass-cli, default)
+
+```bash
+pass-cli login                                          # authenticate pass-cli
+proton-drive-cli login --key-password-provider pass-cli
+```
+
+The entry appears in Proton Pass as a login item titled
+`Proton proton-drive-key.proton-lfs-cli.local`. `pass-cli info` shows whether
+pass-cli itself is logged in. `PROTON_PASS_CLI_BIN` overrides the pass-cli
+binary path (default `pass-cli` on `PATH`); the tray sets it for the bundled
+environment automatically.
 
 ### Git Credential Manager (git-credential)
 
-Uses the system's git credential helper to store and retrieve credentials. This is the simplest setup on macOS (Keychain) and Windows (Credential Manager).
-
-**Setup:**
-
 ```bash
-# Store your Proton credentials in the system credential helper
-proton-drive-cli credential store -u your.email@proton.me
-
-# Verify they are stored
-proton-drive-cli credential verify
+proton-drive-cli login --key-password-provider git-credential
 ```
 
-Or, if using the tray app: select "Git Credential Manager" in the Credential Store menu, then click "Connect to Proton...".
+The key password is stored with `git credential approve` for host
+`proton-drive-key.proton-lfs-cli.local` and read back with
+`git credential fill`; which store backs it depends on your git credential
+helper (macOS Keychain, Windows Credential Manager, Linux Secret Service).
 
-**How it works:** The adapter sends `{ "credentialProvider": "git-credential" }` to proton-drive-cli, which resolves credentials locally via `git credential fill`. If `--data-credential-provider git-credential` is configured, the mailbox/data password is resolved from the separate `proton-data.proton-lfs-cli.local` host. Credentials never leave the local machine.
+### Provider selection order
 
-### Proton Pass (pass-cli)
-
-Uses Proton Pass CLI for encrypted credential storage. This is the default provider.
-
-**Setup:**
-
-```bash
-# Log in to Proton Pass (opens browser for OAuth)
-pass-cli login
-```
-
-Credentials should be stored as a login item with a `proton.me` URL in any vault. `proton-drive-cli` searches all vaults for the first matching entry.
-
-**Setup via CLI:**
-
-```bash
-proton-drive credential store --provider pass-cli   # Create entry interactively
-proton-drive credential verify --provider pass-cli  # Verify entry exists
-```
-
-**How it works:** The adapter sends `{ "credentialProvider": "pass-cli" }` to proton-drive-cli, which resolves credentials by searching Proton Pass vaults internally. If `--data-credential-provider pass-cli` is configured, the mailbox/data password is resolved from a separate Proton Pass login item with URL `https://proton-data.proton-lfs-cli.local`. The Go adapter never sees raw credentials.
-
-The `PROTON_PASS_CLI_BIN` environment variable can override the pass-cli binary path (default: `pass-cli`).
+`--key-password-provider`, then `PROTON_KEY_PASSWORD_PROVIDER`, then
+`pass-cli`. The tray passes the provider from `~/.proton-lfs/config.json`.
+`--key-password-host` / `PROTON_KEY_PASSWORD_HOST` change the host (rarely
+needed).
 
 ## Global vs Per-Repo Configuration
 
-The examples above use per-repo configuration (stored in `.git/config`). To apply settings to all repositories, use `--global`:
+The examples above use per-repository configuration (`.git/config`). For all
+repositories use `--global`:
 
 ```bash
 git config --global lfs.customtransfer.proton.path ~/.local/bin/git-lfs-proton-adapter
-git config --global lfs.customtransfer.proton.args "--backend=local --local-store-dir=$HOME/.lfs-store"
+git config --global lfs.customtransfer.proton.args "--backend local --local-store-dir $HOME/.lfs-store"
 git config --global lfs.standalonetransferagent proton
 ```
 
-Per-repo settings override global settings, so you can set a global default and override specific repositories as needed.
+Per-repository settings override global ones.
+
+## Upgrading from 0.1.x
+
+- The adapter no longer accepts `--credential-provider`. The tray removes it
+  from `lfs.customtransfer.proton.args` when it starts; without the tray, run
+  `proton-lfs-tray register` or delete the option from that setting by hand.
+- `~/.proton-lfs/config.json` stores the key-password provider as
+  `keyPasswordProvider`; a file with the earlier `credentialProvider` key is
+  read and rewritten on the next save.
+- The macOS autostart agent is now `com.proton.lfs-tray`; toggling "Start at
+  System Login" removes the earlier `com.proton.git-lfs-tray` agent.
 
 ## Troubleshooting
 
 ### Enable debug logging
 
-Add `--debug` to the adapter arguments:
+Add `--debug` to the adapter arguments; output goes to stderr, which git-lfs
+shows with `GIT_TRACE=1`:
 
 ```bash
-git config lfs.customtransfer.proton.args "--backend=local --local-store-dir=/tmp/lfs-store --debug"
+git config lfs.customtransfer.proton.args "--backend local --local-store-dir /tmp/lfs-store --debug"
+GIT_TRACE=1 git push
 ```
-
-Debug output is written to stderr, which Git LFS displays during transfers.
 
 ### Common issues
 
 | Symptom | Cause | Fix |
 | --- | --- | --- |
-| `transfer "proton": not found` | Adapter binary not on PATH or `lfs.customtransfer.proton.path` is wrong | Verify the path: `git config lfs.customtransfer.proton.path` |
-| `failed to resolve sdk credentials` | pass-cli not logged in or references are wrong | Run `pass-cli login` and check `PROTON_PASS_*` env vars |
-| `proton-drive-cli` returns auth error | Session expired or credentials invalid | Re-run `pass-cli login` or click "Connect to Proton..." in the tray app |
-| CAPTCHA required | New Proton accounts may trigger CAPTCHA | Log in via the Proton web app first to clear the CAPTCHA |
-| `node not found` in Make targets | Node.js is managed by nvm/fnm and not visible to Make's shell | Pass it explicitly: `make test-integration-sdk NODE="$(command -v node)"` |
-| Tray icon stays grey | No status file yet (no transfers have run) | Push or pull an LFS object to generate `~/.proton-lfs-cli/status.json` |
-| "Error: CLI not found" in tray | proton-drive-cli not found relative to tray binary | Reinstall with `make install` or verify the `.app` bundle structure |
+| `transfer "proton": not found` | `lfs.customtransfer.proton.path` is wrong or the adapter is not executable | `git config lfs.customtransfer.proton.path` and check the file |
+| `no ready Proton Drive session; run proton-drive-cli login …` (`needs_login`) | No saved session | `proton-drive-cli login --key-password-provider <provider>` or "Connect to Proton..." |
+| `Proton Drive session is expired …` / `… is invalid …` (`session_expired`, `session_invalid`) | Token expired and was not refreshed, or the session file is damaged | Run `proton-drive-cli login` again; the tray refreshes tokens while it runs |
+| `stored browser-fork key password required …` (`needs_key_password`) | The key password is missing from the provider (pass-cli logged out, item deleted, provider changed) | For pass-cli run `pass-cli login`; then `proton-drive-cli login` again with the same provider |
+| `mailbox/data password required …` (`needs_data_password`) | Two-password account whose session cannot use the key password | Store the mailbox password and add `--data-credential-provider` (see above) |
+| `Proton rejected this app/session authorization scope` (`insufficient_scope`, Proton 9101) | The app identity or session scope is rejected by Proton | `proton-lfs-tray scope-diagnostics`, then follow `docs/operations/live-canary-runbook.md`; do not retry login |
+| `rate limited by proton api` | Proton rate limit | Wait; the tray blocks sign-in for one hour after a rate-limited login |
+| `captcha verification required` | Proton requires CAPTCHA | Run `proton-drive-cli login` and complete it in the browser |
+| `bridge <command> timed out after 5m0s` | Large object or slow network exceeded the base timeout | Add `--bridge-timeout 20m` (or `PROTON_LFS_BRIDGE_TIMEOUT`) to the adapter arguments |
+| `node not found` in Make targets | Node.js is managed by nvm/fnm and not visible to Make's shell | `make test-integration-sdk NODE="$(command -v node)"` |
+| Tray icon stays grey | No session, or no status file yet | Connect, then push or pull an LFS object to create `~/.proton-lfs/status.json` |
+| "Error: CLI not found" in the tray | `proton-drive-cli` is not next to the tray binary | Reinstall with `make install` or check the `.app` bundle structure |
+| `Refresh: Reconnect required` | Proton rejected the refresh token (code 10013) | "Connect to Proton..." creates a new session |
 
 ## Adapter CLI Reference
 
-```
+```text
 git-lfs-proton-adapter [flags]
 ```
 
-The adapter reads JSON messages from stdin and writes JSON responses to stdout, following the [Git LFS custom transfer protocol](https://github.com/git-lfs/git-lfs/blob/main/docs/custom-transfers.md).
+The adapter reads JSON messages from stdin and writes JSON responses to
+stdout following the
+[Git LFS custom transfer protocol](https://github.com/git-lfs/git-lfs/blob/main/docs/custom-transfers.md).
+`git-lfs-proton-adapter --help` prints the full usage text.
 
 ### Flags
 
 | Flag | Environment variable | Default | Description |
 | --- | --- | --- | --- |
 | `--backend` | `PROTON_LFS_BACKEND` | `local` | Transfer backend: `local` or `sdk` |
-| `--credential-provider` | `PROTON_CREDENTIAL_PROVIDER` | `pass-cli` | Credential provider: `pass-cli` or `git-credential` |
-| `--data-credential-provider` | `PROTON_DATA_CREDENTIAL_PROVIDER` | (none) | Optional separate mailbox/data password provider |
-| `--data-credential-host` | `PROTON_DATA_CREDENTIAL_HOST` | `proton-data.proton-lfs-cli.local` | Credential host/key for mailbox/data password lookup |
-| `--drive-cli-bin` | `PROTON_DRIVE_CLI_BIN` | (auto-detected) | Path to the proton-drive-cli binary (sdk backend only) |
-| `--local-store-dir` | `PROTON_LFS_LOCAL_STORE_DIR` | (none) | Directory for local object storage (local backend only) |
-| `--allow-mock-transfers` | `ADAPTER_ALLOW_MOCK_TRANSFERS` | `false` | Enable mock transfer simulation (testing only) |
-| `--debug` | — | `false` | Enable debug logging to stderr |
+| `--drive-cli-bin` | `PROTON_DRIVE_CLI_BIN` | `submodules/proton-drive-cli/dist/index.js` | proton-drive-cli entry point: a `.js` file run with node, or the standalone executable (sdk backend) |
+| `--local-store-dir` | `PROTON_LFS_LOCAL_STORE_DIR` | (none) | Object directory of the local backend |
+| `--allow-mock-transfers` | `ADAPTER_ALLOW_MOCK_TRANSFERS` | `false` | Simulate transfers (protocol tests only) |
+| `--data-credential-provider` | `PROTON_DATA_CREDENTIAL_PROVIDER` | (none) | Mailbox/data password provider: `pass-cli` or `git-credential` |
+| `--data-credential-host` | `PROTON_DATA_CREDENTIAL_HOST` | `proton-data.proton-lfs-cli.local` | Host/key of the mailbox/data password entry |
+| `--bridge-timeout` | `PROTON_LFS_BRIDGE_TIMEOUT` | `5m` | Base timeout per bridge command; uploads and downloads add 1 s per 256 KiB |
+| `--debug` | — | `false` | Debug logging to stderr |
 | `--version` | — | — | Print version and exit |
 
-Environment variables are read as defaults; flags override them.
+Environment-only settings: `NODE_BIN` (Node.js binary for a `.js` entry
+point), `LFS_STORAGE_BASE` (remote base folder, default `LFS`),
+`PROTON_APP_VERSION` (Proton app-version override), `PROTON_LFS_STATUS_FILE`
+(status file path). Environment variables are read as defaults; flags
+override them. The full reference, including the variables forwarded to
+proton-drive-cli, is [docs/reference/adapter.md](docs/reference/adapter.md).

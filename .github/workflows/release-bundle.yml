@@ -1,5 +1,11 @@
 name: Release Bundle
 
+# The single release pipeline. On a v* tag it:
+#   1. builds the standalone adapter binaries (build.yml, workflow_call),
+#   2. builds adapter + tray + proton-drive-cli SEA per platform,
+#   3. packages the platform bundles (.app zip, .tar.gz, .zip),
+#   4. publishes one GitHub Release with every asset and one SHA256SUMS.txt.
+# workflow_dispatch runs steps 1-3 only (artifacts, no release).
 on:
   push:
     tags:
@@ -11,9 +17,15 @@ permissions:
 
 concurrency:
   group: release-bundle-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  adapters:
+    name: Standalone adapters
+    uses: ./.github/workflows/build.yml
+    with:
+      version: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+
   build-all:
     name: Build (${{ matrix.target }})
     runs-on: ${{ matrix.os }}
@@ -36,27 +48,33 @@ jobs:
             goarch: amd64
             target: windows-amd64
 
+    env:
+      # One version source for every binary built in this job.
+      VERSION: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
 
-      - name: Init submodules
+      # Only proton-drive-cli (and its vendored SDK) is built here; git-lfs and
+      # pass-cli are not part of the bundle.
+      - name: Init proton-drive-cli submodule
         shell: bash
         run: |
-          git submodule update --init submodules/git-lfs
-          git submodule update --init submodules/pass-cli
           git submodule update --init submodules/proton-drive-cli
-          cd submodules/proton-drive-cli && git submodule update --init submodules/sdk
+          git -C submodules/proton-drive-cli submodule update --init submodules/sdk
 
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: "25"
+          node-version-file: .node-version
 
       - name: Enable Corepack + Yarn 4
         shell: bash
@@ -67,44 +85,18 @@ jobs:
           corepack prepare yarn@4.1.1 --activate
           yarn --version
 
-      # ── Go adapter (CGO_ENABLED=0) ──────────────────────────
+      # ── Go adapter and tray (scripts/build-go.sh: cgo only for the macOS tray)
       - name: Build adapter
-        env:
-          GOOS: ${{ matrix.goos }}
-          GOARCH: ${{ matrix.goarch }}
-          CGO_ENABLED: "0"
         shell: bash
-        run: |
-          mkdir -p build
-          EXT=""
-          if [ "${{ matrix.goos }}" = "windows" ]; then EXT=".exe"; fi
-          BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-          go build \
-            -trimpath \
-            -ldflags "-s -w -X main.GitCommit=${{ github.sha }} -X main.BuildTime=${BUILD_TIME}" \
-            -o "build/git-lfs-proton-adapter${EXT}" \
-            ./cmd/adapter
+        env:
+          STRIP: "1"
+        run: bash scripts/build-go.sh adapter "build/git-lfs-proton-adapter${{ matrix.goos == 'windows' && '.exe' || '' }}"
 
-      # ── Go tray app (CGO_ENABLED=1, native runner) ──────────
       - name: Build tray app
-        env:
-          GOOS: ${{ matrix.goos }}
-          GOARCH: ${{ matrix.goarch }}
-          CGO_ENABLED: "1"
         shell: bash
-        run: |
-          EXT=""
-          EXTRA_LDFLAGS=""
-          if [ "${{ matrix.goos }}" = "windows" ]; then
-            EXT=".exe"
-            EXTRA_LDFLAGS="-H windowsgui"
-          fi
-          BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-          go build \
-            -trimpath \
-            -ldflags "-s -w ${EXTRA_LDFLAGS} -X main.Version=${{ github.ref_name }}" \
-            -o "build/proton-lfs-tray${EXT}" \
-            ./cmd/tray
+        env:
+          STRIP: "1"
+        run: bash scripts/build-go.sh tray "build/proton-lfs-tray${{ matrix.goos == 'windows' && '.exe' || '' }}"
 
       # ── proton-drive-cli SEA ─────────────────────────────────
       - name: Install JS dependencies
@@ -125,44 +117,13 @@ jobs:
 
       - name: Build proton-drive-cli SEA
         shell: bash
-        run: |
-          cd submodules/proton-drive-cli
-          node esbuild.config.mjs
-
-          EXT=""
-          if [ "${{ matrix.goos }}" = "windows" ]; then EXT=".exe"; fi
-          OUTPUT_NAME="proton-drive-cli${EXT}"
-          NODE_BIN="$(command -v node)"
-          # Windows: convert MSYS2 path (/c/...) to native path (C:/...)
-          if [ "${{ matrix.goos }}" = "windows" ]; then
-            NODE_BIN="$(cygpath -m "$NODE_BIN")"
-            # Ensure .exe extension (cygpath may or may not include it)
-            [[ "$NODE_BIN" != *.exe ]] && NODE_BIN="${NODE_BIN}.exe"
-          fi
-
-          # Generate build-time config with resolved paths
-          cat > sea-config-ci.json <<SEACFG
-          {
-            "main": "sea-bundle.cjs",
-            "output": "${OUTPUT_NAME}",
-            "executable": "${NODE_BIN}",
-            "disableExperimentalSEAWarning": true,
-            "useCodeCache": true
-          }
-          SEACFG
-
-          node --build-sea sea-config-ci.json
-
-          # macOS: ad-hoc re-sign
-          if [[ "$OSTYPE" == "darwin"* ]]; then
-            codesign --sign - "$OUTPUT_NAME"
-          fi
-
-          mv "$OUTPUT_NAME" "../../build/$OUTPUT_NAME"
-          rm -f sea-bundle.cjs sea-config-ci.json
+        env:
+          # Relative to the checkout: a POSIX path on every runner.
+          SEA_OUTPUT_DIR: build
+        run: bash scripts/build-sea.sh
 
       - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: build-${{ matrix.target }}
           path: build/
@@ -170,36 +131,42 @@ jobs:
 
   package:
     name: Package (${{ matrix.target }})
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 10
     needs: build-all
     strategy:
       fail-fast: false
       matrix:
         include:
+          # The .app is ad-hoc signed and zipped with ditto, so it needs macOS.
           - target: darwin-arm64
             goos: darwin
+            os: macos-14
           - target: linux-amd64
             goos: linux
+            os: ubuntu-latest
           - target: windows-amd64
             goos: windows
+            os: ubuntu-latest
 
     steps:
       - name: Checkout (for packaging scripts)
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Download build artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: build-${{ matrix.target }}
           path: build/
 
       - name: Package bundle
         shell: bash
+        env:
+          VERSION: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
         run: bash scripts/package-bundle.sh "${{ matrix.target }}" "${{ matrix.goos }}"
 
       - name: Upload package artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: package-${{ matrix.target }}
           path: dist/
@@ -208,44 +175,70 @@ jobs:
   release:
     name: Publish GitHub Release
     runs-on: ubuntu-latest
-    timeout-minutes: 5
-    needs: package
+    timeout-minutes: 10
+    needs:
+      - adapters
+      - package
     if: startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: write
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
-      - name: Download all packages
-        uses: actions/download-artifact@v4
+      - name: Download platform bundles
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: package-*
           path: dist/
           merge-multiple: true
 
+      - name: Download standalone adapters
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: git-lfs-proton-adapter-*
+          path: dist/
+          merge-multiple: true
+
+      # One checksum file covering every published asset (bundles and the
+      # standalone adapters that scripts/install-adapter.sh verifies).
       - name: Generate checksums
         run: |
           cd dist
-          sha256sum * > SHA256SUMS.txt
+          ls -l
+          sha256sum -- * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
 
       - name: Install git-cliff
+        env:
+          GIT_CLIFF_VERSION: 2.14.2
+          # sha512 published next to the release asset:
+          # https://github.com/orhun/git-cliff/releases/tag/v2.14.2
+          GIT_CLIFF_SHA512: 26d1f7c8ea2400f2ccb0b2e7f321635f600b583bf4cd1f7afaa5e8c24068ad1088a2504e0a4d9f4333d4bb20a80329327d9462634343ee3af91e1a7fbdc6f18a
         run: |
-          wget https://github.com/orhun/git-cliff/releases/download/v2.11.0/git-cliff-2.11.0-x86_64-unknown-linux-gnu.tar.gz
-          tar -xzf git-cliff-2.11.0-x86_64-unknown-linux-gnu.tar.gz
-          sudo mv git-cliff-2.11.0/git-cliff /usr/local/bin/
+          set -euo pipefail
+          archive="git-cliff-${GIT_CLIFF_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
+          curl -fsSL -o "$archive" \
+            "https://github.com/orhun/git-cliff/releases/download/v${GIT_CLIFF_VERSION}/${archive}"
+          echo "${GIT_CLIFF_SHA512}  ${archive}" | sha512sum -c -
+          tar -xzf "$archive"
+          sudo mv "git-cliff-${GIT_CLIFF_VERSION}/git-cliff" /usr/local/bin/
           git-cliff --version
 
       - name: Generate changelog
+        env:
+          # Lets git-cliff resolve PR numbers and authors (cliff.toml remote fields).
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          git-cliff --config cliff.toml --latest --strip header --output CHANGELOG.md
+          git-cliff --config cliff.toml --github-repo "${{ github.repository }}" \
+            --latest --strip header --output CHANGELOG.md
           cat CHANGELOG.md
 
       - name: Create release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3.0.4
         with:
           body_path: CHANGELOG.md
           files: |

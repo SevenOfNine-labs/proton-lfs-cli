@@ -23,8 +23,11 @@ refresh behavior changes.
 
 ## Credential Provider Selection
 
-- Verify `pass-cli` remains the default provider for adapter transfers.
-- Verify `git-credential` can be selected through adapter args or environment.
+- Verify `pass-cli` is the default key-password provider (`keyPasswordProvider`
+  in `~/.proton-lfs/config.json`).
+- Verify `git-credential` can be selected through the tray check item and
+  `proton-lfs-tray config git-credential`, and that `register` writes no
+  key-password flag into `lfs.customtransfer.proton.args`.
 - Verify two-password/data-password provider fields are displayed distinctly
   from login credential provider fields.
 - Verify provider names shown in tray/helper UI match the bridge contract:

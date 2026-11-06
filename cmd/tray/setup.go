@@ -1,11 +1,15 @@
 package main
 
 import (
+	"bytes"
+	"encoding/xml"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
+	"text/template"
 )
 
 // discoverAdapterBinary finds the bundled git-lfs-proton-adapter binary
@@ -76,16 +80,15 @@ func driveCLICandidates(exeDir string) []string {
 
 // discoverPassCLIBinary finds pass-cli in PATH using exec.LookPath.
 // Returns the absolute path if found, empty string otherwise.
-// This is needed because macOS .app bundles get a minimal PATH and pass-cli
-// is often installed in ~/.local/bin or via Homebrew.
+// A macOS .app bundle starts with launchd's minimal PATH, and pass-cli is
+// usually installed in ~/.local/bin or by Homebrew, so those locations are
+// checked directly after PATH.
 func discoverPassCLIBinary() string {
-	// First try exec.LookPath (uses current PATH)
 	path, err := exec.LookPath("pass-cli")
 	if err == nil {
 		return path
 	}
 
-	// Fall back to checking common install locations directly
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return ""
@@ -99,7 +102,6 @@ func discoverPassCLIBinary() string {
 
 	for _, candidate := range candidates {
 		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
-			// Check if executable
 			if info.Mode()&0111 != 0 {
 				return candidate
 			}
@@ -109,15 +111,66 @@ func discoverPassCLIBinary() string {
 	return ""
 }
 
-const launchAgentLabel = "com.proton.git-lfs-tray"
+// launchAgentLabel is the launchd label of the autostart agent and the
+// CFBundleIdentifier of the .app bundle (scripts/ensure-info-plist.sh and
+// scripts/package-bundle.sh use the same identifier).
+const launchAgentLabel = "com.proton.lfs-tray"
+
+// autostartDesktopFileName is the XDG autostart entry written on Linux;
+// scripts/package-bundle.sh ships a file of the same name in the bundle.
+const autostartDesktopFileName = "proton-lfs.desktop"
+
+// formerLaunchAgentLabel is the label releases before 2026-11 used for the
+// autostart agent; its plist is removed whenever autostart is changed.
+const formerLaunchAgentLabel = "com.proton.git-lfs-tray"
 
 // launchAgentPath returns the path to the macOS LaunchAgent plist.
 func launchAgentPath() string {
+	return launchAgentPathFor(launchAgentLabel)
+}
+
+func launchAgentPathFor(label string) string {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return ""
 	}
-	return filepath.Join(home, "Library", "LaunchAgents", launchAgentLabel+".plist")
+	return filepath.Join(home, "Library", "LaunchAgents", label+".plist")
+}
+
+// launchAgentInstalled reports whether the current or the former autostart
+// agent plist exists.
+func launchAgentInstalled() bool {
+	for _, label := range []string{launchAgentLabel, formerLaunchAgentLabel} {
+		if p := launchAgentPathFor(label); p != "" {
+			if _, err := os.Stat(p); err == nil {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// removeFormerLaunchAgent deletes the plist written under the former label.
+func removeFormerLaunchAgent() error {
+	p := launchAgentPathFor(formerLaunchAgentLabel)
+	if p == "" {
+		return nil
+	}
+	if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
+}
+
+// linuxAutostartPath returns the XDG autostart entry path:
+// $XDG_CONFIG_HOME/autostart (os.UserConfigDir, default ~/.config) per the
+// Desktop Application Autostart Specification.
+func linuxAutostartPath() (string, error) {
+	dir, err := os.UserConfigDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "autostart", autostartDesktopFileName), nil
 }
 
 // isAutoStartEnabled checks if the LaunchAgent plist exists (macOS) or the
@@ -125,18 +178,13 @@ func launchAgentPath() string {
 func isAutoStartEnabled() bool {
 	switch runtime.GOOS {
 	case "darwin":
-		p := launchAgentPath()
-		if p == "" {
-			return false
-		}
-		_, err := os.Stat(p)
-		return err == nil
+		return launchAgentInstalled()
 	case "linux":
-		home, err := os.UserHomeDir()
+		p, err := linuxAutostartPath()
 		if err != nil {
 			return false
 		}
-		_, err = os.Stat(filepath.Join(home, ".config", "autostart", "proton-lfs.desktop"))
+		_, err = os.Stat(p)
 		return err == nil
 	default:
 		return false
@@ -155,51 +203,143 @@ func setAutoStart(enable bool) error {
 	}
 }
 
+// launchAgentTemplate is a launchd.plist(5) property list. String values
+// are escaped with xml.EscapeText so a path containing &, < or " stays a
+// valid document.
+var launchAgentTemplate = template.Must(template.New("launchagent").Funcs(template.FuncMap{
+	"xml": xmlEscape,
+}).Parse(`<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>{{xml .Label}}</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>{{xml .Program}}</string>
+	</array>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>KeepAlive</key>
+	<false/>
+	<key>ProcessType</key>
+	<string>Interactive</string>
+</dict>
+</plist>
+`))
+
+func xmlEscape(s string) (string, error) {
+	var buf bytes.Buffer
+	if err := xml.EscapeText(&buf, []byte(s)); err != nil {
+		return "", err
+	}
+	return buf.String(), nil
+}
+
+// launchAgentPlist renders the LaunchAgent that starts program at login.
+func launchAgentPlist(label, program string) ([]byte, error) {
+	var buf bytes.Buffer
+	err := launchAgentTemplate.Execute(&buf, struct{ Label, Program string }{label, program})
+	if err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
 func setAutoStartDarwin(enable bool) error {
 	p := launchAgentPath()
 	if p == "" {
 		return fmt.Errorf("cannot determine LaunchAgent path")
 	}
+	if err := removeFormerLaunchAgent(); err != nil {
+		return err
+	}
 	if !enable {
-		return os.Remove(p)
+		if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		return nil
 	}
 	exe, err := os.Executable()
 	if err != nil {
 		return err
 	}
 	exe, _ = filepath.EvalSymlinks(exe)
-	plist := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
-  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>Label</key>
-  <string>%s</string>
-  <key>ProgramArguments</key>
-  <array>
-    <string>%s</string>
-  </array>
-  <key>RunAtLoad</key>
-  <true/>
-  <key>KeepAlive</key>
-  <false/>
-  <key>ProcessType</key>
-  <string>Interactive</string>
-</dict>
-</plist>
-`, launchAgentLabel, exe)
+	plist, err := launchAgentPlist(launchAgentLabel, exe)
+	if err != nil {
+		return err
+	}
 	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 		return err
 	}
-	return os.WriteFile(p, []byte(plist), 0o644)
+	return os.WriteFile(p, plist, 0o644)
+}
+
+// desktopEntry renders a Desktop Entry Specification 1.5 file that runs
+// program with no arguments.
+func desktopEntry(program string) string {
+	return "[Desktop Entry]\n" +
+		"Type=Application\n" +
+		"Name=Proton LFS\n" +
+		"Exec=" + desktopExecValue([]string{program}) + "\n" +
+		"Comment=System tray for Proton LFS\n" +
+		"Categories=Development;\n" +
+		"StartupNotify=false\n"
+}
+
+// desktopExecReserved lists the characters that the Desktop Entry
+// Specification 1.5 ("The Exec key") reserves; an argument containing any
+// of them must be quoted.
+const desktopExecReserved = " \t\n\"'\\><~|&;$*?#()`"
+
+// desktopExecValue renders argv as an Exec value. Per the specification an
+// argument with reserved characters is enclosed in double quotes with the
+// characters ", `, $ and \ escaped by a backslash; a literal % is written
+// as %% because % introduces field codes. The result then passes through
+// the general string escaping of the file format (desktopStringValue),
+// which the specification applies before the Exec quoting rule.
+func desktopExecValue(argv []string) string {
+	quoted := make([]string, 0, len(argv))
+	for _, arg := range argv {
+		quoted = append(quoted, desktopExecArg(arg))
+	}
+	return desktopStringValue(strings.Join(quoted, " "))
+}
+
+func desktopExecArg(arg string) string {
+	arg = strings.ReplaceAll(arg, "%", "%%")
+	if arg != "" && !strings.ContainsAny(arg, desktopExecReserved) {
+		return arg
+	}
+	var b strings.Builder
+	b.WriteByte('"')
+	for _, r := range arg {
+		switch r {
+		case '"', '`', '$', '\\':
+			b.WriteByte('\\')
+		}
+		b.WriteRune(r)
+	}
+	b.WriteByte('"')
+	return b.String()
+}
+
+// desktopStringValue applies the escape sequences of values of type string
+// (\s, \n, \t, \r and \\) from the Desktop Entry Specification 1.5.
+func desktopStringValue(s string) string {
+	return strings.NewReplacer(
+		`\`, `\\`,
+		"\n", `\n`,
+		"\t", `\t`,
+		"\r", `\r`,
+	).Replace(s)
 }
 
 func setAutoStartLinux(enable bool) error {
-	home, err := os.UserHomeDir()
+	p, err := linuxAutostartPath()
 	if err != nil {
 		return err
 	}
-	p := filepath.Join(home, ".config", "autostart", "proton-lfs.desktop")
 	if !enable {
 		return os.Remove(p)
 	}
@@ -208,16 +348,8 @@ func setAutoStartLinux(enable bool) error {
 		return err
 	}
 	exe, _ = filepath.EvalSymlinks(exe)
-	entry := fmt.Sprintf(`[Desktop Entry]
-Type=Application
-Name=Proton LFS
-Exec=%s
-Comment=System tray for Proton LFS
-Categories=Development;
-StartupNotify=false
-`, exe)
 	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 		return err
 	}
-	return os.WriteFile(p, []byte(entry), 0o644)
+	return os.WriteFile(p, []byte(desktopEntry(exe)), 0o644)
 }

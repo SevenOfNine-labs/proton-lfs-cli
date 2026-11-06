@@ -894,7 +894,8 @@ func TestSpecPerTransferErrorChain(t *testing.T) {
 	}
 }
 
-// TestSpecMalformedJSONInput asserts malformed JSON returns a protocol error without panic.
+// TestSpecMalformedJSONInput asserts malformed JSON yields a protocol error
+// on stdout and a non-nil Run error (so main exits non-zero) without panic.
 // Spec lines 289-291: "Any unexpected fatal errors in the transfer process
 // should set the exit code to non-zero and print information to stderr."
 func TestSpecMalformedJSONInput(t *testing.T) {
@@ -903,8 +904,8 @@ func TestSpecMalformedJSONInput(t *testing.T) {
 
 	out := new(bytes.Buffer)
 	err := adapter.Run(strings.NewReader("this is not json at all\n"), out)
-	if err != nil {
-		t.Fatalf("Run should not return error for malformed input, got: %v", err)
+	if err == nil {
+		t.Fatal("Run must return an error for malformed input so the process exits non-zero")
 	}
 
 	msgs := decodeAllMessages(t, out.Bytes())

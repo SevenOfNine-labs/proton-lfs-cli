@@ -20,8 +20,8 @@ type outboundMessage struct {
 	Path  string `json:"path,omitempty"`
 }
 
-func shouldStall(event, stallOn string) bool {
-	switch stallOn {
+func shouldExit(event, exitOn string) bool {
+	switch exitOn {
 	case "both":
 		return event == "upload" || event == "download"
 	case "upload":
@@ -35,17 +35,17 @@ func shouldStall(event, stallOn string) bool {
 
 func main() {
 	_ = flag.String("local-store-dir", "", "ignored; accepted for argument compatibility with adapter config")
-	stallOn := flag.String("stall-on", "both", "transfer event to stall on: upload, download, or both")
-	stallMS := flag.Int("stall-ms", 15000, "stall duration in milliseconds")
+	exitOn := flag.String("exit-on", "both", "transfer event after which the adapter exits without completing: upload, download, or both")
+	delayMS := flag.Int("delay-ms", 15000, "delay before exiting, in milliseconds")
 	flag.Parse()
 
-	mode := strings.ToLower(strings.TrimSpace(*stallOn))
+	mode := strings.ToLower(strings.TrimSpace(*exitOn))
 	if mode == "" {
 		mode = "both"
 	}
-	stallDuration := time.Duration(*stallMS) * time.Millisecond
-	if stallDuration <= 0 {
-		stallDuration = 15 * time.Second
+	delay := time.Duration(*delayMS) * time.Millisecond
+	if delay <= 0 {
+		delay = 15 * time.Second
 	}
 
 	dec := json.NewDecoder(os.Stdin)
@@ -76,8 +76,10 @@ func main() {
 		case "terminate":
 			return
 		case "upload", "download":
-			if shouldStall(msg.Event, mode) {
-				time.Sleep(stallDuration)
+			if shouldExit(msg.Event, mode) {
+				// Exit without a complete message: git-lfs must detect the
+				// closed stdout and fail the transfer.
+				time.Sleep(delay)
 				return
 			}
 			_ = enc.Encode(outboundMessage{

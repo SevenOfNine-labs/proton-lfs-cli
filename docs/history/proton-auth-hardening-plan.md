@@ -1,5 +1,7 @@
 # Proton Auth Hardening Plan
 
+> Historical record as of 2026-05-22; superseded by the browser-fork-only implementation described in `docs/architecture/proton-sdk-bridge.md`, the submodule's `docs/architecture/browser-fork-auth.md` and `docs/operations/live-canary-runbook.md`. Kept for the anti-abuse rationale; commands and file names in it may no longer exist.
+
 **Date**: 2026-05-22
 **Status**: Superseded by the browser-fork-only auth implementation. Keep this
 document only for anti-abuse rationale and historical context; current source

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"embed"
 	"fmt"
 	"os"
@@ -10,12 +11,15 @@ import (
 
 	"fyne.io/systray"
 
-	"proton-lfs-cli/internal/config"
+	"github.com/SevenOfNine-labs/proton-lfs-cli/internal/config"
 )
 
 //go:embed icons/*.png
 var iconFS embed.FS
 
+// The icon set has four states: idle (grey), ok (green), error (red) and
+// syncing (blue). Status states without an icon of their own (rate_limited,
+// auth_required, captcha) use the error icon and are told apart by tooltip.
 var (
 	iconIdle    []byte
 	iconOK      []byte
@@ -87,7 +91,7 @@ func setupMenu() {
 	mCredGit = systray.AddMenuItemCheckbox("Use Git Credential Manager", "Store browser-fork key password in the OS credential manager", false)
 
 	prefs := config.LoadPrefs()
-	applyCredCheckmarks(prefs.CredentialProvider)
+	applyCredCheckmarks(prefs.KeyPasswordProvider)
 
 	systray.AddSeparator()
 
@@ -171,45 +175,33 @@ func applyCredCheckmarks(provider string) {
 
 func switchCredentialProvider(provider string) {
 	prefs := config.LoadPrefs()
-	prefs.CredentialProvider = provider
+	prefs.KeyPasswordProvider = provider
 	_ = config.SavePrefs(prefs)
 	applyCredCheckmarks(provider)
 }
 
+// registerGitLFS writes the same global git settings as
+// `proton-lfs-cli register`.
 func registerGitLFS() {
-	adapterPath := discoverAdapterBinary()
+	adapterPath := findAdapter()
 	if adapterPath == "" {
 		sendNotification("Error: adapter binary not found")
 		return
 	}
-	if err := exec.Command("git", "config", "--global", "lfs.customtransfer.proton.path", adapterPath).Run(); err != nil {
-		sendNotification("Error: git config failed")
-		return
-	}
-
 	prefs := config.LoadPrefs()
-	driveCLIPath := discoverDriveCLIBinary()
-	args := buildProtonTransferArgsFromPrefs(prefs, driveCLIPath)
-	if err := exec.Command("git", "config", "--global", "lfs.customtransfer.proton.args", args).Run(); err != nil {
+	args := buildProtonTransferArgsFromPrefs(prefs, findDriveCLI())
+	if err := writeGitLFSRegistration(adapterPath, args); err != nil {
+		trayLog.Printf("register: %v", err)
 		sendNotification("Error: git config failed")
 		return
 	}
-	if err := exec.Command("git", "config", "--global", "lfs.standalonetransferagent", "proton").Run(); err != nil {
-		sendNotification("Error: git config failed")
-		return
-	}
-
 	applyRegisterStatus(true)
 	sendNotification("LFS Backend Enabled")
 }
 
 // isLFSEnabled checks whether the Proton LFS adapter is registered in git global config.
 func isLFSEnabled() bool {
-	out, err := exec.Command("git", "config", "--global", "lfs.standalonetransferagent").Output()
-	if err != nil {
-		return false
-	}
-	return strings.TrimSpace(string(out)) == "proton"
+	return readGitLFSConfig().StandaloneAgent == gitStandaloneAgent
 }
 
 // isSessionActive checks whether a proton-drive-cli session file exists.
@@ -223,15 +215,16 @@ func isSessionActive() bool {
 }
 
 func disconnectFromProton() {
-	driveCLI := discoverDriveCLIBinary()
+	driveCLI := findDriveCLI()
 	if driveCLI == "" {
 		trayLog.Print("disconnect: proton-drive-cli binary not found")
 		sendNotification("Error: CLI not found")
 		return
 	}
 	go func() {
-		cmd := exec.Command(driveCLI, "logout")
-		out, err := cmd.CombinedOutput()
+		ctx, cancel := context.WithTimeout(context.Background(), driveCLITimeout)
+		defer cancel()
+		out, err := driveCLICommand(ctx, driveCLI, "logout").CombinedOutput()
 		logSubprocessOutput("disconnect", out)
 		if err != nil {
 			trayLog.Printf("disconnect: logout failed: %v", err)
@@ -241,27 +234,22 @@ func disconnectFromProton() {
 		trayLog.Print("disconnect: logout succeeded")
 		clearRefreshState()
 		sendNotification("Disconnected from Proton")
-		applyLoginStatus()
+		refreshTrayState()
 	}()
 }
 
 func recheckStatus() {
-	applyStatus()
-	applyLoginStatus()
-	applyLFSStatus()
+	refreshTrayState()
 	maybeRefreshSession()
 }
 
 func openLogs() {
 	logPath := trayLogPath()
-	cmd := terminalCommand(fmt.Sprintf("tail -n 200 -f %s", shellQuoteArg(logPath)))
-	if cmd == nil || cmd.Start() != nil {
-		sendNotification("Logs: " + logPath)
-	}
+	openInTerminal(fmt.Sprintf("tail -n 200 -f %s", shellQuoteArg(logPath)), "Logs: "+logPath)
 }
 
 func runDoctor() {
-	driveCLI := discoverDriveCLIBinary()
+	driveCLI := findDriveCLI()
 	if driveCLI == "" {
 		sendNotification("Error: CLI not found")
 		return
@@ -271,7 +259,7 @@ func runDoctor() {
 		shellQuoteArg(driveCLI),
 		"doctor",
 		"--key-password-provider",
-		shellQuoteArg(prefs.CredentialProvider),
+		shellQuoteArg(prefs.KeyPasswordProvider),
 	}
 	if prefs.DataCredentialProvider != "" {
 		args = append(args,
@@ -281,10 +269,8 @@ func runDoctor() {
 			shellQuoteArg(resolveDataCredentialHost(prefs)),
 		)
 	}
-	cmd := terminalCommand(strings.Join(args, " ") + "; echo; echo 'Press Enter to close...'; read -r")
-	if cmd == nil || cmd.Start() != nil {
-		sendNotification("Doctor could not open terminal")
-	}
+	openInTerminal(strings.Join(args, " ")+"; echo; echo 'Press Enter to close...'; read -r",
+		"Doctor could not open terminal")
 }
 
 func openDataPasswordGuide() {
@@ -300,10 +286,7 @@ func openDataPasswordGuide() {
 		"echo 'Press Enter to close...'",
 		"read -r",
 	}, "; ")
-	cmd := terminalCommand(script)
-	if cmd == nil || cmd.Start() != nil {
-		sendNotification("Configure data password in your credential provider")
-	}
+	openInTerminal(script, "Configure data password in your credential provider")
 }
 
 func resolveDataCredentialHost(prefs config.Preferences) string {
@@ -313,16 +296,28 @@ func resolveDataCredentialHost(prefs config.Preferences) string {
 	return config.DefaultDataCredentialHost
 }
 
-// sendNotification shows a native macOS notification banner, or falls back
-// to notify-send on Linux.
+// sendNotification shows a desktop notification: a macOS banner through
+// osascript or notify-send on Linux. Every message is also written to the
+// tray log, which is the only channel on platforms without a notifier.
 func sendNotification(msg string) {
+	trayLog.Printf("notify: %s", msg)
 	switch runtime.GOOS {
 	case "darwin":
-		_ = exec.Command("osascript", "-e",
-			fmt.Sprintf(`display notification "%s" with title "Proton LFS"`, msg)).Start()
+		_ = darwinNotificationCommand(msg).Start()
 	case "linux":
 		_ = exec.Command("notify-send", "Proton LFS", msg).Start()
 	}
+}
+
+// darwinNotificationCommand passes msg to the AppleScript as an argv item
+// (`on run argv`), never by interpolating it into the script source, so
+// quotes and backslashes in msg cannot alter the script.
+func darwinNotificationCommand(msg string) *exec.Cmd {
+	return exec.Command("osascript",
+		"-e", "on run argv",
+		"-e", `display notification (item 1 of argv) with title "Proton LFS"`,
+		"-e", "end run",
+		msg)
 }
 
 func toggleAutoStart(item *systray.MenuItem) {
@@ -337,40 +332,35 @@ func toggleAutoStart(item *systray.MenuItem) {
 	}
 }
 
-// terminalCommand returns an exec.Cmd that opens a terminal and runs the given shell snippet.
-func terminalCommand(script string) *exec.Cmd {
-	switch runtime.GOOS {
-	case "darwin":
-		return terminalCommandDarwin(script)
-	case "linux":
-		// Try common terminal emulators
-		for _, term := range []string{"x-terminal-emulator", "gnome-terminal", "xterm"} {
-			if p, err := exec.LookPath(term); err == nil {
-				return exec.Command(p, "-e", "bash", "-c", script)
-			}
-		}
-		return nil
-	case "windows":
-		return exec.Command("cmd", "/c", "start", "cmd", "/k", script)
-	default:
-		return nil
+// openInTerminal runs the POSIX shell snippet script in a terminal window
+// and shows fallback as a notification when no terminal can be opened.
+func openInTerminal(script, fallback string) {
+	cmd, cleanup := terminalCommand(script)
+	if cmd == nil {
+		sendNotification(fallback)
+		return
 	}
+	launchTerminal(cmd, cleanup, func() { sendNotification(fallback) })
 }
 
-// terminalCommandDarwin writes the script to a temp file and tells Terminal
-// to execute it. This avoids the raw command being echoed in the terminal.
-func terminalCommandDarwin(script string) *exec.Cmd {
-	f, err := os.CreateTemp("", "proton-lfs-*.sh")
-	if err != nil {
-		return nil
+// launchTerminal starts cmd and calls onFailure when the start fails or the
+// terminal exits non-zero. The exit is awaited in a goroutine because
+// emulators that host the command in-process (xterm) return only when the
+// window closes. cleanup releases resources the command owns and runs only
+// when the process never started; a started command cleans up itself.
+func launchTerminal(cmd *exec.Cmd, cleanup func(), onFailure func()) {
+	if err := cmd.Start(); err != nil {
+		trayLog.Printf("terminal: start failed: %v", err)
+		if cleanup != nil {
+			cleanup()
+		}
+		onFailure()
+		return
 	}
-	content := "#!/bin/zsh\nclear\n" + script + "\nrm -f \"$0\"\n"
-	if _, err := f.WriteString(content); err != nil {
-		_ = f.Close()
-		return nil
-	}
-	_ = f.Close()
-	_ = os.Chmod(f.Name(), 0o700)
-	return exec.Command("osascript", "-e",
-		fmt.Sprintf(`tell application "Terminal" to do script "%s"`, f.Name()))
+	go func() {
+		if err := cmd.Wait(); err != nil {
+			trayLog.Printf("terminal: %s exited: %v", cmd.Path, err)
+			onFailure()
+		}
+	}()
 }

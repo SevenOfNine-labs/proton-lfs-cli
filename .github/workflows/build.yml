@@ -1,30 +1,35 @@
 name: Build Artifacts
 
+# Cross-compiles the standalone adapter for every supported target and uploads
+# the binaries as workflow artifacts. Releases are created only by
+# release-bundle.yml, which calls this workflow (workflow_call) and attaches
+# these artifacts next to the platform bundles.
 on:
   push:
     branches:
       - main
-    tags:
-      - "v*"
   pull_request:
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      version:
+        description: Version to stamp (the release tag); git describe when empty
+        type: string
+        required: false
+        default: ""
 
 permissions:
   contents: read
 
 concurrency:
   group: build-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   build-adapter:
     name: Build adapter (${{ matrix.target }})
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    env:
-      PROTON_PASS_REF_ROOT: pass://Personal/Proton LFS
-      PROTON_PASS_USERNAME_REF: pass://Personal/Proton LFS/username
-      PROTON_PASS_PASSWORD_REF: pass://Personal/Proton LFS/password
     strategy:
       fail-fast: false
       matrix:
@@ -52,10 +57,13 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Tags and history for `git describe` and the commit-date BuildTime.
+          fetch-depth: 0
 
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
 
@@ -63,40 +71,13 @@ jobs:
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
-          CGO_ENABLED: 0
-        run: |
-          mkdir -p bin
-          BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-          go build \
-            -trimpath \
-            -ldflags "-s -w -X main.GitCommit=${{ github.sha }} -X main.BuildTime=${BUILD_TIME}" \
-            -o "bin/${{ matrix.binary_name }}" \
-            ./cmd/adapter
+          VERSION: ${{ inputs.version }}
+          STRIP: "1"
+        run: bash scripts/build-go.sh adapter "bin/${{ matrix.binary_name }}"
 
       - name: Upload adapter artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ${{ matrix.binary_name }}
           path: bin/${{ matrix.binary_name }}
           retention-days: 14
-
-  release:
-    name: Publish GitHub Release
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    needs:
-      - build-adapter
-    if: startsWith(github.ref, 'refs/tags/v')
-    permissions:
-      contents: write
-
-    steps:
-      - name: Download artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: dist
-
-      - name: Create release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: dist/**/*

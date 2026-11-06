@@ -8,13 +8,13 @@ Integration tests validate Git LFS client behavior against the adapter runtime a
 
 | Command | Scope |
 | --- | --- |
-| `make test` | Adapter unit tests |
-| `make test-sdk` | proton-drive-cli unit tests |
+| `make test` | Go unit tests (`./cmd/...`, `./internal/...`) |
+| `yarn workspace @sevenofnine-ai/proton-drive-cli test` | proton-drive-cli Jest tests (CI runs them on Node.js 22 and 26) |
 | `make test-integration` | Git LFS + adapter integration suite |
-| `make test-integration-timeout` | Stalled-adapter timeout semantics |
+| `make test-integration-adapter-exit` | Adapter exits mid-transfer without completing |
 | `make test-integration-stress` | High-volume concurrent stress/soak |
-| `make test-integration-sdk` | SDK backend integration path (local service by default) |
-| `make test-integration-failure-modes` | Failure mode tests (wrong OID, crash, hang) |
+| `make test-integration-sdk` | sdk backend through a built proton-drive-cli and your saved session (`PROTON_LFS_RUN_SDK_INTEGRATION=1`) |
+| `make test-integration-failure-modes` | Failure mode tests (wrong OID, crash, exit without response) |
 | `make test-integration-config-matrix` | Direction config matrix tests |
 | `make test-integration-credentials` | Credential flow security tests |
 | `make test-e2e-mock` | Mocked E2E pipeline (no real credentials) |
@@ -44,7 +44,7 @@ pass-cli login
 make test-integration-sdk
 ```
 
-`make test-integration-sdk` now performs a prerequisite check and may export
+`make test-integration-sdk` performs a prerequisite check and exports
 `PROTON_PASS_CLI_BIN` via `scripts/export-pass-env.sh` for sessions whose
 key-password provider is Proton Pass. It does not export account usernames or
 passwords.
@@ -54,10 +54,9 @@ If Node is only configured via shell startup files (`~/.zshrc`, `nvm`, `fnm`), r
 make test-integration-sdk NODE="$(command -v node)"
 ```
 
-See `docs/architecture/sdk-capability-matrix.md` for the full environment matrix.
-
-Accounts requiring 2FA should complete interactive `proton-drive login` before
-real SDK tests. Browser-fork sessions normally unlock Drive with the stored
+Sign in once with `proton-drive-cli login --key-password-provider <provider>`
+before real SDK tests; two-factor authentication is completed in the browser.
+Browser-fork sessions unlock Drive with the stored
 UID-scoped key password. Add a separate mailbox/data password provider only if
 offline doctor reports `needs_data_password`:
 
@@ -72,7 +71,7 @@ If you are testing with a personal Proton account:
 1. Complete browser-fork login first:
 
 ```bash
-proton-drive login --key-password-provider pass-cli
+proton-drive-cli login --key-password-provider pass-cli
 ```
 
 1. Authenticate pass-cli if the saved session uses it as a key-password or
@@ -83,10 +82,16 @@ pass-cli login
 make check-sdk-prereqs
 ```
 
-1. Choose one runtime path:
+1. Run the sdk suite, which performs one real Proton Drive round trip per
+   test through `submodules/proton-drive-cli/dist/index.js`
+   (`tests/integration/git_lfs_sdk_backend_test.go`):
 
-   - Local prototype path (no real Proton backend): `make test-integration-sdk`
-   - Real backend via proton-drive-cli: `make test-integration-sdk-real`
+   ```bash
+   make test-integration-sdk
+   ```
+
+   CI runs the same tests against `tests/testdata/mock-proton-drive-cli.js`
+   (`bridge-integration` job) and never against Proton.
 
 ## Mocked E2E Testing
 
@@ -101,12 +106,12 @@ This uses `mock-pass-cli.sh` and `mock-proton-drive-cli.js` to exercise the full
 ## Coverage Expectations
 
 - Real `git-lfs` subprocess path for upload and download.
-- proton-drive-cli bridge contract path covering upload, download, list, and token refresh.
+- proton-drive-cli bridge contract path covering auth-state, init, exists, upload and download.
 - Standalone mode behavior (`action: null`) coverage.
 - Object-level failure handling coverage (`complete.error`).
 - Wrong-OID response rejection coverage (`progress` and `complete`).
 - Adapter crash and no-response subprocess failure coverage.
-- Stalled-adapter timeout semantics coverage (`lfs.activitytimeout`) across OS CI matrix.
+- Adapter exits mid-transfer coverage across the OS CI matrix: git-lfs fails when the adapter closes stdout (it has no activity timeout for custom adapters; `lfs.activitytimeout` applies to its HTTP client only).
 - Concurrent multi-file roundtrip coverage (`lfs.customtransfer.proton.concurrent=true`).
 - High-volume concurrent stress/soak coverage (`PROTON_LFS_STRESS_*`).
 - Mocked E2E pipeline coverage (full Git LFS push/pull through mock proton-drive-cli).
@@ -142,7 +147,7 @@ retry-login loop or continue into the transfer path.
 The live path also classifies Proton API 9101 as `insufficient_scope`, which is
 an app/session authorization-scope blocker rather than a credential or data
 password blocker.
-Use `proton-lfs-cli scope-diagnostics` for redacted local evidence, and add
+Use `proton-lfs-tray scope-diagnostics` for redacted local evidence, and add
 `--live` with the explicit canary acknowledgement for exactly one read-only
 metadata probe. This command is designed for issue evidence: it reports local
 scope names and structured Proton error details without raw tokens, passwords,
@@ -155,7 +160,7 @@ only inspects local status and offline doctor readiness. Its post-login doctor
 inspection requires `authMode=browser-fork`, `state=ready`, and
 `canAttemptTransfer=true`, and its script tests prove that no transfer command
 is attempted in this path. The script accepts only `--key-password-provider`
-and `--key-password-host` login args, so legacy account credential flags and
+and `--key-password-host` login args, so account credential flags and
 unknown options fail before proton-drive-cli is invoked.
 
 ## High-Value Missing Tests

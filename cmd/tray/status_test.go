@@ -9,8 +9,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
-	"proton-lfs-cli/internal/config"
+	"github.com/SevenOfNine-labs/proton-lfs-cli/internal/config"
 )
 
 func writeSessionForStatusTest(t *testing.T, home string, meta sessionMetadata) {
@@ -110,16 +111,25 @@ func TestTruncate(t *testing.T) {
 }
 
 func TestTruncateMultibyteInput(t *testing.T) {
-	// truncate uses len() which counts bytes, not runes.
-	// "héllo" = 6 bytes (h=1, é=2, l=1, l=1, o=1).
-	input := "héllo"
-	got := truncate(input, 4)
-	// s[:3] = "hé" (3 bytes), then + "…" (3 bytes)
-	if len(got) == 0 {
-		t.Fatal("expected non-empty result")
+	cases := []struct {
+		input string
+		limit int
+		want  string
+	}{
+		{"héllo wörld", 4, "hél…"},
+		{"héllo", 5, "héllo"},
+		{"日本語のテキスト", 4, "日本語…"},
+		{"😀😀😀", 2, "😀…"},
 	}
-	// Document byte-slicing behavior: truncation happens at byte boundary
-	t.Logf("truncate(%q, 4) = %q (len=%d)", input, got, len(got))
+	for _, tc := range cases {
+		got := truncate(tc.input, tc.limit)
+		if got != tc.want {
+			t.Errorf("truncate(%q, %d) = %q, want %q", tc.input, tc.limit, got, tc.want)
+		}
+		if !utf8.ValidString(got) {
+			t.Errorf("truncate(%q, %d) = %q is not valid UTF-8", tc.input, tc.limit, got)
+		}
+	}
 }
 
 func TestTransferStatusTextWithRetryMetadata(t *testing.T) {
@@ -202,10 +212,10 @@ func TestSessionFilePath(t *testing.T) {
 	}
 }
 
-func TestInspectAuthReadinessBlocksLegacySessionWithoutDataCredential(t *testing.T) {
+func TestInspectAuthReadinessBlocksPasswordLoginSessionWithoutDataCredential(t *testing.T) {
 	now := time.Date(2026, 6, 23, 18, 0, 0, 0, time.UTC)
 	resetRefreshForStatusTest(t, now)
-	home := setupFakeHome(t, fakeHomeOpts{configJSON: `{"credentialProvider":"pass-cli"}`})
+	home := setupFakeHome(t, fakeHomeOpts{configJSON: `{"keyPasswordProvider":"pass-cli"}`})
 	setupGitConfig(t, "")
 	writeSessionForStatusTest(t, home, sessionMetadata{
 		SessionID:      "session-id",
@@ -228,7 +238,7 @@ func TestInspectAuthReadinessBlocksLegacySessionWithoutDataCredential(t *testing
 		t.Fatalf("unexpected transfer title: %s", readiness.transferTitle)
 	}
 	if !readiness.dataPasswordActive {
-		t.Fatal("data-password action should be enabled for legacy unlock blocker")
+		t.Fatal("data-password action should be enabled for a password-login session without stored unlock material")
 	}
 	if readiness.action != authActionDisconnect {
 		t.Fatalf("signed-in blocked state should offer disconnect, got %s", readiness.action)
@@ -238,7 +248,7 @@ func TestInspectAuthReadinessBlocksLegacySessionWithoutDataCredential(t *testing
 func TestInspectAuthReadinessReadyForBrowserForkTwoPasswordWithoutDataCredential(t *testing.T) {
 	now := time.Date(2026, 6, 23, 18, 0, 0, 0, time.UTC)
 	resetRefreshForStatusTest(t, now)
-	home := setupFakeHome(t, fakeHomeOpts{configJSON: `{"credentialProvider":"pass-cli"}`})
+	home := setupFakeHome(t, fakeHomeOpts{configJSON: `{"keyPasswordProvider":"pass-cli"}`})
 	setupGitConfig(t, "")
 	writeSessionForStatusTest(t, home, sessionMetadata{
 		SessionID:            "session-id",
@@ -270,7 +280,7 @@ func TestInspectAuthReadinessReadyForBrowserForkTwoPasswordWithoutDataCredential
 func TestInspectAuthReadinessBlocksBrowserForkMissingKeyPassword(t *testing.T) {
 	now := time.Date(2026, 6, 23, 18, 0, 0, 0, time.UTC)
 	resetRefreshForStatusTest(t, now)
-	home := setupFakeHome(t, fakeHomeOpts{configJSON: `{"credentialProvider":"pass-cli"}`})
+	home := setupFakeHome(t, fakeHomeOpts{configJSON: `{"keyPasswordProvider":"pass-cli"}`})
 	setupGitConfig(t, "")
 	writeSessionForStatusTest(t, home, sessionMetadata{
 		SessionID:      "session-id",
@@ -299,7 +309,7 @@ func TestInspectAuthReadinessReadyWithConfiguredDataCredential(t *testing.T) {
 	now := time.Date(2026, 6, 23, 18, 0, 0, 0, time.UTC)
 	resetRefreshForStatusTest(t, now)
 	home := setupFakeHome(t, fakeHomeOpts{
-		configJSON: `{"credentialProvider":"pass-cli","dataCredentialProvider":"pass-cli"}`,
+		configJSON: `{"keyPasswordProvider":"pass-cli","dataCredentialProvider":"pass-cli"}`,
 	})
 	setupGitConfig(t, "")
 	writeSessionForStatusTest(t, home, sessionMetadata{
@@ -426,7 +436,7 @@ func TestDecideRefreshAllowsNewSessionAfterTerminalFailure(t *testing.T) {
 func TestInspectAuthReadinessBlocksTerminalRefreshFailure(t *testing.T) {
 	now := time.Date(2026, 6, 23, 18, 0, 0, 0, time.UTC)
 	resetRefreshForStatusTest(t, now)
-	home := setupFakeHome(t, fakeHomeOpts{configJSON: `{"credentialProvider":"pass-cli"}`})
+	home := setupFakeHome(t, fakeHomeOpts{configJSON: `{"keyPasswordProvider":"pass-cli"}`})
 	setupGitConfig(t, "")
 	writeSessionForStatusTest(t, home, sessionMetadata{
 		SessionID:            "session-id",
@@ -460,51 +470,143 @@ func TestInspectAuthReadinessBlocksTerminalRefreshFailure(t *testing.T) {
 }
 
 func TestAuthReadinessDoesNotOverrideActiveTransferStatus(t *testing.T) {
-	setupFakeHome(t, fakeHomeOpts{})
-	if err := config.WriteStatus(config.StatusReport{
-		State:  config.StateTransferring,
-		LastOp: "upload",
-	}); err != nil {
-		t.Fatal(err)
+	transferring := traySnapshot{
+		report:    config.StatusReport{State: config.StateTransferring, LastOp: "upload"},
+		hasReport: true,
+		readiness: authReadiness{signedIn: true, ready: true, tooltip: "Proton LFS - Ready"},
 	}
-
-	if authReadinessShouldOverrideTransferStatus(authReadiness{
-		signedIn: true,
-		ready:    true,
-	}) {
+	if authReadinessOverridesTransferStatus(transferring) {
 		t.Fatal("ready auth state must not hide active transfer status")
 	}
-	if !authReadinessShouldOverrideTransferStatus(authReadiness{
-		signedIn: true,
-		blocked:  true,
-	}) {
+	if icon, tooltip := resolveTrayIcon(transferring); string(icon) != string(iconSyncing) || tooltip != "Proton LFS — Uploading…" {
+		t.Fatalf("active upload should show syncing icon, got tooltip %q", tooltip)
+	}
+
+	blocked := transferring
+	blocked.readiness = authReadiness{signedIn: true, blocked: true, tooltip: "Proton LFS - Setup needed"}
+	if !authReadinessOverridesTransferStatus(blocked) {
 		t.Fatal("blocked auth state should override transfer status")
+	}
+	if icon, tooltip := resolveTrayIcon(blocked); string(icon) != string(iconError) || tooltip != "Proton LFS - Setup needed" {
+		t.Fatalf("blocked auth should show error icon, got tooltip %q", tooltip)
 	}
 }
 
-func TestTerminalCommandDarwin(t *testing.T) {
-	if runtime.GOOS != "darwin" {
-		t.Skip("darwin-only test")
+func TestPerformSessionRefreshTimeoutIsRecoverable(t *testing.T) {
+	setupTrayLogForTest(t)
+	if runtime.GOOS == "windows" {
+		t.Skip("needs a POSIX shell")
 	}
-	cmd := terminalCommand("echo hello")
-	if cmd == nil {
-		t.Fatal("expected non-nil command on darwin")
-		return
+	now := time.Date(2026, 6, 23, 18, 0, 0, 0, time.UTC)
+	resetRefreshForStatusTest(t, now)
+	setupFakeHome(t, fakeHomeOpts{})
+
+	slow := filepath.Join(t.TempDir(), "proton-drive-cli")
+	if err := os.WriteFile(slow, []byte("#!/bin/sh\nexec sleep 10\n"), 0o755); err != nil {
+		t.Fatal(err)
 	}
-	if len(cmd.Args) < 3 {
-		t.Fatalf("expected at least 3 args, got %v", cmd.Args)
+	origTimeout := driveCLITimeout
+	driveCLITimeout = 200 * time.Millisecond
+	t.Cleanup(func() { driveCLITimeout = origTimeout })
+
+	if !markRefreshStarted(now) {
+		t.Fatal("precondition: refresh not in progress")
 	}
-	if cmd.Args[0] != "osascript" {
-		t.Fatalf("expected osascript, got %q", cmd.Args[0])
+	start := time.Now()
+	performSessionRefresh(slow, "session-1")
+	if elapsed := time.Since(start); elapsed > driveCLITimeout+subprocessWaitDelay {
+		t.Fatalf("refresh took %s; the timeout must bound it", elapsed)
 	}
-	if cmd.Args[1] != "-e" {
-		t.Fatalf("expected -e flag, got %q", cmd.Args[1])
+
+	state := snapshotRefreshState()
+	if state.InProgress {
+		t.Fatal("refresh must not stay in progress after a timeout")
 	}
-	// The AppleScript references a temp script file, not the inline script
-	if !strings.Contains(cmd.Args[2], "do script") {
-		t.Fatalf("expected 'do script' in AppleScript, got %q", cmd.Args[2])
+	if state.ActionRequired || state.ActionSessionID != "" {
+		t.Fatalf("timeout must be recoverable, got %#v", state)
 	}
-	if !strings.Contains(cmd.Args[2], "proton-lfs-") {
-		t.Fatalf("expected temp file reference in AppleScript, got %q", cmd.Args[2])
+	if !strings.Contains(state.LastError, "timed out") {
+		t.Fatalf("LastError = %q, want timeout message", state.LastError)
+	}
+	if want := now.Add(refreshRetryInterval); !state.NextAttempt.Equal(want) {
+		t.Fatalf("NextAttempt = %s, want %s", state.NextAttempt, want)
+	}
+	meta := sessionMetadata{SessionID: "session-1", TokenExpiresAt: now.Add(5 * time.Minute).UnixMilli()}
+	if decision := decideRefresh(now.Add(2*refreshRetryInterval), meta, state); !decision.Attempt {
+		t.Fatalf("refresh must be retried after the backoff, got %#v", decision)
+	}
+}
+
+func TestPerformSessionRefreshRecordsResult(t *testing.T) {
+	setupTrayLogForTest(t)
+	if runtime.GOOS == "windows" {
+		t.Skip("needs a POSIX shell")
+	}
+	now := time.Date(2026, 6, 23, 18, 0, 0, 0, time.UTC)
+	resetRefreshForStatusTest(t, now)
+	setupFakeHome(t, fakeHomeOpts{})
+
+	fake := filepath.Join(t.TempDir(), "proton-drive-cli")
+	script := "#!/bin/sh\necho '{\"ok\":false,\"state\":\"refresh_failed\",\"error\":\"Invalid refresh token\",\"recoverable\":false}'\nexit 1\n"
+	if err := os.WriteFile(fake, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if !markRefreshStarted(now) {
+		t.Fatal("precondition: refresh not in progress")
+	}
+	performSessionRefresh(fake, "session-1")
+	state := snapshotRefreshState()
+	if state.InProgress || !state.ActionRequired || state.ActionSessionID != "session-1" {
+		t.Fatalf("terminal failure not recorded: %#v", state)
+	}
+}
+
+func TestResolveTrayIconPerState(t *testing.T) {
+	ready := authReadiness{signedIn: true, ready: true, tooltip: "Proton LFS - Ready"}
+	notConnected := authReadiness{tooltip: "Proton LFS - Not connected"}
+	cases := []struct {
+		name     string
+		snapshot traySnapshot
+		wantIcon []byte
+		wantTip  string
+	}{
+		{"no status file", traySnapshot{readiness: ready}, iconOK, "Proton LFS - Ready"},
+		{"not signed in hides ok transfer", traySnapshot{report: config.StatusReport{State: config.StateOK}, hasReport: true, readiness: notConnected}, iconIdle, "Proton LFS - Not connected"},
+		{"error transfer", traySnapshot{report: config.StatusReport{State: config.StateError, Error: "boom"}, hasReport: true, readiness: ready}, iconError, "Proton LFS — Error: boom"},
+		{"rate limited shares error icon", traySnapshot{report: config.StatusReport{State: config.StateRateLimited}, hasReport: true, readiness: ready}, iconError, "Proton LFS — Rate Limit Active"},
+		{"auth required shares error icon", traySnapshot{report: config.StatusReport{State: config.StateAuthRequired}, hasReport: true, readiness: ready}, iconError, "Proton LFS — Authentication Required"},
+		{"captcha shares error icon", traySnapshot{report: config.StatusReport{State: config.StateCaptcha}, hasReport: true, readiness: ready}, iconError, "Proton LFS — CAPTCHA Verification Required"},
+		{"download in progress", traySnapshot{report: config.StatusReport{State: config.StateTransferring, LastOp: "download"}, hasReport: true, readiness: ready}, iconSyncing, "Proton LFS — Downloading…"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			icon, tip := resolveTrayIcon(tc.snapshot)
+			if string(icon) != string(tc.wantIcon) {
+				t.Fatalf("wrong icon for %s", tc.name)
+			}
+			if tip != tc.wantTip {
+				t.Fatalf("tooltip = %q, want %q", tip, tc.wantTip)
+			}
+		})
+	}
+}
+
+func TestTakeTraySnapshotReadsEachSourceOnce(t *testing.T) {
+	now := time.Date(2026, 6, 23, 18, 0, 0, 0, time.UTC)
+	resetRefreshForStatusTest(t, now)
+	setupFakeHome(t, fakeHomeOpts{})
+	setupGitConfig(t, "[lfs]\n\tstandalonetransferagent = proton\n")
+	queries := countGitConfigQueries(t)
+	invalidateGitLFSConfig()
+
+	s := takeTraySnapshot(now)
+	if !s.lfsEnabled {
+		t.Fatal("snapshot should see the registration")
+	}
+	if s.hasReport {
+		t.Fatal("no status file was written")
+	}
+	if *queries != 1 {
+		t.Fatalf("git queried %d times for one snapshot, want 1", *queries)
 	}
 }

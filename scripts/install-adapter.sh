@@ -7,12 +7,29 @@ set -euo pipefail
 #   curl -fsSL https://raw.githubusercontent.com/SevenOfNine-labs/proton-lfs-cli/main/scripts/install-adapter.sh | bash
 #
 # Environment variables:
-#   INSTALL_DIR   — target directory (default: /usr/local/bin)
-#   VERSION       — release tag to install (default: latest)
+#   INSTALL_DIR      target directory (default: /usr/local/bin)
+#   VERSION          release tag to install (default: latest)
+#   VERIFY_CHECKSUM  auto     verify against SHA256SUMS.txt when the release
+#                             publishes a checksum for the asset; warn when
+#                             it does not (default)
+#                    required fail unless a published checksum matches
+#                    skip     do not verify
+#
+# release-bundle.yml publishes one SHA256SUMS.txt covering every release
+# asset, including these standalone adapter binaries
+# (git-lfs-proton-adapter-<os>-<arch>[.exe]). "auto" keeps older releases
+# without a checksum entry installable, with a warning.
 
 REPO="SevenOfNine-labs/proton-lfs-cli"
 BINARY_NAME="git-lfs-proton-adapter"
+CHECKSUM_FILE="SHA256SUMS.txt"
 INSTALL_DIR="${INSTALL_DIR:-/usr/local/bin}"
+VERIFY_CHECKSUM="${VERIFY_CHECKSUM:-auto}"
+
+case "$VERIFY_CHECKSUM" in
+  auto|required|skip) ;;
+  *) echo "VERIFY_CHECKSUM must be auto, required or skip (got: ${VERIFY_CHECKSUM})" >&2; exit 1 ;;
+esac
 
 # --- Detect OS ---
 detect_os() {
@@ -38,22 +55,79 @@ detect_arch() {
 }
 
 # --- Resolve version ---
+# GitHub redirects releases/latest to releases/tag/<tag>; the tag is the last
+# path segment of the final URL, so no API JSON needs parsing.
 resolve_version() {
   if [ -n "${VERSION:-}" ]; then
     echo "$VERSION"
     return
   fi
 
-  local latest
-  latest="$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" \
-    | grep '"tag_name"' \
-    | sed -E 's/.*"tag_name":\s*"([^"]+)".*/\1/')"
+  local effective tag
+  effective="$(curl -fsSLI -o /dev/null -w '%{url_effective}' \
+    "https://github.com/${REPO}/releases/latest")" || effective=""
+  tag="${effective##*/}"
+  case "$tag" in
+    ""|latest|releases)
+      echo "Failed to determine latest release from ${effective:-no response}" >&2
+      exit 1
+      ;;
+  esac
+  echo "$tag"
+}
 
-  if [ -z "$latest" ]; then
-    echo "Failed to determine latest release" >&2
+# --- SHA-256 of a file (coreutils sha256sum, or shasum on macOS) ---
+sha256_of() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | awk '{print $1}'
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$1" | awk '{print $1}'
+  else
+    return 1
+  fi
+}
+
+checksum_unavailable() {
+  local reason="$1"
+  if [ "$VERIFY_CHECKSUM" = "required" ]; then
+    echo "Checksum verification required but ${reason}" >&2
     exit 1
   fi
-  echo "$latest"
+  echo "Warning: ${reason}; installing without checksum verification" >&2
+}
+
+# --- Verify the downloaded asset against the release's checksum file ---
+verify_checksum() {
+  local asset_file="$1" asset_name="$2" version="$3"
+  local sums expected actual
+
+  if [ "$VERIFY_CHECKSUM" = "skip" ]; then
+    return 0
+  fi
+
+  sums="${TMP_DIR}/${CHECKSUM_FILE}"
+  if ! curl -fsSL -o "$sums" \
+      "https://github.com/${REPO}/releases/download/${version}/${CHECKSUM_FILE}"; then
+    checksum_unavailable "release ${version} publishes no ${CHECKSUM_FILE}"
+    return 0
+  fi
+
+  # sha256sum format: "<hex>  <name>" where a leading '*' marks binary mode.
+  expected="$(awk -v name="$asset_name" '{ f = $2; sub(/^\*/, "", f); if (f == name) { print $1; exit } }' "$sums")"
+  if [ -z "$expected" ]; then
+    checksum_unavailable "${CHECKSUM_FILE} of release ${version} has no entry for ${asset_name}"
+    return 0
+  fi
+
+  if ! actual="$(sha256_of "$asset_file")"; then
+    echo "No sha256sum or shasum tool available to verify ${asset_name}" >&2
+    exit 1
+  fi
+  if [ "$actual" != "$expected" ]; then
+    echo "Checksum mismatch for ${asset_name}: expected ${expected}, got ${actual}" >&2
+    exit 1
+  fi
+  echo "Checksum verified (${CHECKSUM_FILE})"
 }
 
 main() {
@@ -74,21 +148,25 @@ main() {
   echo "  From: ${url}"
   echo "  To:   ${INSTALL_DIR}/${BINARY_NAME}"
 
-  tmp="$(mktemp)"
-  trap 'rm -f "$tmp"' EXIT
+  TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/install-adapter.XXXXXX")"
+  trap 'rm -rf "$TMP_DIR"' EXIT
+  tmp="${TMP_DIR}/${asset_name}"
 
   if ! curl -fSL --progress-bar -o "$tmp" "$url"; then
     echo "Download failed. Check that release ${version} has asset ${asset_name}." >&2
     exit 1
   fi
 
-  chmod +x "$tmp"
+  verify_checksum "$tmp" "$asset_name" "$version"
 
-  if [ -w "$INSTALL_DIR" ]; then
-    mv "$tmp" "${INSTALL_DIR}/${BINARY_NAME}"
+  # install(1) copies the file with an explicit mode and the invoking user's
+  # ownership (root under sudo), unlike moving a 0600 mktemp file into place.
+  if [ -d "$INSTALL_DIR" ] && [ -w "$INSTALL_DIR" ]; then
+    install -m 0755 "$tmp" "${INSTALL_DIR}/${BINARY_NAME}"
   else
     echo "Elevated permissions required to install to ${INSTALL_DIR}"
-    sudo mv "$tmp" "${INSTALL_DIR}/${BINARY_NAME}"
+    sudo install -d -m 0755 "$INSTALL_DIR"
+    sudo install -m 0755 "$tmp" "${INSTALL_DIR}/${BINARY_NAME}"
   fi
 
   echo "Installed ${BINARY_NAME} ${version} to ${INSTALL_DIR}/${BINARY_NAME}"

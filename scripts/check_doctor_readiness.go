@@ -9,7 +9,7 @@ import (
 	"io"
 	"os"
 
-	"proton-lfs-cli/internal/preflight"
+	"github.com/SevenOfNine-labs/proton-lfs-cli/internal/preflight"
 )
 
 func main() {

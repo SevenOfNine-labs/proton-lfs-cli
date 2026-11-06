@@ -4,6 +4,9 @@ run:
   timeout: 5m
   go: "1.25"
   tests: true
+  # tests/integration is behind the integration tag; lint it too.
+  build-tags:
+    - integration
 
 linters:
   default: none

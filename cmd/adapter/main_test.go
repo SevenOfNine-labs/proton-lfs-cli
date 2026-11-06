@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"proton-lfs-cli/internal/config"
+	"github.com/SevenOfNine-labs/proton-lfs-cli/internal/config"
 )
 
 const validOID = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
@@ -60,7 +60,7 @@ func (b *observingBackend) Upload(_ *Session, _, _ string, _ int64) (int64, erro
 	return b.uploadSize, nil
 }
 
-func (b *observingBackend) Download(_ *Session, _ string) (string, int64, error) {
+func (b *observingBackend) Download(_ *Session, _ string, _ int64) (string, int64, error) {
 	if b.onDownload != nil {
 		b.onDownload()
 	}
@@ -85,7 +85,7 @@ func (b *streamingObservingBackend) Upload(_ *Session, _, _ string, _ int64) (in
 	return b.uploadSize, nil
 }
 
-func (b *streamingObservingBackend) Download(_ *Session, _ string) (string, int64, error) {
+func (b *streamingObservingBackend) Download(_ *Session, _ string, _ int64) (string, int64, error) {
 	return b.downloadPath, b.downloadSize, nil
 }
 
@@ -100,7 +100,7 @@ func (b *streamingObservingBackend) UploadWithProgress(_ *Session, _, _ string, 
 	return b.uploadSize, nil
 }
 
-func (b *streamingObservingBackend) DownloadWithProgress(_ *Session, _ string, progress ProgressFunc) (string, int64, error) {
+func (b *streamingObservingBackend) DownloadWithProgress(_ *Session, _ string, _ int64, progress ProgressFunc) (string, int64, error) {
 	b.downloadStreamed = true
 	if err := progress(b.downloadSize, b.downloadSize); err != nil {
 		return "", 0, err
@@ -582,7 +582,7 @@ func TestClassifyErrorAuthChallengeStates(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			state, errorCode, detail := classifyError(tc.code, tc.message)
+			state, errorCode, detail := classifyError(tc.code, "", tc.message)
 			if state != config.StateAuthRequired {
 				t.Fatalf("expected auth-required state, got %q", state)
 			}
@@ -922,12 +922,12 @@ func TestCopyIntoOpenFile(t *testing.T) {
 	})
 }
 
-func TestSendProgressSequenceZeroSize(t *testing.T) {
+func TestSendFinalProgressZeroSize(t *testing.T) {
 	adapter := NewAdapter()
 	buf := new(bytes.Buffer)
 	enc := json.NewEncoder(buf)
 
-	if err := adapter.sendProgressSequence(enc, validOID, 0); err != nil {
+	if err := adapter.sendFinalProgress(enc, validOID, 0); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -943,12 +943,12 @@ func TestSendProgressSequenceZeroSize(t *testing.T) {
 	}
 }
 
-func TestSendProgressSequenceNegativeSize(t *testing.T) {
+func TestSendFinalProgressNegativeSize(t *testing.T) {
 	adapter := NewAdapter()
 	buf := new(bytes.Buffer)
 	enc := json.NewEncoder(buf)
 
-	if err := adapter.sendProgressSequence(enc, validOID, -1); err != nil {
+	if err := adapter.sendFinalProgress(enc, validOID, -1); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -961,12 +961,12 @@ func TestSendProgressSequenceNegativeSize(t *testing.T) {
 	}
 }
 
-func TestSendProgressSequenceExactChunkSize(t *testing.T) {
+func TestSendFinalProgressExactChunkSize(t *testing.T) {
 	adapter := NewAdapter()
 	buf := new(bytes.Buffer)
 	enc := json.NewEncoder(buf)
 
-	if err := adapter.sendProgressSequence(enc, validOID, progressChunkSize); err != nil {
+	if err := adapter.sendFinalProgress(enc, validOID, progressChunkSize); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -979,12 +979,12 @@ func TestSendProgressSequenceExactChunkSize(t *testing.T) {
 	}
 }
 
-func TestSendProgressSequenceSmallerThanChunk(t *testing.T) {
+func TestSendFinalProgressSmallerThanChunk(t *testing.T) {
 	adapter := NewAdapter()
 	buf := new(bytes.Buffer)
 	enc := json.NewEncoder(buf)
 
-	if err := adapter.sendProgressSequence(enc, validOID, 100); err != nil {
+	if err := adapter.sendFinalProgress(enc, validOID, 100); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -997,24 +997,16 @@ func TestSendProgressSequenceSmallerThanChunk(t *testing.T) {
 	}
 }
 
-func TestSendProgressSequenceLargeObjectStreamingCounter(t *testing.T) {
+func TestSendFinalProgressLargeObjectIsOneEvent(t *testing.T) {
 	adapter := NewAdapter()
 	const largeSize int64 = 3*1024*1024*1024 + 123
 	writer := &progressCountingWriter{t: t}
 
-	if err := adapter.sendProgressSequence(json.NewEncoder(writer), validOID, largeSize); err != nil {
+	if err := adapter.sendFinalProgress(json.NewEncoder(writer), validOID, largeSize); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-
-	expectedCount := (largeSize + progressChunkSize - 1) / progressChunkSize
-	if writer.count != expectedCount {
-		t.Fatalf("expected %d progress messages, got %d", expectedCount, writer.count)
-	}
-	if writer.last != largeSize {
-		t.Fatalf("last bytesSoFar=%d, want %d", writer.last, largeSize)
-	}
-	if writer.latest.BytesSince != largeSize%progressChunkSize {
-		t.Fatalf("last bytesSinceLast=%d, want %d", writer.latest.BytesSince, largeSize%progressChunkSize)
+	if writer.count != 1 {
+		t.Fatalf("expected one progress message covering the whole object, got %d", writer.count)
 	}
 }
 
@@ -1249,6 +1241,31 @@ func TestValidateTransferRequestEdgeCases(t *testing.T) {
 			}
 			if err.Error() != tc.wantErr {
 				t.Fatalf("expected error %q, got %q", tc.wantErr, err.Error())
+			}
+		})
+	}
+}
+
+func TestClassifyErrorPrefersStructuredCode(t *testing.T) {
+	cases := []struct {
+		name      string
+		code      int
+		errorCode ErrorCode
+		message   string
+		wantState string
+		wantCode  string
+	}{
+		{"insufficient scope is not an auth retry", 403, ErrCodeInsufficientScope, "scope", config.StateError, "insufficient_scope"},
+		{"permission denied is not an auth retry", 403, ErrCodePermissionDenied, "denied", config.StateError, "permission_denied"},
+		{"rate limited keeps its state even with 2fa text", 429, ErrCodeRateLimited, "rate limited while loading 2FA settings", config.StateRateLimited, "rate_limited"},
+		{"session not initialized is a protocol error, not auth", 400, "", "session not initialized", config.StateError, "client_error"},
+		{"captcha by status without code", 407, "", "x", config.StateCaptcha, "captcha_required"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			state, errorCode, _ := classifyError(tc.code, tc.errorCode, tc.message)
+			if state != tc.wantState || errorCode != tc.wantCode {
+				t.Fatalf("classifyError(%d, %q, %q) = (%q, %q), want (%q, %q)", tc.code, tc.errorCode, tc.message, state, errorCode, tc.wantState, tc.wantCode)
 			}
 		})
 	}

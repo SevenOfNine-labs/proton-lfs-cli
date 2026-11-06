@@ -81,8 +81,8 @@ regression test for the observed state.
 `INSUFFICIENT_SCOPE` means the saved session can be locally ready while Proton
 still rejects the app/session authorization scope for Drive API calls. Treat it
 as an app-version/session-scope investigation, not as a data-password problem.
-For redacted evidence, run `proton-lfs-cli scope-diagnostics` first, then
-`PROTON_LFS_LIVE_CANARY=I_UNDERSTAND_THIS_TOUCHES_A_REAL_PROTON_ACCOUNT proton-lfs-cli scope-diagnostics --live`
+For redacted evidence, run `proton-lfs-tray scope-diagnostics` first, then
+`PROTON_LFS_LIVE_CANARY=I_UNDERSTAND_THIS_TOUCHES_A_REAL_PROTON_ACCOUNT proton-lfs-tray scope-diagnostics --live`
 if one read-only server probe is intentionally allowed. The diagnostics command
 does not run login or transfer commands.
 
@@ -97,13 +97,13 @@ export PROTON_LFS_LIVE_CANARY=I_UNDERSTAND_THIS_TOUCHES_A_REAL_PROTON_ACCOUNT
 Run exactly one interactive login:
 
 ```bash
-proton-drive login --key-password-provider git-credential
+proton-drive-cli login --key-password-provider git-credential
 ```
 
 For Proton Pass:
 
 ```bash
-proton-drive login --key-password-provider pass-cli
+proton-drive-cli login --key-password-provider pass-cli
 ```
 
 If the account requires TOTP, complete the single prompt. If the prompt fails,
@@ -114,8 +114,8 @@ stop. Do not immediately run the command again.
 After login, inspect only local state:
 
 ```bash
-proton-drive status
-proton-drive doctor --key-password-provider git-credential
+proton-drive-cli status
+proton-drive-cli doctor --key-password-provider git-credential
 ```
 
 Expected local properties:
@@ -142,7 +142,7 @@ upload, download, delete, or the Git LFS transfer path.
 The manual equivalent is one small metadata read:
 
 ```bash
-proton-drive ls /
+proton-drive-cli ls /
 ```
 
 Stop after this command regardless of success. Do not upload or download in the
@@ -171,7 +171,6 @@ explicit:
 
 ```bash
 PROTON_LFS_LIVE_CANARY=I_UNDERSTAND_THIS_TOUCHES_A_REAL_PROTON_ACCOUNT \
-PROTON_CREDENTIAL_PROVIDER=pass-cli \
 PROTON_KEY_PASSWORD_PROVIDER=pass-cli \
 LIVE_CANARY_DOCTOR_ARGS="--key-password-provider pass-cli" \
 LIVE_BROWSER_FORK_LOGIN_ARGS="--key-password-provider pass-cli" \
@@ -183,7 +182,7 @@ Stop after this target. The target parses the offline doctor JSON and requires
 `make test-e2e-real` later, in a separate command, after recording that result.
 The browser-fork helper rejects any `LIVE_BROWSER_FORK_LOGIN_ARGS` value that
 is not `--key-password-provider` or `--key-password-host`; login is
-browser-fork-only, and legacy account credential flags are never allowed.
+browser-fork-only, and account credential flags are rejected.
 
 ## Real E2E Guard
 
@@ -247,7 +246,7 @@ email addresses into issue trackers or commits.
 After the canary:
 
 ```bash
-proton-drive logout
+proton-drive-cli logout
 unset PROTON_LFS_LIVE_CANARY
 ```
 

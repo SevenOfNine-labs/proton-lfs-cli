@@ -2,12 +2,13 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"os/exec"
 	"strings"
 
-	"proton-lfs-cli/internal/config"
+	"github.com/SevenOfNine-labs/proton-lfs-cli/internal/config"
 )
 
 // Function vars for testability — tests swap these to inject mocks.
@@ -24,10 +25,11 @@ func cliDriveLogin(driveCLI string, args ...string) error {
 	var stderr bytes.Buffer
 	cmd := exec.Command(driveCLI, cmdArgs...)
 	cmd.Stderr = &stderr
-	// For pass-cli provider, set PROTON_PASS_CLI_BIN so proton-drive-cli can
-	// find pass-cli even when running from a macOS .app bundle with minimal PATH.
+	// proton-drive-cli resolves pass-cli through PROTON_PASS_CLI_BIN; a macOS
+	// .app bundle starts with launchd's minimal PATH, so the absolute path
+	// discovered here is passed explicitly.
 	provider := extractKeyPasswordProviderFromArgs(args)
-	if provider == "pass-cli" {
+	if provider == config.CredentialProviderPassCLI {
 		if passCLI := discoverPassCLIBinary(); passCLI != "" {
 			cmd.Env = append(cmd.Environ(), "PROTON_PASS_CLI_BIN="+passCLI)
 		}
@@ -67,7 +69,7 @@ func cliStatus(w io.Writer) int {
 	}
 
 	prefs := config.LoadPrefs()
-	_, _ = fmt.Fprintf(w, "Provider: %s\n", prefs.CredentialProvider)
+	_, _ = fmt.Fprintf(w, "Provider: %s\n", prefs.KeyPasswordProvider)
 
 	report, err := config.ReadStatus()
 	if err != nil {
@@ -89,8 +91,10 @@ func cliLogout(w io.Writer) int {
 		return 1
 	}
 
+	ctx, cancel := context.WithTimeout(context.Background(), driveCLITimeout)
+	defer cancel()
 	var stderr bytes.Buffer
-	cmd := exec.Command(driveCLI, "logout")
+	cmd := driveCLICommand(ctx, driveCLI, "logout")
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
 		if stderr.Len() > 0 {
@@ -108,7 +112,7 @@ func cliLogout(w io.Writer) int {
 func cliConfig(w io.Writer, args []string) int {
 	if len(args) == 0 {
 		prefs := config.LoadPrefs()
-		_, _ = fmt.Fprintln(w, prefs.CredentialProvider)
+		_, _ = fmt.Fprintln(w, prefs.KeyPasswordProvider)
 		return 0
 	}
 
@@ -131,7 +135,7 @@ func cliConfig(w io.Writer, args []string) int {
 	}
 
 	prefs := config.LoadPrefs()
-	prefs.CredentialProvider = provider
+	prefs.KeyPasswordProvider = provider
 	if err := config.SavePrefs(prefs); err != nil {
 		_, _ = fmt.Fprintf(w, "error saving config: %v\n", err)
 		return 1
@@ -140,7 +144,8 @@ func cliConfig(w io.Writer, args []string) int {
 	return 0
 }
 
-// cliRegister enables the Proton LFS backend in git global config.
+// cliRegister enables the Proton LFS backend in git global config. It writes
+// the same settings as the tray's "Enable LFS Backend" item.
 func cliRegister(w io.Writer) int {
 	adapterPath := findAdapter()
 	if adapterPath == "" {
@@ -148,22 +153,9 @@ func cliRegister(w io.Writer) int {
 		return 1
 	}
 
-	if err := exec.Command("git", "config", "--global",
-		"lfs.customtransfer.proton.path", adapterPath).Run(); err != nil {
-		_, _ = fmt.Fprintf(w, "error: git config failed: %v\n", err)
-		return 1
-	}
-
 	prefs := config.LoadPrefs()
 	driveCLIPath := findDriveCLI()
-	args := buildProtonTransferArgs(prefs.CredentialProvider, driveCLIPath)
-	if err := exec.Command("git", "config", "--global",
-		"lfs.customtransfer.proton.args", args).Run(); err != nil {
-		_, _ = fmt.Fprintf(w, "error: git config failed: %v\n", err)
-		return 1
-	}
-	if err := exec.Command("git", "config", "--global",
-		"lfs.standalonetransferagent", "proton").Run(); err != nil {
+	if err := writeGitLFSRegistration(adapterPath, buildProtonTransferArgsFromPrefs(prefs, driveCLIPath)); err != nil {
 		_, _ = fmt.Fprintf(w, "error: git config failed: %v\n", err)
 		return 1
 	}
@@ -173,7 +165,7 @@ func cliRegister(w io.Writer) int {
 	if driveCLIPath != "" {
 		_, _ = fmt.Fprintf(w, "  drive-cli: %s\n", driveCLIPath)
 	}
-	_, _ = fmt.Fprintf(w, "  provider: %s\n", prefs.CredentialProvider)
+	_, _ = fmt.Fprintf(w, "  provider: %s\n", prefs.KeyPasswordProvider)
 	return 0
 }
 
@@ -186,7 +178,7 @@ func cliLogin(w io.Writer) int {
 	}
 
 	prefs := config.LoadPrefs()
-	provider := prefs.CredentialProvider
+	provider := prefs.KeyPasswordProvider
 
 	_, _ = fmt.Fprintln(w, "Logging in...")
 	if err := loginDrive(driveCLI, "--key-password-provider", provider); err != nil {

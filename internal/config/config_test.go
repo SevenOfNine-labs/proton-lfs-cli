@@ -2,6 +2,8 @@ package config
 
 import (
 	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -45,31 +47,44 @@ func TestEnvBoolOrDefault(t *testing.T) {
 }
 
 func TestAppDirPath(t *testing.T) {
-	p := AppDirPath()
-	if p == "" {
-		t.Fatal("AppDirPath returned empty")
+	p, err := AppDirPath()
+	if err != nil || p == "" {
+		t.Fatalf("AppDirPath() = %q, %v", p, err)
+	}
+}
+
+func TestAppDirPathWithoutHome(t *testing.T) {
+	t.Setenv("HOME", "")
+	if p, err := AppDirPath(); err == nil {
+		t.Fatalf("AppDirPath() without HOME = %q, want error", p)
+	}
+	if p, err := StatusFilePath(); err == nil {
+		t.Fatalf("StatusFilePath() without HOME = %q, want error", p)
+	}
+	if err := WriteStatus(StatusReport{State: StateIdle}); err == nil {
+		t.Fatal("WriteStatus without HOME must fail instead of writing into the working directory")
 	}
 }
 
 func TestStatusFilePath_Default(t *testing.T) {
 	t.Setenv(EnvStatusFile, "")
-	p := StatusFilePath()
-	if p == "" {
-		t.Fatal("StatusFilePath returned empty")
+	p, err := StatusFilePath()
+	if err != nil || p == "" {
+		t.Fatalf("StatusFilePath() = %q, %v", p, err)
 	}
 }
 
 func TestStatusFilePath_EnvOverride(t *testing.T) {
 	t.Setenv(EnvStatusFile, "/tmp/test-status.json")
-	if got := StatusFilePath(); got != "/tmp/test-status.json" {
-		t.Fatalf("got %q, want /tmp/test-status.json", got)
+	if got, err := StatusFilePath(); err != nil || got != "/tmp/test-status.json" {
+		t.Fatalf("got %q, %v, want /tmp/test-status.json", got, err)
 	}
 }
 
 func TestPrefsFilePath(t *testing.T) {
-	p := PrefsFilePath()
-	if p == "" {
-		t.Fatal("PrefsFilePath returned empty")
+	p, err := PrefsFilePath()
+	if err != nil || p == "" {
+		t.Fatalf("PrefsFilePath() = %q, %v", p, err)
 	}
 }
 
@@ -165,16 +180,16 @@ func TestPrefsRoundTrip(t *testing.T) {
 	t.Setenv("HOME", tmpDir)
 
 	prefs := Preferences{
-		CredentialProvider: CredentialProviderGitCredential,
-		Enabled:            true,
+		KeyPasswordProvider: CredentialProviderGitCredential,
+		Enabled:             true,
 	}
 	if err := SavePrefs(prefs); err != nil {
 		t.Fatalf("SavePrefs: %v", err)
 	}
 
 	got := LoadPrefs()
-	if got.CredentialProvider != CredentialProviderGitCredential {
-		t.Fatalf("CredentialProvider = %q", got.CredentialProvider)
+	if got.KeyPasswordProvider != CredentialProviderGitCredential {
+		t.Fatalf("KeyPasswordProvider = %q", got.KeyPasswordProvider)
 	}
 	if !got.Enabled {
 		t.Fatal("Enabled should be true")
@@ -185,8 +200,8 @@ func TestPrefsLoadMissingReturnsDefaults(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	got := LoadPrefs()
 	defaults := DefaultPreferences()
-	if got.CredentialProvider != defaults.CredentialProvider {
-		t.Fatalf("got %q, want default %q", got.CredentialProvider, defaults.CredentialProvider)
+	if got.KeyPasswordProvider != defaults.KeyPasswordProvider {
+		t.Fatalf("got %q, want default %q", got.KeyPasswordProvider, defaults.KeyPasswordProvider)
 	}
 	if got.Enabled != defaults.Enabled {
 		t.Fatalf("Enabled = %v, want %v", got.Enabled, defaults.Enabled)
@@ -201,7 +216,35 @@ func TestPrefsLoadCorruptReturnsDefaults(t *testing.T) {
 	_ = os.WriteFile(configDir+"/"+ConfigFileName, []byte("{invalid json"), 0o600)
 
 	got := LoadPrefs()
-	if got.CredentialProvider != DefaultCredentialProvider {
-		t.Fatalf("corrupt file should return defaults, got %q", got.CredentialProvider)
+	if got.KeyPasswordProvider != DefaultKeyPasswordProvider {
+		t.Fatalf("corrupt file should return defaults, got %q", got.KeyPasswordProvider)
+	}
+}
+
+func TestPrefsLoadMigratesFormerKeyPasswordProviderKey(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	dir := filepath.Join(home, AppDir)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	former := []byte(`{"credentialProvider":"git-credential","enabled":true}`)
+	if err := os.WriteFile(filepath.Join(dir, ConfigFileName), former, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	got := LoadPrefs()
+	if got.KeyPasswordProvider != CredentialProviderGitCredential {
+		t.Fatalf("former credentialProvider key not migrated: %+v", got)
+	}
+	if err := SavePrefs(got); err != nil {
+		t.Fatal(err)
+	}
+	saved, err := os.ReadFile(filepath.Join(dir, ConfigFileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(saved), `"keyPasswordProvider": "git-credential"`) || strings.Contains(string(saved), "credentialProvider\"") {
+		t.Fatalf("saved prefs must use the current key only:\n%s", saved)
 	}
 }

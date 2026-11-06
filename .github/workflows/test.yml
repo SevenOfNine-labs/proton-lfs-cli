@@ -12,21 +12,17 @@ permissions:
 
 concurrency:
   group: test-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   go-test:
     name: Go tests
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    env:
-      PROTON_PASS_REF_ROOT: pass://Personal/Proton LFS
-      PROTON_PASS_USERNAME_REF: pass://Personal/Proton LFS/username
-      PROTON_PASS_PASSWORD_REF: pass://Personal/Proton LFS/password
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # The bridge contract tests in cmd/adapter read the JSON schemas shipped
       # in submodules/proton-drive-cli/schemas/bridge/v1.
@@ -34,17 +30,17 @@ jobs:
         run: git submodule update --init --depth=1 submodules/proton-drive-cli
 
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
 
-      - name: Run adapter tests with coverage
+      - name: Run unit tests with coverage (cmd/..., internal/...)
         run: |
-          go test -race -coverprofile=coverage.out ./cmd/adapter/...
+          go test -race -coverprofile=coverage.out ./cmd/... ./internal/...
           go tool cover -func=coverage.out | tail -n 1
 
       - name: Upload Go coverage artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: go-coverage
           path: coverage.out
@@ -62,24 +58,24 @@ jobs:
           - macos-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
 
-      - name: Install Linux deps
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc libgtk-3-dev libayatana-appindicator3-dev
-
+      # fyne.io/systray needs cgo only on darwin. Linux proves the pure-Go
+      # build (CGO_ENABLED=0, so no -race, which the Go tests job covers);
+      # macOS exercises the Cocoa/cgo path.
       - name: Run tray tests
-        env:
-          CGO_ENABLED: "1"
+        shell: bash
         run: |
-          go test -race -cover ./cmd/tray/...
+          if [ "${RUNNER_OS}" = "Linux" ]; then
+            CGO_ENABLED=0 go test -cover ./cmd/tray/...
+          else
+            go test -race -cover ./cmd/tray/...
+          fi
 
   integration-local:
     name: Integration local backend (${{ matrix.os }})
@@ -93,10 +89,10 @@ jobs:
           - macos-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
 
@@ -122,8 +118,8 @@ jobs:
           go test -tags integration ./tests/integration/... \
             -run '^TestGitLFSCustomTransfer(StandaloneUpload|DownloadRoundTrip|ConcurrentRoundTrip)$' -v
 
-  integration-timeout:
-    name: Integration timeout semantics (${{ matrix.os }})
+  integration-adapter-exit:
+    name: Integration adapter exit mid-transfer (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     strategy:
@@ -135,10 +131,10 @@ jobs:
           - windows-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
 
@@ -164,10 +160,10 @@ jobs:
         run: |
           git lfs version
 
-      - name: Run timeout semantics integration tests
+      - name: Run adapter-exit integration tests
         shell: bash
         run: |
-          go test -tags integration ./tests/integration/... -run '^TestGitLFSCustomTransferTimeout' -v
+          go test -tags integration ./tests/integration/... -run '^TestGitLFSCustomTransferAdapterExitsMid' -v
 
   integration-stress:
     name: Integration concurrency stress (ubuntu)
@@ -179,10 +175,10 @@ jobs:
       PROTON_LFS_STRESS_CONCURRENCY: "8"
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
 
@@ -207,10 +203,10 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
 
@@ -231,10 +227,10 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
 
@@ -253,22 +249,24 @@ jobs:
     name: Integration credential security
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    env:
-      PROTON_PASS_REF_ROOT: pass://Personal/Proton LFS
-      PROTON_PASS_USERNAME_REF: pass://Personal/Proton LFS/username
-      PROTON_PASS_PASSWORD_REF: pass://Personal/Proton LFS/password
-      PASS_MOCK_USERNAME: integration-user@proton.test
-      PASS_MOCK_PASSWORD: integration-password
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
 
-      - name: Run credential security tests (mocked pass-cli)
+      - name: Setup Node.js (runs the recording bridge stand-in)
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+
+      - name: Build adapter
+        run: make build
+
+      - name: Run credential security tests (mocked pass-cli, recording bridge)
         env:
           PROTON_PASS_CLI_BIN: ${{ github.workspace }}/scripts/mock-pass-cli.sh
         run: |
@@ -279,26 +277,20 @@ jobs:
     name: Bridge integration (mocked)
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    env:
-      PROTON_PASS_REF_ROOT: pass://Personal/Proton LFS
-      PROTON_PASS_USERNAME_REF: pass://Personal/Proton LFS/username
-      PROTON_PASS_PASSWORD_REF: pass://Personal/Proton LFS/password
-      PASS_MOCK_USERNAME: integration-user@proton.test
-      PASS_MOCK_PASSWORD: integration-password
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: "22"
+          node-version-file: .node-version
 
       - name: Install git-lfs
         run: |
@@ -308,6 +300,9 @@ jobs:
 
       - name: Run bridge integration test with mocked pass-cli and drive-cli
         env:
+          # The SDK round-trip is opt-in so that `make test-integration` stays
+          # offline; this job supplies the mocks and opts in.
+          PROTON_LFS_RUN_SDK_INTEGRATION: "1"
           PROTON_PASS_CLI_BIN: ${{ github.workspace }}/scripts/mock-pass-cli.sh
           PROTON_DRIVE_CLI_BIN: ${{ github.workspace }}/tests/testdata/mock-proton-drive-cli.js
         run: |
@@ -315,23 +310,29 @@ jobs:
           go test -tags integration ./tests/integration/... -run SDK -v
 
   drive-cli-tests:
-    name: Drive CLI tests (Jest)
+    name: Drive CLI tests (Jest, Node ${{ matrix.node-version }})
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        # 22 is the engines floor of dist/index.js, 26 the LTS line in
+        # .node-version used by every other job and the SEA build.
+        node-version: ["22", "26"]
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          submodules: true
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Init drive-cli submodules (non-recursive)
-        working-directory: submodules/proton-drive-cli
-        run: git submodule update --init --depth=1
+      # Only proton-drive-cli and its vendored SDK are needed here.
+      - name: Init proton-drive-cli submodule (non-recursive)
+        run: |
+          git submodule update --init --depth=1 submodules/proton-drive-cli
+          git -C submodules/proton-drive-cli submodule update --init --depth=1 submodules/sdk
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: "22"
+          node-version: ${{ matrix.node-version }}
 
       - name: Enable Corepack
         run: |
@@ -342,41 +343,34 @@ jobs:
         working-directory: submodules/proton-drive-cli/submodules/sdk/client/js
         run: npm install --no-package-lock --no-audit --no-fund && npm run build
 
+      # Installs through the root workspace so the root yarn.lock (the one the
+      # release bundle is built from) is what gets tested.
       - name: Install dependencies
-        working-directory: submodules/proton-drive-cli
-        run: YARN_ENABLE_IMMUTABLE_INSTALLS=false yarn install
+        run: yarn install --immutable
 
       - name: Build
-        working-directory: submodules/proton-drive-cli
-        run: yarn build
+        run: yarn workspace @sevenofnine-ai/proton-drive-cli build
 
       - name: Run proton-drive-cli tests
-        working-directory: submodules/proton-drive-cli
-        run: yarn test
+        run: yarn workspace @sevenofnine-ai/proton-drive-cli test
 
   e2e-mocked:
     name: Mocked E2E pipeline
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    env:
-      PROTON_PASS_REF_ROOT: pass://Personal/Proton LFS
-      PROTON_PASS_USERNAME_REF: pass://Personal/Proton LFS/username
-      PROTON_PASS_PASSWORD_REF: pass://Personal/Proton LFS/password
-      PASS_MOCK_USERNAME: integration-user@proton.test
-      PASS_MOCK_PASSWORD: integration-password
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: "22"
+          node-version-file: .node-version
 
       - name: Install git-lfs
         run: |

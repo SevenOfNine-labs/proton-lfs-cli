@@ -1,5 +1,7 @@
 # Proton Auth News Audit - 2026-06-21, refreshed 2026-06-25
 
+> Historical record as of 2026-06-25 (audit started 2026-06-21); superseded by `docs/project/current-state.md` and `docs/history/proton-sdk-update-2026-11-05.md`. Source links and findings reflect that date.
+
 This note records the latest Proton auth and SDK signals reviewed before any
 real Proton login canary. No live login or transfer was attempted during this
 audit.

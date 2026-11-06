@@ -1,14 +1,20 @@
 package main
 
 import (
+	"bytes"
 	"io"
 	"log"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
-	"proton-lfs-cli/internal/config"
+	"github.com/SevenOfNine-labs/proton-lfs-cli/internal/config"
 )
 
 func setupTrayLogForTest(t *testing.T) {
@@ -136,5 +142,108 @@ func TestActiveAuthRateLimitIgnoresExpiredOrNonLoginStatus(t *testing.T) {
 	}
 	if _, blocked := activeAuthRateLimit(now); blocked {
 		t.Fatal("expired login rate-limit status must not block Connect")
+	}
+}
+
+func TestRedactSubprocessOutputRedactsSecretBeforeLaterMarker(t *testing.T) {
+	// A JSON token that appears before a Bearer marker must be redacted too:
+	// cutting the string at the first marker found in a fixed marker order
+	// would have kept everything before that marker, including the token.
+	input := `{"accessToken":"LEAKED-SECRET"} ... Bearer xyz`
+	got := redactSubprocessOutput(input)
+	if strings.Contains(got, "LEAKED-SECRET") {
+		t.Fatalf("access token leaked: %s", got)
+	}
+	if strings.Contains(got, "xyz") {
+		t.Fatalf("bearer token leaked: %s", got)
+	}
+	if !strings.Contains(got, `"accessToken":"[redacted]"`) || !strings.Contains(got, "Bearer [redacted]") {
+		t.Fatalf("expected both values redacted in place: %s", got)
+	}
+}
+
+func TestRunLoggedCommandHandlesLinesLongerThanScannerLimit(t *testing.T) {
+	setupTrayLogForTest(t)
+	if runtime.GOOS == "windows" {
+		t.Skip("needs a POSIX shell")
+	}
+	// 300 KiB on one line exceeds bufio.MaxScanTokenSize (64 KiB).
+	script := filepath.Join(t.TempDir(), "noisy.sh")
+	body := "#!/bin/sh\n" +
+		"head -c 307200 /dev/zero | tr '\\0' 'x'\n" +
+		"printf '\\nsecond line\\n'\n" +
+		"printf 'stderr line\\n' >&2\n"
+	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	done := make(chan struct{})
+	var out []byte
+	var err error
+	go func() {
+		defer close(done)
+		out, err = runLoggedCommand("test", exec.Command(script))
+	}()
+	select {
+	case <-done:
+	case <-time.After(20 * time.Second):
+		t.Fatal("runLoggedCommand deadlocked on a long line")
+	}
+	if err != nil {
+		t.Fatalf("command failed: %v", err)
+	}
+	lines := strings.Split(strings.TrimRight(string(out), "\n"), "\n")
+	var longest int
+	var sawSecond, sawStderr bool
+	for _, line := range lines {
+		if len(line) > longest {
+			longest = len(line)
+		}
+		sawSecond = sawSecond || line == "second line"
+		sawStderr = sawStderr || line == "stderr line"
+	}
+	if longest != 307200 {
+		t.Fatalf("longest line = %d bytes, want 307200 (line kept whole)", longest)
+	}
+	if !sawSecond || !sawStderr {
+		t.Fatalf("expected stdout and stderr lines after the long line:\n%d lines", len(lines))
+	}
+}
+
+func TestLineLoggerFlushesTrailingPartialLine(t *testing.T) {
+	setupTrayLogForTest(t)
+	var out bytes.Buffer
+	var mu sync.Mutex
+	w := newLineLogger("test", &out, &mu)
+	if _, err := w.Write([]byte("first\nsec")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.Write([]byte("ond\ntail")); err != nil {
+		t.Fatal(err)
+	}
+	w.Flush()
+	if got := out.String(); got != "first\nsecond\ntail\n" {
+		t.Fatalf("output = %q", got)
+	}
+}
+
+func TestRedactSubprocessOutputCoversObjectAndWordForms(t *testing.T) {
+	cases := []string{
+		`{ accessToken: 'eyJabc.def', refreshToken: 'r3fr3sh' }`,
+		`AccessToken eyJabc.def expired`,
+		`refresh_token=r3fr3sh&uid=u-1`,
+		`{"accessToken":"eyJabc.def","Uid":"u-1"}`,
+		`session_id: abc123secret`,
+	}
+	for _, input := range cases {
+		got := redactSubprocessOutput(input)
+		for _, secret := range []string{"eyJabc.def", "r3fr3sh", "u-1", "abc123secret"} {
+			if strings.Contains(got, secret) {
+				t.Fatalf("redaction leaked %q from %q: %s", secret, input, got)
+			}
+		}
+	}
+	if got := redactSubprocessOutput(`{"accessToken":"x1"}`); got != `{"accessToken":"[redacted]"}` {
+		t.Fatalf("redacted JSON must stay well-formed, got %s", got)
 	}
 }
