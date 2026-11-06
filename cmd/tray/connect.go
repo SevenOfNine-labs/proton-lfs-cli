@@ -1,19 +1,22 @@
 package main
 
 import (
-	"bufio"
 	"bytes"
 	"fmt"
-	"io"
 	"os/exec"
 	"strings"
 	"sync"
 	"time"
 
-	"proton-lfs-cli/internal/config"
+	"github.com/SevenOfNine-labs/proton-lfs-cli/internal/config"
 )
 
 const authRateLimitCooldown = time.Hour
+
+// subprocessWaitDelay bounds exec.Cmd.Wait after the child has exited or its
+// context expired: a grandchild that inherited the output pipes (for example
+// a browser spawned by proton-drive-cli login) must not keep the tray waiting.
+const subprocessWaitDelay = 5 * time.Second
 
 // connectToProton runs the tray Connect flow.
 // Browser-fork authentication is the only account login path. The tray never
@@ -25,7 +28,7 @@ func connectToProton() {
 		return
 	}
 
-	driveCLI := discoverDriveCLIBinary()
+	driveCLI := findDriveCLI()
 	if driveCLI == "" {
 		trayLog.Print("connect: proton-drive-cli binary not found")
 		sendNotification("Error: CLI not found")
@@ -34,7 +37,7 @@ func connectToProton() {
 	trayLog.Printf("connect: using drive-cli at %s", driveCLI)
 
 	prefs := config.LoadPrefs()
-	provider := prefs.CredentialProvider
+	provider := prefs.KeyPasswordProvider
 	trayLog.Printf("connect: key-password provider = %s", provider)
 	traceID := newAuthTraceID()
 	trayLog.Printf("connect: auth trace id = %s", traceID)
@@ -69,7 +72,7 @@ func connectToProton() {
 		} else {
 			sendNotification("Signed in")
 		}
-		applyAuthReadiness(readiness)
+		refreshTrayState()
 	}()
 }
 
@@ -84,9 +87,10 @@ func protonDriveLoginWithTrace(driveCLI string, provider string, traceID string,
 	trayLog.Printf("connect: exec %s %v", driveCLI, cmdArgs)
 	cmd := exec.Command(driveCLI, cmdArgs...)
 	cmd.Env = append(cmd.Environ(), withAuthTraceEnv(nil, traceID)...)
-	// For pass-cli provider, set PROTON_PASS_CLI_BIN so proton-drive-cli can
-	// find pass-cli even when running from a macOS .app bundle with minimal PATH
-	if provider == "pass-cli" {
+	// proton-drive-cli resolves pass-cli through PROTON_PASS_CLI_BIN; a macOS
+	// .app bundle starts with launchd's minimal PATH, so the tray passes the
+	// absolute path it discovered.
+	if provider == config.CredentialProviderPassCLI {
 		if passCLI := discoverPassCLIBinary(); passCLI != "" {
 			cmd.Env = append(cmd.Env, "PROTON_PASS_CLI_BIN="+passCLI)
 			trayLog.Printf("connect: set PROTON_PASS_CLI_BIN=%s", passCLI)
@@ -101,40 +105,69 @@ func protonDriveLoginWithTrace(driveCLI string, provider string, traceID string,
 	return out, err
 }
 
+// runLoggedCommand runs cmd, logs every output line (redacted) under prefix,
+// and returns the combined stdout and stderr. Output is split into lines by
+// lineLogger rather than bufio.Scanner: the scanner stops at
+// bufio.MaxScanTokenSize (64 KiB) and a stopped reader leaves the child
+// blocked on a full pipe, which deadlocked cmd.Wait. exec.Cmd drains the
+// pipes itself when Stdout and Stderr are writers, bounded by WaitDelay.
 func runLoggedCommand(prefix string, cmd *exec.Cmd) ([]byte, error) {
 	var out bytes.Buffer
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return nil, err
-	}
-	stderr, err := cmd.StderrPipe()
-	if err != nil {
-		return nil, err
-	}
-	if err := cmd.Start(); err != nil {
-		return nil, err
-	}
-	var wg sync.WaitGroup
 	var outMu sync.Mutex
-	wg.Add(2)
-	go streamCommandOutput(prefix, stdout, &out, &outMu, &wg)
-	go streamCommandOutput(prefix, stderr, &out, &outMu, &wg)
-	wg.Wait()
-	err = cmd.Wait()
+	stdout := newLineLogger(prefix, &out, &outMu)
+	stderr := newLineLogger(prefix, &out, &outMu)
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
+	cmd.WaitDelay = subprocessWaitDelay
+	err := cmd.Run()
+	stdout.Flush()
+	stderr.Flush()
 	return out.Bytes(), err
 }
 
-func streamCommandOutput(prefix string, r io.Reader, out *bytes.Buffer, outMu *sync.Mutex, wg *sync.WaitGroup) {
-	defer wg.Done()
-	scanner := bufio.NewScanner(r)
-	for scanner.Scan() {
-		line := scanner.Text()
-		outMu.Lock()
-		out.WriteString(line)
-		out.WriteByte('\n')
-		outMu.Unlock()
-		logSubprocessOutput(prefix, []byte(line))
+// lineLogger is an io.Writer that forwards each complete line to the tray
+// log and to a shared output buffer. One lineLogger serves one stream; the
+// buffer is shared between streams and guarded by outMu.
+type lineLogger struct {
+	prefix  string
+	out     *bytes.Buffer
+	outMu   *sync.Mutex
+	pending bytes.Buffer
+}
+
+func newLineLogger(prefix string, out *bytes.Buffer, outMu *sync.Mutex) *lineLogger {
+	return &lineLogger{prefix: prefix, out: out, outMu: outMu}
+}
+
+func (l *lineLogger) Write(p []byte) (int, error) {
+	l.pending.Write(p)
+	for {
+		idx := bytes.IndexByte(l.pending.Bytes(), '\n')
+		if idx < 0 {
+			return len(p), nil
+		}
+		line := make([]byte, idx)
+		copy(line, l.pending.Next(idx+1))
+		l.emit(line)
 	}
+}
+
+// Flush emits a trailing line that was not newline-terminated.
+func (l *lineLogger) Flush() {
+	if l.pending.Len() == 0 {
+		return
+	}
+	line := make([]byte, l.pending.Len())
+	copy(line, l.pending.Next(l.pending.Len()))
+	l.emit(line)
+}
+
+func (l *lineLogger) emit(line []byte) {
+	l.outMu.Lock()
+	l.out.Write(line)
+	l.out.WriteByte('\n')
+	l.outMu.Unlock()
+	logSubprocessOutput(l.prefix, line)
 }
 
 func activeAuthRateLimit(now time.Time) (time.Duration, bool) {

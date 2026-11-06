@@ -44,19 +44,15 @@ func WriteStatus(report StatusReport) error {
 		return fmt.Errorf("marshal status: %w", err)
 	}
 
-	path := StatusFilePath()
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
+	path, err := StatusFilePath()
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return fmt.Errorf("create status dir: %w", err)
 	}
-
-	tmp := fmt.Sprintf("%s.tmp-%d", path, time.Now().UnixNano())
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
-		return fmt.Errorf("write status tmp: %w", err)
-	}
-	if err := os.Rename(tmp, path); err != nil {
-		_ = os.Remove(tmp)
-		return fmt.Errorf("rename status: %w", err)
+	if err := WriteFileAtomic(path, data, 0o600); err != nil {
+		return fmt.Errorf("write status: %w", err)
 	}
 	return nil
 }
@@ -64,7 +60,11 @@ func WriteStatus(report StatusReport) error {
 // ReadStatus reads and parses the status file.
 func ReadStatus() (StatusReport, error) {
 	var report StatusReport
-	data, err := os.ReadFile(StatusFilePath())
+	path, err := StatusFilePath()
+	if err != nil {
+		return report, err
+	}
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return report, err
 	}

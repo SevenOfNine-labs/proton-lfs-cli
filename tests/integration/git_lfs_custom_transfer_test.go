@@ -45,12 +45,21 @@ func findToolBinary(root, envName, defaultName string) (string, error) {
 	return "", fmt.Errorf("unable to find %s binary", defaultName)
 }
 
+// goBinary returns the Go command used to build test helpers: $GO when set
+// (the Makefile passes its GO variable through), otherwise go on PATH.
+func goBinary() string {
+	if v := strings.TrimSpace(os.Getenv("GO")); v != "" {
+		return v
+	}
+	return "go"
+}
+
 func buildAdapter(t *testing.T, root string) string {
 	t.Helper()
 
 	outDir := t.TempDir()
 	outPath := filepath.Join(outDir, "git-lfs-proton-adapter")
-	cmd := exec.Command("go", "build", "-trimpath", "-o", outPath, "./cmd/adapter")
+	cmd := exec.Command(goBinary(), "build", "-trimpath", "-o", outPath, "./cmd/adapter")
 	cmd.Dir = root
 	cmd.Env = append(os.Environ(), "GOCACHE="+filepath.Join(root, ".cache", "go-build"))
 	output, err := cmd.CombinedOutput()

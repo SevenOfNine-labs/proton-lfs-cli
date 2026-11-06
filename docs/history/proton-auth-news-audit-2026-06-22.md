@@ -1,5 +1,7 @@
 # Proton Auth News Audit - 2026-06-22
 
+> Historical record as of 2026-06-22; superseded by `docs/project/current-state.md` and `docs/history/proton-sdk-update-2026-11-05.md`. The SDK pin it describes (`a3fc5e54`) was replaced by `js/v0.23.0`.
+
 This note records the latest Proton Drive CLI/SDK signals reviewed before any
 real Proton login canary. No live login, browser-fork login, or transfer was
 attempted during this audit.

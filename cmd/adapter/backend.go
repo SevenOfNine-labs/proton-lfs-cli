@@ -15,7 +15,9 @@ import (
 type TransferBackend interface {
 	Initialize(session *Session) error
 	Upload(session *Session, oid, sourcePath string, expectedSize int64) (int64, error)
-	Download(session *Session, oid string) (string, int64, error)
+	// Download stages the object in a temporary file; expectedSize is the
+	// size announced by git-lfs (0 when unknown) and sizes the bridge timeout.
+	Download(session *Session, oid string, expectedSize int64) (string, int64, error)
 }
 
 // ProgressFunc reports transfer progress using Git LFS custom-transfer byte
@@ -27,7 +29,7 @@ type ProgressFunc func(bytesSoFar, bytesSinceLast int64) error
 type ProgressTransferBackend interface {
 	TransferBackend
 	UploadWithProgress(session *Session, oid, sourcePath string, expectedSize int64, progress ProgressFunc) (int64, error)
-	DownloadWithProgress(session *Session, oid string, progress ProgressFunc) (string, int64, error)
+	DownloadWithProgress(session *Session, oid string, expectedSize int64, progress ProgressFunc) (string, int64, error)
 }
 
 // ErrorCode is a machine-readable error classification for structured error handling.
@@ -82,13 +84,14 @@ func newBackendError(code int, message string, err error) error {
 }
 
 func newBackendErrorWithCode(code int, message string, err error, errorCode ErrorCode) error {
+	retryable := isRetryable(errorCode, code)
 	return &BackendError{
 		Code:      code,
 		Message:   message,
 		Err:       err,
 		ErrorCode: errorCode,
-		Retryable: isRetryableCode(code),
-		Temporary: isTemporaryCode(code),
+		Retryable: retryable,
+		Temporary: retryable || errorCode == ErrCodeRateLimited,
 	}
 }
 
@@ -116,17 +119,17 @@ func classifyErrorCode(httpCode int) ErrorCode {
 	}
 }
 
-// isRetryableCode determines if an HTTP status code indicates a retryable error
-func isRetryableCode(code int) bool {
-	// 5xx server errors are retryable, except when rate-limited (429)
-	return code >= 500 && code < 600
-}
-
-// isTemporaryCode determines if an HTTP status code indicates a temporary error
-func isTemporaryCode(code int) bool {
-	// Rate limits and 5xx server errors are temporary, but only 5xx are
-	// retryable by the adapter without user-controlled waiting.
-	return code == 429 || code == 503 || (code >= 500 && code < 600)
+// isRetryable reports whether a transfer can succeed on retry without user
+// action: only transport failures and upstream server errors qualify (RFC
+// 9110 §15.6: 500, 502, 503, 504). Quota exhaustion (507) and local
+// cryptographic failures carry server_error status codes but need the user.
+func isRetryable(errorCode ErrorCode, code int) bool {
+	switch errorCode {
+	case ErrCodeNetworkFailure, ErrCodeServerError:
+		return code == 500 || code == 502 || code == 503 || code == 504
+	default:
+		return false
+	}
 }
 
 func backendErrorDetails(err error) (int, string) {
@@ -203,11 +206,11 @@ func (b *LocalStoreBackend) UploadWithProgress(session *Session, oid, sourcePath
 	return size, nil
 }
 
-func (b *LocalStoreBackend) Download(session *Session, oid string) (string, int64, error) {
-	return b.DownloadWithProgress(session, oid, nil)
+func (b *LocalStoreBackend) Download(session *Session, oid string, expectedSize int64) (string, int64, error) {
+	return b.DownloadWithProgress(session, oid, expectedSize, nil)
 }
 
-func (b *LocalStoreBackend) DownloadWithProgress(session *Session, oid string, progress ProgressFunc) (string, int64, error) {
+func (b *LocalStoreBackend) DownloadWithProgress(session *Session, oid string, _ int64, progress ProgressFunc) (string, int64, error) {
 	if err := b.validateSession(session); err != nil {
 		return "", 0, err
 	}
@@ -276,6 +279,13 @@ type DriveCLIBackendOptions struct {
 }
 
 // NewDriveCLIBackend creates a backend that delegates to proton-drive-cli.
+// TerminateBridge kills a running bridge subprocess (see BridgeClient.TerminateActive).
+func (b *DriveCLIBackend) TerminateBridge() {
+	if b.bridge != nil {
+		b.bridge.TerminateActive()
+	}
+}
+
 func NewDriveCLIBackend(bridge *BridgeClient, opts ...DriveCLIBackendOptions) *DriveCLIBackend {
 	var options DriveCLIBackendOptions
 	if len(opts) > 0 {
@@ -318,7 +328,6 @@ func (b *DriveCLIBackend) Initialize(session *Session) error {
 	}
 
 	b.authenticated = true
-	session.Token = "direct-bridge"
 	return nil
 }
 
@@ -327,23 +336,32 @@ func mapAuthStateForTransfer(state *BridgeAuthStateResponse) error {
 		return newBackendError(502, "proton drive auth state is unavailable", nil)
 	}
 
+	// The bridge reports why a state is not ready in errors[]; carry that
+	// into the message so the tray and git-lfs show the cause.
+	withCause := func(message string) string {
+		if len(state.Errors) == 0 {
+			return message
+		}
+		return message + ": " + strings.Join(state.Errors, "; ")
+	}
+
 	switch strings.TrimSpace(state.State) {
 	case "ready":
 		return nil
 	case "needs_data_password":
-		return newBackendErrorWithCode(401, "mailbox/data password required for this Proton account", nil, ErrCodeDataPasswordRequired)
+		return newBackendErrorWithCode(401, withCause("mailbox/data password required for this Proton account"), nil, ErrCodeDataPasswordRequired)
 	case "needs_key_password":
-		return newBackendErrorWithCode(401, "stored browser-fork key password required for this Proton session", nil, ErrCodeKeyPasswordRequired)
+		return newBackendErrorWithCode(401, withCause("stored browser-fork key password required for this Proton session"), nil, ErrCodeKeyPasswordRequired)
 	case "needs_login":
-		return newBackendError(401, "no ready Proton Drive session; run proton-drive login before Git LFS transfer", nil)
+		return newBackendError(401, withCause("no ready Proton Drive session; run proton-drive-cli login before Git LFS transfer"), nil)
 	case "session_expired":
-		return newBackendError(401, "Proton Drive session is expired; refresh or login before Git LFS transfer", nil)
+		return newBackendError(401, withCause("Proton Drive session is expired; refresh or login before Git LFS transfer"), nil)
 	case "session_invalid":
-		return newBackendError(401, "Proton Drive session is invalid; run proton-drive login before Git LFS transfer", nil)
+		return newBackendError(401, withCause("Proton Drive session is invalid; run proton-drive-cli login before Git LFS transfer"), nil)
 	case "configuration_error":
-		return newBackendError(400, "Proton Drive auth configuration error", nil)
+		return newBackendError(400, withCause("Proton Drive auth configuration error"), nil)
 	default:
-		return newBackendError(502, "unrecognized Proton Drive auth state", nil)
+		return newBackendError(502, withCause("unrecognized Proton Drive auth state"), nil)
 	}
 }
 
@@ -374,7 +392,7 @@ func (b *DriveCLIBackend) Upload(session *Session, oid, sourcePath string, expec
 		return info.Size(), nil
 	}
 
-	if err := b.bridge.Upload(b.operationCredentials(), oid, sourcePath); err != nil {
+	if err := b.bridge.Upload(b.operationCredentials(), oid, sourcePath, expectedSize); err != nil {
 		return 0, mapBridgeError(err, "drive-cli upload failed")
 	}
 
@@ -391,7 +409,7 @@ func (b *DriveCLIBackend) Upload(session *Session, oid, sourcePath string, expec
 	return info.Size(), nil
 }
 
-func (b *DriveCLIBackend) Download(session *Session, oid string) (string, int64, error) {
+func (b *DriveCLIBackend) Download(session *Session, oid string, expectedSize int64) (string, int64, error) {
 	if session == nil || !session.Initialized {
 		return "", 0, newBackendError(500, "session not initialized", nil)
 	}
@@ -412,9 +430,15 @@ func (b *DriveCLIBackend) Download(session *Session, oid string) (string, int64,
 		return "", 0, newBackendError(500, "failed to create temporary download file", err)
 	}
 
-	if err := b.bridge.Download(b.operationCredentials(), oid, tmpPath); err != nil {
+	if err := b.bridge.Download(b.operationCredentials(), oid, tmpPath, expectedSize); err != nil {
 		_ = os.Remove(tmpPath)
 		return "", 0, mapBridgeError(err, "drive-cli download failed")
+	}
+	// The bridge recreates the staging file on retry; keep the plaintext
+	// owner-readable only (CWE-732) regardless of the subprocess umask.
+	if err := os.Chmod(tmpPath, 0o600); err != nil {
+		_ = os.Remove(tmpPath)
+		return "", 0, newBackendError(500, "failed to protect downloaded object", err)
 	}
 
 	info, err := os.Stat(tmpPath)
@@ -429,9 +453,10 @@ func (b *DriveCLIBackend) Download(session *Session, oid string) (string, int64,
 	return tmpPath, info.Size(), nil
 }
 
-// mapBridgeError converts bridge subprocess errors into BackendErrors with
-// appropriate HTTP-style status codes, matching the logic from the old
-// mapSDKError function.
+// mapBridgeError converts bridge subprocess errors into BackendErrors.
+// Envelope errors (*BridgeError) are mapped from their structured error code;
+// transport failures (spawn, timeout, malformed output) are classified from
+// their message.
 func mapBridgeError(err error, fallbackMessage string) error {
 	if err == nil {
 		return nil
@@ -441,32 +466,16 @@ func mapBridgeError(err error, fallbackMessage string) error {
 	if errors.As(err, &bridgeErr) {
 		return mapStructuredBridgeError(bridgeErr, fallbackMessage, err)
 	}
-
-	msg := strings.ToLower(strings.TrimSpace(err.Error()))
-
-	// Parse [code] prefix from bridge error format
-	if strings.HasPrefix(msg, "[") {
-		if idx := strings.Index(msg, "]"); idx > 1 {
-			codeStr := msg[1:idx]
-			rest := strings.TrimSpace(msg[idx+1:])
-			switch codeStr {
-			case "401":
-				return newBackendError(401, "session is invalid or expired", err)
-			case "404":
-				return newBackendError(404, "object not found in drive backend", err)
-			case "407":
-				return newBackendError(407, "captcha verification required — run: proton-drive login", err)
-			case "429":
-				return newBackendError(429, "rate limited by proton api — wait and retry", err)
-			case "503":
-				return newBackendError(503, "drive service is unavailable", err)
-			default:
-				if rest != "" {
-					return newBackendError(502, fallbackMessage, err)
-				}
-			}
-		}
+	var timeoutErr *BridgeTimeoutError
+	if errors.As(err, &timeoutErr) {
+		return newBackendErrorWithCode(504, fmt.Sprintf(
+			"%s; raise --bridge-timeout or PROTON_LFS_BRIDGE_TIMEOUT for large objects or slow links",
+			timeoutErr.Error()), err, ErrCodeNetworkFailure)
 	}
+
+	// Transport failures carry free text (spawn errors, sanitized stderr);
+	// only words are matched, never bare status digits that an OID can contain.
+	msg := strings.ToLower(strings.TrimSpace(err.Error()))
 
 	switch {
 	case strings.Contains(msg, "two-factor"),
@@ -483,17 +492,14 @@ func mapBridgeError(err error, fallbackMessage string) error {
 		strings.Contains(msg, "decrypt any keys"):
 		return newBackendErrorWithCode(401, "mailbox/data password could not unlock Proton keys", err, ErrCodeKeyUnlockFailed)
 	case strings.Contains(msg, "invalid or expired session"),
-		strings.Contains(msg, "unauthorized"),
-		strings.Contains(msg, "401"):
+		strings.Contains(msg, "unauthorized"):
 		return newBackendError(401, "session is invalid or expired", err)
-	case strings.Contains(msg, "sufficient scope"),
-		strings.Contains(msg, "9101"):
+	case strings.Contains(msg, "sufficient scope"):
 		return newBackendErrorWithCode(403, "Proton rejected this app/session authorization scope", err, ErrCodeInsufficientScope)
-	case strings.Contains(msg, "not found"),
-		strings.Contains(msg, "404"):
+	case strings.Contains(msg, "not found"):
 		return newBackendError(404, "object not found in drive backend", err)
 	case strings.Contains(msg, "captcha"):
-		return newBackendError(407, "captcha verification required — run: proton-drive login", err)
+		return newBackendError(407, "captcha verification required — run: proton-drive-cli login", err)
 	case strings.Contains(msg, "rate limit"):
 		return newBackendError(429, "rate limited by proton api — wait and retry", err)
 	case strings.Contains(msg, "timeout"),
@@ -502,8 +508,6 @@ func mapBridgeError(err error, fallbackMessage string) error {
 		strings.Contains(msg, "no such host"),
 		strings.Contains(msg, "dial tcp"):
 		return newBackendError(503, "drive service is unavailable", err)
-	case strings.Contains(msg, "concurrency limit"):
-		return newBackendError(503, "bridge concurrency limit reached", err)
 	default:
 		return newBackendError(502, fallbackMessage, err)
 	}
@@ -540,38 +544,20 @@ func mapStructuredBridgeError(bridgeErr *BridgeError, fallbackMessage string, or
 		_ = json.Unmarshal([]byte(bridgeErr.Details), &details)
 	}
 	errorCode := strings.ToUpper(strings.TrimSpace(details.ErrorCode))
-
-	switch {
-	case errorCode == "AUTH_FAILED" || errorCode == "INVALID_CREDENTIALS" || errorCode == "SESSION_EXPIRED":
-		return newBackendErrorWithCode(bridgeStatusOrDefault(bridgeErr, 401), "session is invalid or expired", original, ErrCodeAuthRequired)
-	case errorCode == "TWO_FACTOR_REQUIRED" || strings.Contains(lowerMsg, "two-factor") || strings.Contains(lowerMsg, "2fa") || strings.Contains(lowerMsg, "fido2"):
-		message := "two-factor authentication required"
-		if details.TwoFactorType == "fido2" {
-			message = "FIDO2 two-factor authentication required"
+	// UNKNOWN_ERROR and DECRYPTION_FAILED are the bridge's generic codes for
+	// errors it could not classify (for example "Failed to decrypt any keys"
+	// from a wrong mailbox password); the message identifies those cases.
+	if errorCode == "UNKNOWN_ERROR" || errorCode == "DECRYPTION_FAILED" {
+		if ok, mapped := mapBridgeErrorMessage(lowerMsg, details, original); ok {
+			return mapped
 		}
-		return newBackendErrorWithCode(401, message, original, ErrCodeTwoFactorRequired)
-	case errorCode == "KEY_PASSWORD_REQUIRED" || strings.Contains(lowerMsg, "key password"):
-		return newBackendErrorWithCode(401, "stored browser-fork key password required for this Proton session", original, ErrCodeKeyPasswordRequired)
-	case errorCode == "DATA_PASSWORD_REQUIRED" || strings.Contains(lowerMsg, "mailbox/data password") || strings.Contains(lowerMsg, "data password") || strings.Contains(lowerMsg, "key decryption"):
-		return newBackendErrorWithCode(401, "mailbox/data password required for this Proton account", original, ErrCodeDataPasswordRequired)
-	case strings.Contains(lowerMsg, "failed to decrypt") || strings.Contains(lowerMsg, "decrypt any keys"):
-		return newBackendErrorWithCode(401, "mailbox/data password could not unlock Proton keys", original, ErrCodeKeyUnlockFailed)
-	case errorCode == "CAPTCHA_REQUIRED":
-		return newBackendErrorWithCode(bridgeStatusOrDefault(bridgeErr, 407), "captcha verification required — run: proton-drive login", original, ErrCodeCaptchaRequired)
-	case errorCode == "RATE_LIMITED":
-		return newBackendErrorWithCode(bridgeStatusOrDefault(bridgeErr, 429), "rate limited by proton api — wait and retry", original, ErrCodeRateLimited)
-	case errorCode == "INSUFFICIENT_SCOPE" || details.ProtonCode == 9101 || strings.Contains(lowerMsg, "sufficient scope"):
-		return newBackendErrorWithCode(bridgeStatusOrDefault(bridgeErr, 403), "Proton rejected this app/session authorization scope", original, ErrCodeInsufficientScope)
-	case errorCode == "NOT_FOUND" || errorCode == "FILE_NOT_FOUND" || errorCode == "PATH_NOT_FOUND":
-		return newBackendErrorWithCode(bridgeStatusOrDefault(bridgeErr, 404), "object not found in drive backend", original, ErrCodeNotFound)
-	case errorCode == "PERMISSION_DENIED":
-		return newBackendErrorWithCode(bridgeStatusOrDefault(bridgeErr, 403), "permission denied by drive backend", original, ErrCodePermissionDenied)
-	case errorCode == "NETWORK_ERROR" || errorCode == "TIMEOUT" || errorCode == "CONNECTION_REFUSED":
-		return newBackendErrorWithCode(bridgeStatusOrDefault(bridgeErr, 502), "drive service is unavailable", original, ErrCodeNetworkFailure)
-	case errorCode == "FILE_TOO_LARGE" || errorCode == "INVALID_FILE" || errorCode == "INVALID_PATH" || errorCode == "NOT_A_FOLDER" || errorCode == "VALIDATION_ERROR" || errorCode == "OPERATION_CANCELLED":
-		return newBackendErrorWithCode(bridgeStatusOrDefault(bridgeErr, 400), msg, original, ErrCodeInvalidRequest)
-	case errorCode == "API_ERROR" || errorCode == "QUOTA_EXCEEDED" || errorCode == "DISK_FULL" || errorCode == "UPLOAD_FAILED" || errorCode == "DOWNLOAD_FAILED" || errorCode == "ENCRYPTION_FAILED" || errorCode == "DECRYPTION_FAILED" || errorCode == "UNKNOWN_ERROR":
-		return newBackendErrorWithCode(bridgeStatusOrDefault(bridgeErr, 502), fallbackMessage, original, ErrCodeServerError)
+	}
+	if errorCode != "" {
+		if ok, mapped := mapBridgeErrorCode(errorCode, bridgeErr, details, msg, fallbackMessage, original); ok {
+			return mapped
+		}
+	} else if ok, mapped := mapBridgeErrorMessage(lowerMsg, details, original); ok {
+		return mapped
 	}
 
 	switch bridgeErr.Code {
@@ -580,7 +566,7 @@ func mapStructuredBridgeError(bridgeErr *BridgeError, fallbackMessage string, or
 	case 404:
 		return newBackendError(404, "object not found in drive backend", original)
 	case 407:
-		return newBackendError(407, "captcha verification required — run: proton-drive login", original)
+		return newBackendError(407, "captcha verification required — run: proton-drive-cli login", original)
 	case 429:
 		return newBackendError(429, "rate limited by proton api — wait and retry", original)
 	case 403:
@@ -595,5 +581,73 @@ func mapStructuredBridgeError(bridgeErr *BridgeError, fallbackMessage string, or
 			return newBackendError(bridgeErr.Code, msg, original)
 		}
 		return newBackendError(502, fallbackMessage, original)
+	}
+}
+
+// mapBridgeErrorCode maps a structured bridge error code (the keys of
+// schemas/bridge/v1/error-code-map.json) to a BackendError. The HTTP status
+// reported by the bridge is preserved when present.
+func mapBridgeErrorCode(errorCode string, bridgeErr *BridgeError, details bridgeErrorDetails, msg, fallbackMessage string, original error) (bool, error) {
+	switch errorCode {
+	case "AUTH_FAILED", "INVALID_CREDENTIALS", "SESSION_EXPIRED":
+		return true, newBackendErrorWithCode(bridgeStatusOrDefault(bridgeErr, 401), "session is invalid or expired", original, ErrCodeAuthRequired)
+	case "TWO_FACTOR_REQUIRED":
+		message := "two-factor authentication required"
+		if details.TwoFactorType == "fido2" {
+			message = "FIDO2 two-factor authentication required"
+		}
+		return true, newBackendErrorWithCode(bridgeStatusOrDefault(bridgeErr, 401), message, original, ErrCodeTwoFactorRequired)
+	case "KEY_PASSWORD_REQUIRED":
+		return true, newBackendErrorWithCode(bridgeStatusOrDefault(bridgeErr, 401), "stored browser-fork key password required for this Proton session", original, ErrCodeKeyPasswordRequired)
+	case "DATA_PASSWORD_REQUIRED":
+		return true, newBackendErrorWithCode(bridgeStatusOrDefault(bridgeErr, 401), "mailbox/data password required for this Proton account", original, ErrCodeDataPasswordRequired)
+	case "CAPTCHA_REQUIRED":
+		return true, newBackendErrorWithCode(bridgeStatusOrDefault(bridgeErr, 407), "captcha verification required — run: proton-drive-cli login", original, ErrCodeCaptchaRequired)
+	case "RATE_LIMITED":
+		return true, newBackendErrorWithCode(bridgeStatusOrDefault(bridgeErr, 429), "rate limited by proton api — wait and retry", original, ErrCodeRateLimited)
+	case "INSUFFICIENT_SCOPE":
+		return true, newBackendErrorWithCode(bridgeStatusOrDefault(bridgeErr, 403), "Proton rejected this app/session authorization scope", original, ErrCodeInsufficientScope)
+	case "NOT_FOUND", "FILE_NOT_FOUND", "PATH_NOT_FOUND":
+		return true, newBackendErrorWithCode(bridgeStatusOrDefault(bridgeErr, 404), "object not found in drive backend", original, ErrCodeNotFound)
+	case "PERMISSION_DENIED":
+		return true, newBackendErrorWithCode(bridgeStatusOrDefault(bridgeErr, 403), "permission denied by drive backend", original, ErrCodePermissionDenied)
+	case "NETWORK_ERROR", "TIMEOUT", "CONNECTION_REFUSED":
+		return true, newBackendErrorWithCode(bridgeStatusOrDefault(bridgeErr, 502), "drive service is unavailable", original, ErrCodeNetworkFailure)
+	case "FILE_TOO_LARGE", "INVALID_FILE", "INVALID_PATH", "NOT_A_FOLDER", "VALIDATION_ERROR", "OPERATION_CANCELLED":
+		return true, newBackendErrorWithCode(bridgeStatusOrDefault(bridgeErr, 400), msg, original, ErrCodeInvalidRequest)
+	case "QUOTA_EXCEEDED", "DISK_FULL":
+		return true, newBackendErrorWithCode(bridgeStatusOrDefault(bridgeErr, 507), msg, original, ErrCodeServerError)
+	case "ENCRYPTION_FAILED", "DECRYPTION_FAILED":
+		// Local cryptographic failures: status 500 by contract, never retryable.
+		err := newBackendErrorWithCode(bridgeStatusOrDefault(bridgeErr, 500), msg, original, ErrCodeServerError)
+		var backendErr *BackendError
+		if errors.As(err, &backendErr) {
+			backendErr.Retryable = false
+			backendErr.Temporary = false
+		}
+		return true, err
+	case "API_ERROR", "UPLOAD_FAILED", "DOWNLOAD_FAILED", "UNKNOWN_ERROR":
+		return true, newBackendErrorWithCode(bridgeStatusOrDefault(bridgeErr, 502), fallbackMessage, original, ErrCodeServerError)
+	default:
+		return false, nil
+	}
+}
+
+// mapBridgeErrorMessage classifies envelope errors that carry no structured
+// error code from their message and Proton code.
+func mapBridgeErrorMessage(lowerMsg string, details bridgeErrorDetails, original error) (bool, error) {
+	switch {
+	case strings.Contains(lowerMsg, "two-factor"), strings.Contains(lowerMsg, "2fa"), strings.Contains(lowerMsg, "fido2"):
+		return true, newBackendErrorWithCode(401, "two-factor authentication required", original, ErrCodeTwoFactorRequired)
+	case strings.Contains(lowerMsg, "key password"):
+		return true, newBackendErrorWithCode(401, "stored browser-fork key password required for this Proton session", original, ErrCodeKeyPasswordRequired)
+	case strings.Contains(lowerMsg, "mailbox/data password"), strings.Contains(lowerMsg, "data password"), strings.Contains(lowerMsg, "key decryption"):
+		return true, newBackendErrorWithCode(401, "mailbox/data password required for this Proton account", original, ErrCodeDataPasswordRequired)
+	case strings.Contains(lowerMsg, "failed to decrypt"), strings.Contains(lowerMsg, "decrypt any keys"):
+		return true, newBackendErrorWithCode(401, "mailbox/data password could not unlock Proton keys", original, ErrCodeKeyUnlockFailed)
+	case details.ProtonCode == 9101, strings.Contains(lowerMsg, "sufficient scope"):
+		return true, newBackendErrorWithCode(403, "Proton rejected this app/session authorization scope", original, ErrCodeInsufficientScope)
+	default:
+		return false, nil
 	}
 }

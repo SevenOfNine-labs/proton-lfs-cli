@@ -17,9 +17,6 @@ func TestDriveCLIBackendGitCredentialModeInitialize(t *testing.T) {
 		t.Fatalf("Initialize with git-credential failed: %v", err)
 	}
 
-	if session.Token != "direct-bridge" {
-		t.Errorf("expected token 'direct-bridge', got %q", session.Token)
-	}
 	if !backend.authenticated {
 		t.Error("expected authenticated=true after Initialize")
 	}
@@ -46,9 +43,6 @@ func TestCredentialProviderConstants(t *testing.T) {
 	}
 	if CredentialProviderGitCredential != "git-credential" {
 		t.Errorf("expected 'git-credential', got %q", CredentialProviderGitCredential)
-	}
-	if DefaultCredentialProvider != CredentialProviderPassCLI {
-		t.Errorf("expected default provider to be pass-cli, got %q", DefaultCredentialProvider)
 	}
 	if DefaultDataCredentialHost == "" {
 		t.Error("expected non-empty default data credential host")

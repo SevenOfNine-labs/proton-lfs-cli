@@ -1,5 +1,5 @@
 version: 1
-generated_on: "2026-02-09"
+generated_on: "2026-11-06"
 
 requirements:
   - id: CT-001
@@ -107,11 +107,15 @@ requirements:
 
   - id: CT-016
     source: submodules/git-lfs/tq/custom.go
-    clause: activity-timeout-for-stalled-adapter-subprocess
+    clause: adapter-exit-mid-transfer-detected-on-stdout-close
     scope: adapter-gitlfs-contract
     status: covered
     tests:
-      - tests/integration/git_lfs_custom_transfer_timeout_semantics_test.go
+      - tests/integration/git_lfs_custom_transfer_adapter_exit_test.go
+    notes: >-
+      git-lfs has no activity timeout for custom adapters (lfs.activitytimeout
+      applies to its HTTP client only); the failure is detected when the
+      adapter's stdout closes.
 
   - id: CT-017
     source: submodules/git-lfs/tq/custom.go
@@ -122,7 +126,7 @@ requirements:
       - tests/integration/git_lfs_custom_transfer_concurrency_stress_test.go
 
   - id: CT-SDK-001
-    source: docs/testing/spec-gap-analysis.md
+    source: docs/architecture/proton-sdk-bridge.md
     clause: sdk-runtime-backend-contract
     scope: adapter-sdk-bridge
     status: covered
@@ -130,7 +134,7 @@ requirements:
       - cmd/adapter/backend_test.go
 
   - id: CT-SDK-002
-    source: docs/testing/spec-gap-analysis.md
+    source: docs/architecture/proton-sdk-bridge.md
     clause: sdk-runtime-live-integration
     scope: adapter-sdk-bridge
     status: covered
@@ -150,7 +154,7 @@ requirements:
       - tests/integration/git_lfs_sdk_backend_test.go
 
   - id: CT-SDK-004
-    source: docs/testing/spec-gap-analysis.md
+    source: docs/testing/integration-testing.md
     clause: real-sdk-integration-test-lane
     scope: adapter-sdk-bridge
     status: covered
@@ -166,7 +170,7 @@ requirements:
     status: covered
     tests:
       - tests/integration/git_lfs_sdk_backend_test.go
-      - tests/integration/git_lfs_sdk_backend_test.go
+      - tests/integration/git_lfs_e2e_mock_test.go
     gaps:
       - needs dedicated stress and failure-injection coverage
 
@@ -235,7 +239,7 @@ requirements:
     requirement: >-
       Account login must use browser-fork sign-in. The tray/helper
       and root adapter must not prompt for or pass Proton account usernames,
-      account passwords, TOTP codes, or legacy account credential selectors.
+      account passwords, TOTP codes, or account credential selectors.
 
   - id: AUTH-002
     source: RFC 8252
@@ -335,7 +339,7 @@ requirements:
       - scripts/browser_fork_canary_test.go
     requirement: >-
       `LIVE_BROWSER_FORK_LOGIN_ARGS` may pass only
-      `--key-password-provider` and `--key-password-host`. Legacy account
+      `--key-password-provider` and `--key-password-host`. Account
       credential flags, username flags, auth-mode flags, and unknown options
       must fail before proton-drive-cli is invoked.
 

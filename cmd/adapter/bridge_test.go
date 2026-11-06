@@ -148,23 +148,22 @@ func TestHelperProcess(_ *testing.T) {
 			keyPasswordHost = "proton-drive-key.proton-lfs-cli.local"
 		}
 		writeOKResponse(os.Stdout, map[string]any{
-			"state":                   state,
-			"hasSession":              hasSession,
-			"sessionValid":            sessionValid,
-			"sessionExpired":          state == "session_expired",
-			"sessionUidPresent":       hasSession,
-			"passwordMode":            passwordMode,
-			"authMode":                authMode,
-			"keyPasswordPersisted":    keyPasswordPersisted,
-			"keyPasswordAvailable":    keyPasswordAvailable,
-			"keyPasswordProvider":     keyPasswordProvider,
-			"keyPasswordHost":         keyPasswordHost,
-			"hasExplicitDataPassword": false,
-			"dataCredentialProvider":  req["dataCredentialProvider"],
-			"dataCredentialHost":      req["dataCredentialHost"],
-			"willAttemptNetwork":      false,
-			"errors":                  []string{},
-			"actions":                 []string{},
+			"state":                  state,
+			"hasSession":             hasSession,
+			"sessionValid":           sessionValid,
+			"sessionExpired":         state == "session_expired",
+			"sessionUidPresent":      hasSession,
+			"passwordMode":           passwordMode,
+			"authMode":               authMode,
+			"keyPasswordPersisted":   keyPasswordPersisted,
+			"keyPasswordAvailable":   keyPasswordAvailable,
+			"keyPasswordProvider":    keyPasswordProvider,
+			"keyPasswordHost":        keyPasswordHost,
+			"dataCredentialProvider": req["dataCredentialProvider"],
+			"dataCredentialHost":     req["dataCredentialHost"],
+			"willAttemptNetwork":     false,
+			"errors":                 []string{},
+			"actions":                []string{},
 		})
 	case "init":
 		writeOKResponse(os.Stdout, nil)
@@ -247,13 +246,11 @@ func helperBridgeClient(t *testing.T, extraEnv ...string) *BridgeClient {
 	env := []string{"GO_TEST_HELPER_PROCESS=1"}
 	env = append(env, extraEnv...)
 	return NewBridgeClient(BridgeClientConfig{
-		NodeBin:       os.Args[0],
-		CLIBin:        "-test.run=TestHelperProcess",
-		Timeout:       10 * time.Second,
-		MaxConcurrent: 10,
-		StorageBase:   "LFS",
-		AppVersion:    "test-1.0",
-		ExtraEnv:      env,
+		CLIBin:      helperCLIBin(t),
+		Timeout:     10 * time.Second,
+		StorageBase: "LFS",
+		AppVersion:  "test-1.0",
+		ExtraEnv:    env,
 	})
 }
 
@@ -307,7 +304,7 @@ func TestBridgeInitLFSStorage(t *testing.T) {
 
 func TestBridgeUpload(t *testing.T) {
 	bc := helperBridgeClient(t)
-	if err := bc.Upload(OperationCredentials{}, validOID, "/tmp/test.bin"); err != nil {
+	if err := bc.Upload(OperationCredentials{}, validOID, "/tmp/test.bin", 0); err != nil {
 		t.Fatalf("Upload failed: %v", err)
 	}
 }
@@ -315,7 +312,7 @@ func TestBridgeUpload(t *testing.T) {
 func TestBridgeDownload(t *testing.T) {
 	bc := helperBridgeClient(t)
 	tmpPath := filepath.Join(t.TempDir(), "download.bin")
-	if err := bc.Download(OperationCredentials{}, validOID, tmpPath); err != nil {
+	if err := bc.Download(OperationCredentials{}, validOID, tmpPath, 0); err != nil {
 		t.Fatalf("Download failed: %v", err)
 	}
 	data, err := os.ReadFile(tmpPath)
@@ -362,7 +359,7 @@ func TestBridgeExistsRejectsMalformedSuccessPayload(t *testing.T) {
 
 func TestBridgeErrorMapping404(t *testing.T) {
 	bc := helperBridgeClient(t, "MOCK_BRIDGE_ERROR=not found", "MOCK_BRIDGE_ERROR_CODE=404")
-	err := bc.Upload(OperationCredentials{}, validOID, "/tmp/test.bin")
+	err := bc.Upload(OperationCredentials{}, validOID, "/tmp/test.bin", 0)
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -445,34 +442,11 @@ func TestBridgeStdoutNoiseTolerance(t *testing.T) {
 	}
 }
 
-func TestBridgeSemaphoreExhaustion(t *testing.T) {
-	bc := NewBridgeClient(BridgeClientConfig{
-		NodeBin:       os.Args[0],
-		CLIBin:        "-test.run=TestHelperProcess",
-		Timeout:       10 * time.Second,
-		MaxConcurrent: 1,
-		ExtraEnv:      []string{"GO_TEST_HELPER_PROCESS=1", "MOCK_BRIDGE_DELAY=2s"},
-	})
-	bc.semaphore <- struct{}{}
-
-	err := bc.InitLFSStorage(OperationCredentials{})
-	if err == nil {
-		t.Fatal("expected concurrency limit error")
-	}
-	if !strings.Contains(err.Error(), "concurrency limit") {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	<-bc.semaphore
-}
-
 func TestBridgeCommandTimeoutReturnsTypedError(t *testing.T) {
 	bc := NewBridgeClient(BridgeClientConfig{
-		NodeBin:       os.Args[0],
-		CLIBin:        "-test.run=TestHelperProcess",
-		Timeout:       20 * time.Millisecond,
-		MaxConcurrent: 1,
-		ExtraEnv:      []string{"GO_TEST_HELPER_PROCESS=1", "MOCK_BRIDGE_DELAY=250ms"},
+		CLIBin:   helperCLIBin(t),
+		Timeout:  20 * time.Millisecond,
+		ExtraEnv: []string{"GO_TEST_HELPER_PROCESS=1", "MOCK_BRIDGE_DELAY=250ms"},
 	})
 
 	start := time.Now()
@@ -547,10 +521,10 @@ func TestBridgeCommandsNeverSendAccountLoginFields(t *testing.T) {
 			return bc.InitLFSStorage(creds)
 		}},
 		{name: "upload", wantCommand: "upload", run: func(bc *BridgeClient) error {
-			return bc.Upload(creds, validOID, uploadPath)
+			return bc.Upload(creds, validOID, uploadPath, 0)
 		}},
 		{name: "download", wantCommand: "download", run: func(bc *BridgeClient) error {
-			return bc.Download(creds, validOID, filepath.Join(t.TempDir(), "download.bin"))
+			return bc.Download(creds, validOID, filepath.Join(t.TempDir(), "download.bin"), 0)
 		}},
 		{name: "exists", wantCommand: "exists", run: func(bc *BridgeClient) error {
 			_, err := bc.Exists(creds, validOID)
@@ -822,7 +796,20 @@ func TestMatchesAllowlist(t *testing.T) {
 		{"HOME", true},
 		{"NODE_ENV", true},
 		{"MOCK_BRIDGE_FOO", true},
-		{"PROTON_LFS_BACKEND", true},
+		{"PROTON_PASS_CLI_BIN", true},
+		{"PROTON_KEY_PASSWORD_PROVIDER", true},
+		{"PROTON_DRIVE_UPLOAD_TIMEOUT_MS", false},
+		{"USERPROFILE", true},
+		{"SYSTEMROOT", true},
+		{"PROTON_AUTH_TRACE_ID", true},
+		{"PROTON_LFS_BACKEND", false},
+		{"PROTON_PASSWORD", false},
+		{"PROTON_DATA_PASSWORD", false},
+		{"PROTON_MAILBOX_PASSWORD", false},
+		{"PROTON_USERNAME", false},
+		{"PROTON_KEY_PASSWORD", false},
+		{"PROTON_PASS_TOKEN", false},
+		{"PROTON_SECOND_FACTOR_CODE", false},
 		{"SECRET_KEY", false},
 		{"AWS_ACCESS_KEY_ID", false},
 	}
@@ -919,5 +906,62 @@ func TestParseBridgeOutputMultipleLines(t *testing.T) {
 	}
 	if !resp.OK {
 		t.Fatal("expected last JSON line (OK=true) to win")
+	}
+}
+
+// helperCLIBin returns an executable entry point that re-enters this test
+// binary as the bridge helper process, mirroring how the adapter runs the
+// standalone proton-drive-cli executable.
+func helperCLIBin(t *testing.T) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "proton-drive-cli")
+	script := "#!/bin/sh\nexec " + shellQuote(os.Args[0]) + " -test.run=TestHelperProcess -- \"$@\"\n"
+	if err := os.WriteFile(path, []byte(script), 0o700); err != nil {
+		t.Fatalf("write helper entry point: %v", err)
+	}
+	return path
+}
+
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
+}
+
+func TestBridgeCommandArgvRunsScriptsUnderNodeAndExecutablesDirectly(t *testing.T) {
+	cases := []struct {
+		cliBin      string
+		wantProgram string
+		wantArgs    []string
+	}{
+		{"/opt/proton/dist/index.js", "/usr/bin/node", []string{"/opt/proton/dist/index.js", "bridge", "exists"}},
+		{"/opt/proton/dist/index.cjs", "/usr/bin/node", []string{"/opt/proton/dist/index.cjs", "bridge", "exists"}},
+		{"/opt/proton/dist/index.MJS", "/usr/bin/node", []string{"/opt/proton/dist/index.MJS", "bridge", "exists"}},
+		{"/Applications/ProtonLFS.app/Contents/Helpers/proton-drive-cli", "/Applications/ProtonLFS.app/Contents/Helpers/proton-drive-cli", []string{"bridge", "exists"}},
+		{`C:\\Program Files\\ProtonLFS\\proton-drive-cli.exe`, `C:\\Program Files\\ProtonLFS\\proton-drive-cli.exe`, []string{"bridge", "exists"}},
+	}
+	for _, tc := range cases {
+		bc := NewBridgeClient(BridgeClientConfig{NodeBin: "/usr/bin/node", CLIBin: tc.cliBin})
+		program, args := bc.commandArgv("exists")
+		if program != tc.wantProgram || strings.Join(args, " ") != strings.Join(tc.wantArgs, " ") {
+			t.Fatalf("commandArgv(%q) = %q %v, want %q %v", tc.cliBin, program, args, tc.wantProgram, tc.wantArgs)
+		}
+	}
+}
+
+func TestBridgeCommandTimeoutScalesWithObjectSize(t *testing.T) {
+	bc := NewBridgeClient(BridgeClientConfig{CLIBin: "x", Timeout: time.Minute})
+	if got := bc.commandTimeout(0); got != time.Minute {
+		t.Fatalf("zero-size timeout = %s, want 1m", got)
+	}
+	const twoGiB = 2 * 1024 * 1024 * 1024
+	want := time.Minute + time.Duration(twoGiB/transferMinBytesPerSecond)*time.Second
+	if got := bc.commandTimeout(twoGiB); got != want {
+		t.Fatalf("2 GiB timeout = %s, want %s", got, want)
+	}
+}
+
+func TestBridgeCommandTimeoutIsCapped(t *testing.T) {
+	bc := NewBridgeClient(BridgeClientConfig{CLIBin: "x", Timeout: time.Minute})
+	if got := bc.commandTimeout(1 << 62); got != maxBridgeCommandTimeout {
+		t.Fatalf("huge object timeout = %s, want cap %s", got, maxBridgeCommandTimeout)
 	}
 }

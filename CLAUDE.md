@@ -22,7 +22,7 @@ Go Adapter (cmd/adapter/) → proton-drive-cli (subprocess, stdin/stdout JSON) �
 
 Shared configuration lives in `internal/config/` and is used by both the adapter and tray app.
 
-The project has four main components:
+The project has five main components:
 
 1. **Go Adapter** (`cmd/adapter/`): Custom transfer adapter that implements Git LFS protocol
    - `main.go`: Core adapter logic, message handling, protocol implementation, status reporting
@@ -44,9 +44,11 @@ The project has four main components:
    - `status.go`: `StatusReport` struct, atomic `WriteStatus`/`ReadStatus`
    - `prefs.go`: `Preferences` struct, `LoadPrefs`/`SavePrefs`
 
-4. **Submodules** (`submodules/`):
+4. **Preflight** (`internal/preflight/`): Parses `proton-drive-cli doctor --json` against the bridge auth-state schema; used by `scripts/check_doctor_readiness.go` and the real E2E test before any live canary
+
+5. **Submodules** (`submodules/`):
    - `git-lfs`: Upstream Git LFS reference
-   - `pass-cli`: Proton Pass CLI for secure credential storage (v1.4.3)
+   - `pass-cli`: Proton Pass CLI for secure credential storage (2.7.0)
    - `proton-drive-cli`: TypeScript-based Proton Drive client with full auth flow, E2E encryption
 
 ## Development Commands
@@ -55,8 +57,8 @@ The project has four main components:
 ```bash
 make setup              # Install deps (Go + JS), create .env
 make build              # Build Go adapter to bin/git-lfs-proton-adapter
-make build-tray         # Build system tray app (requires CGO_ENABLED=1)
-make build-sea          # Build proton-drive-cli as standalone SEA binary (Node.js 25.5+)
+make build-tray         # Build system tray app (cgo only on macOS)
+make build-sea          # Build proton-drive-cli as standalone SEA binary (Node.js per .node-version)
 make build-bundle       # Build all 3 components into dist/ for packaging
 make build-all          # Build adapter + tray + Git LFS submodule + proton-drive-cli
 make build-drive-cli    # Build proton-drive-cli TypeScript bridge only
@@ -66,14 +68,14 @@ make uninstall          # Remove installed bundle
 
 ### Testing
 ```bash
-make test               # Run Go adapter unit tests
+make test               # Run Go unit tests for ./cmd/... and ./internal/...
 make test-integration   # Run Git LFS integration tests
 make test-integration-sdk  # SDK backend integration (uses pass-cli)
 make test-integration-failure-modes     # Failure mode tests (wrong OID, crash, hang)
 make test-integration-config-matrix    # Direction config matrix tests
 make test-integration-credentials       # Credential security tests
 make test-e2e-mock      # Mocked E2E pipeline (no real credentials)
-make test-e2e-real      # Real Proton Drive E2E (requires pass-cli login + build-drive-cli)
+make test-e2e-real      # Real Proton Drive E2E (guarded: exact PROTON_LFS_LIVE_CANARY acknowledgement + LIVE_CANARY_DOCTOR_ARGS; runs live-drive-scope-canary first)
 ```
 
 ### Linting and Formatting
@@ -108,8 +110,9 @@ The adapter supports two backends controlled by `PROTON_LFS_BACKEND`:
 Account login is browser-fork-only and happens in `proton-drive-cli login`
 before Git LFS transfers. The Go adapter never sends account username/password
 fields, `credentialProvider`, or `allowLogin` to bridge transfer commands.
-`PROTON_CREDENTIAL_PROVIDER` is retained only as a legacy tray/helper
-key-password provider preference.
+The key-password provider preference is `keyPasswordProvider` in
+`~/.proton-lfs/config.json`; `--credential-provider` and
+`PROTON_CREDENTIAL_PROVIDER` do not exist.
 
 ### pass-cli (default)
 
@@ -123,7 +126,7 @@ PROTON_PASS_CLI_BIN=pass-cli           # Binary path (respected by proton-drive-
 **Setup:**
 ```bash
 pass-cli login
-proton-drive login --key-password-provider pass-cli
+proton-drive-cli login --key-password-provider pass-cli
 ```
 
 ### git-credential
@@ -133,7 +136,7 @@ or Linux Secret Service to store the browser-fork key password:
 
 ```bash
 PROTON_KEY_PASSWORD_PROVIDER=git-credential
-proton-drive login --key-password-provider git-credential
+proton-drive-cli login --key-password-provider git-credential
 ```
 
 ## proton-drive-cli Bridge
@@ -141,39 +144,32 @@ proton-drive login --key-password-provider git-credential
 The `proton-drive-cli` submodule (`submodules/proton-drive-cli/`) provides:
 - Browser-fork authentication and session management (`src/auth/`)
 - Session management with token refresh
-- File upload/download with E2E encryption (`src/drive/`)
+- Drive operations through the official SDK (`src/sdk/`)
 - OpenPGP crypto operations (`src/crypto/`)
 - Bridge command for Git LFS integration (`src/cli/bridge.ts`)
 
-**Bridge protocol**: `proton-drive-cli bridge <command>` reads JSON from stdin, writes JSON to stdout using `{ ok, payload, error, code }` envelope format.
+**Bridge protocol**: `proton-drive-cli bridge <command>` reads JSON from stdin, writes JSON to stdout using the `{ ok, payload, error, code, details }` envelope (schemas under `schemas/bridge/v1/`).
 
-**Bridge helpers** (`src/cli/bridge-helpers.ts`): OID-to-path mapping using 2-level prefix directories (e.g., OID `abc12345...` → `/LFS/ab/c1/abc12345...`).
+**OID path mapping**: `oidToPath` in `src/bridge/validators.ts` uses 2-level prefix directories (e.g., OID `abc12345...` → `/LFS/ab/c1/abc12345...`); `src/cli/bridge-helpers.ts` wraps it as `oidFileLocation`.
 
 ## Important Configuration Files
 
 - `.env` / `.env.example`: Environment configuration (credentials, backend modes)
 - `Makefile`: Build orchestration, test runners, prerequisite checks
-- `package.json`: Root Yarn 4 workspace with `proton-drive-cli`
+- `submodules/proton-drive-cli/package.json` and `yarn.lock`: the JavaScript dependencies (the root has no JS project)
 - `go.mod`: Go 1.25 module (deps: `fyne.io/systray`)
-- `docs/architecture/sdk-capability-matrix.md`: SDK access requirements by mode
+- `docs/reference/adapter.md`: every adapter flag and environment variable
 
 ## JavaScript Package Management
 
-Uses **Yarn 4** (Berry) via Corepack:
+proton-drive-cli owns its JavaScript dependencies: `package.json` and
+`yarn.lock` live in `submodules/proton-drive-cli/`, which Yarn treats as its
+own project. Yarn 4 comes from Corepack through `packageManager`; npm cannot
+install the `portal:` dependency on the vendored SDK.
 ```bash
 corepack enable
-corepack prepare yarn@4.1.1 --activate
-yarn install
-
-# Fallback to npm if Yarn unavailable
-make setup JS_PM=npm
-```
-
-Workspace structure:
-```json
-{
-  "workspaces": ["submodules/proton-drive-cli"]
-}
+make install-deps            # go mod download + yarn install in the submodule
+cd submodules/proton-drive-cli && yarn build && yarn test
 ```
 
 ## Testing Strategy
@@ -198,7 +194,7 @@ Workspace structure:
 - Environment allowlist filters subprocess env (only PATH, HOME, NODE_*, MOCK_BRIDGE_*, etc.)
 - OID validation: `/^[a-f0-9]{64}$/i` before subprocess spawn
 - Path traversal prevention: reject paths containing `..`
-- Subprocess pool: max 10 concurrent operations with 5-minute timeout (non-blocking semaphore)
+- One bridge subprocess per command, bounded by `--bridge-timeout` (default 5 min, plus 1 s per 256 KiB for transfers) and killed with its process group on expiry; concurrency comes from git-lfs starting one adapter process per transfer slot
 - Session tokens stored in `~/.proton-drive-cli/session.json` (should be 0600)
 - See `docs/security/threat-model.md` for full threat model
 
@@ -210,23 +206,23 @@ The adapter writes status to `~/.proton-lfs/status.json` (override with `PROTON_
 { "state": "ok", "lastOid": "abc123...", "lastOp": "upload", "timestamp": "..." }
 ```
 
-States: `idle` (grey icon), `ok` (green), `error` (red), `transferring` (blue).
+States: `idle`, `ok`, `transferring`, `error`, `rate_limited`, `auth_required`, `captcha`. The tray has four icons (idle grey, ok green, error red, syncing blue); `rate_limited`, `auth_required` and `captcha` share the error icon and differ by tooltip.
 
 ## Release Pipeline
 
 `release-bundle.yml` triggers on `v*` tags and produces self-contained bundles:
 
-1. **build-all** (matrix: macos-14/13, ubuntu, windows): Builds adapter (CGO=0), tray (CGO=1), proton-drive-cli SEA (Node.js 25.5+ `--build-sea`)
-2. **package**: Assembles platform bundles (macOS `.app`, Linux `.tar.gz`, Windows `.zip`) via `scripts/package-bundle.sh`
-3. **release**: Creates GitHub Release with SHA256 checksums
+1. **adapters**: calls `build.yml` (`workflow_call`) for the standalone adapter binaries
+2. **build-all** (matrix: macos-14, ubuntu, windows): Builds adapter and tray via `scripts/build-go.sh` (cgo only for the macOS tray), proton-drive-cli SEA via `scripts/build-sea.sh` (Node.js per `.node-version`, `--build-sea`)
+3. **package**: Assembles reproducible platform bundles (macOS ad-hoc signed `.app` zip, Linux `.tar.gz`, Windows `.zip`) via `scripts/package-bundle.sh`
+4. **release**: Creates the single GitHub Release with every asset and one `SHA256SUMS.txt`
 
-The existing `build.yml` continues to build standalone adapter binaries.
+`build.yml` on its own (pushes, PRs) only uploads adapter artifacts; it never creates a release. `proton-drive-cli` is not published to npm.
 
 ## Known Issues
 
-1. `proton-drive-cli session refresh not working properly` (noted in its README)
-2. `Mock transfers are fail-closed by default` (require explicit opt-in)
-3. CAPTCHA may require manual intervention for new Proton accounts
+1. `Mock transfers are fail-closed by default` (require explicit opt-in)
+2. CAPTCHA may require manual intervention for new Proton accounts
 
 ## Changeset Tracking (MANDATORY)
 

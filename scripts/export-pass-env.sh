@@ -66,7 +66,7 @@ if [[ "$SKIP_CHECK" != "true" ]]; then
     exit 1
   fi
 
-  if ! test_err="$("$PASS_CLI_BIN" test 2>&1 >/dev/null)"; then
+  if ! test_err="$("$PASS_CLI_BIN" info 2>&1 >/dev/null)"; then
     echo "pass-cli is not authenticated. Run 'pass-cli login' first." >&2
     if [[ -n "$test_err" ]]; then
       echo "$test_err" >&2

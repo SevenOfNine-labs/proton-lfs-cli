@@ -10,8 +10,4 @@ exclude = [
   "^http://localhost(:\\d+)?",
   "^http://127\\.0\\.0\\.1(:\\d+)?",
   "^http://0\\.0\\.0\\.0(:\\d+)?",
-  # pkg.go.dev cannot index this module: go.mod declares the module path
-  # "proton-lfs-cli", not a GitHub import path. Drop this exclusion once the
-  # module path is published (or the badge is removed).
-  "^https://pkg\\.go\\.dev/github\\.com/SevenOfNine-labs/proton-lfs-cli"
 ]

@@ -4,10 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -20,8 +23,9 @@ type BridgeResponse struct {
 	Details string          `json:"details,omitempty"`
 }
 
-// BridgeError preserves the structured error envelope returned by
-// proton-drive-cli while keeping the legacy "[code] message" string shape.
+// BridgeError is the failed response envelope of a bridge command
+// (schemas/bridge/v1/response-envelope.schema.json); Error() renders it as
+// "[code] message".
 type BridgeError struct {
 	Command string
 	Code    int
@@ -45,13 +49,12 @@ func (e *BridgeError) Error() string {
 
 // BridgeClientConfig holds the configuration for creating a new BridgeClient.
 type BridgeClientConfig struct {
-	NodeBin       string
-	CLIBin        string
-	Timeout       time.Duration
-	MaxConcurrent int
-	StorageBase   string
-	AppVersion    string
-	ExtraEnv      []string // additional env vars (for testing)
+	NodeBin     string
+	CLIBin      string
+	Timeout     time.Duration
+	StorageBase string
+	AppVersion  string
+	ExtraEnv    []string // additional env vars (for testing)
 }
 
 // BridgeAuthStateResponse mirrors proton-drive-cli bridge auth-state payloads.
@@ -69,7 +72,6 @@ type BridgeAuthStateResponse struct {
 	KeyPasswordAvailable   bool     `json:"keyPasswordAvailable,omitempty"`
 	KeyPasswordProvider    string   `json:"keyPasswordProvider,omitempty"`
 	KeyPasswordHost        string   `json:"keyPasswordHost,omitempty"`
-	HasExplicitDataPass    bool     `json:"hasExplicitDataPassword"`
 	DataCredentialProvider string   `json:"dataCredentialProvider,omitempty"`
 	DataCredentialHost     string   `json:"dataCredentialHost,omitempty"`
 	WillAttemptNetwork     bool     `json:"willAttemptNetwork"`
@@ -79,14 +81,47 @@ type BridgeAuthStateResponse struct {
 
 // BridgeClient communicates with proton-drive-cli via subprocess stdin/stdout.
 type BridgeClient struct {
-	nodeBin       string
-	cliBin        string
-	timeout       time.Duration
-	maxConcurrent int
-	semaphore     chan struct{}
-	storageBase   string
-	appVersion    string
-	extraEnv      []string
+	nodeBin     string
+	cliBin      string
+	timeout     time.Duration
+	storageBase string
+	appVersion  string
+	extraEnv    []string
+
+	// active is the running bridge subprocess, killed by TerminateActive
+	// when the adapter itself is interrupted.
+	mu     sync.Mutex
+	active *exec.Cmd
+}
+
+// TerminateActive kills the running bridge subprocess and, on Unix, its
+// process group. The bridge runs in its own group, so a terminal Ctrl-C that
+// interrupts git, git-lfs and the adapter does not reach it directly.
+func (bc *BridgeClient) TerminateActive() {
+	bc.mu.Lock()
+	defer bc.mu.Unlock()
+	if bc.active != nil && bc.active.Process != nil {
+		_ = killBridgeProcess(bc.active)
+	}
+}
+
+// transferMinBytesPerSecond is the throughput floor used to extend the base
+// timeout for uploads and downloads: an object may take
+// timeout + size/transferMinBytesPerSecond before the bridge is killed.
+const transferMinBytesPerSecond = 256 * 1024
+
+// maxBridgeCommandTimeout caps the size-derived budget; the object size comes
+// from the LFS pointer, which a cloned repository controls.
+const maxBridgeCommandTimeout = 24 * time.Hour
+
+// BridgeTimeoutError reports a bridge command killed at its deadline.
+type BridgeTimeoutError struct {
+	Command string
+	Timeout time.Duration
+}
+
+func (e *BridgeTimeoutError) Error() string {
+	return fmt.Sprintf("bridge %s timed out after %s", e.Command, e.Timeout)
 }
 
 // NewBridgeClient creates a new bridge subprocess client.
@@ -95,29 +130,26 @@ func NewBridgeClient(cfg BridgeClientConfig) *BridgeClient {
 		cfg.NodeBin = resolveNodeBinary()
 	}
 	if cfg.Timeout <= 0 {
-		cfg.Timeout = 5 * time.Minute
-	}
-	if cfg.MaxConcurrent <= 0 {
-		cfg.MaxConcurrent = 10
+		cfg.Timeout = defaultBridgeTimeout
 	}
 	if cfg.StorageBase == "" {
 		cfg.StorageBase = DefaultStorageBase
 	}
 	return &BridgeClient{
-		nodeBin:       cfg.NodeBin,
-		cliBin:        cfg.CLIBin,
-		timeout:       cfg.Timeout,
-		maxConcurrent: cfg.MaxConcurrent,
-		semaphore:     make(chan struct{}, cfg.MaxConcurrent),
-		storageBase:   cfg.StorageBase,
-		appVersion:    cfg.AppVersion,
-		extraEnv:      cfg.ExtraEnv,
+		nodeBin:     cfg.NodeBin,
+		cliBin:      cfg.CLIBin,
+		timeout:     cfg.Timeout,
+		storageBase: cfg.StorageBase,
+		appVersion:  cfg.AppVersion,
+		extraEnv:    cfg.ExtraEnv,
 	}
 }
 
-// envAllowlist lists environment variable prefixes and exact names that are
-// forwarded to the bridge subprocess. This mirrors the allowlist previously
-// maintained in protonDriveBridge.js.
+// envAllowlist lists the environment variables forwarded to the bridge
+// subprocess: entries ending in "_" are prefixes, all others exact names.
+// Only variables proton-drive-cli reads are forwarded; secret-shaped names
+// such as PROTON_PASSWORD or PROTON_DATA_PASSWORD never reach the bridge
+// (docs/security/threat-model.md).
 var envAllowlist = []string{
 	"PATH",
 	"HOME",
@@ -135,12 +167,30 @@ var envAllowlist = []string{
 	"XDG_CACHE_HOME",
 	"XDG_RUNTIME_DIR",
 	"MOCK_BRIDGE_",
-	"PROTON_",
-	"LFS_",
-	"SDK_",
+	// proton-drive-cli configuration (src/constants.ts,
+	// src/auth/key-password-store.ts, src/credentials/pass-cli.ts).
+	"PROTON_DRIVE_CLI_APP_VERSION",
+	"PROTON_KEY_PASSWORD_PROVIDER",
+	"PROTON_KEY_PASSWORD_HOST",
+	"PROTON_DATA_CREDENTIAL_PROVIDER",
+	"PROTON_DATA_CREDENTIAL_HOST",
+	"PROTON_PASS_CLI_BIN",
+	"PROTON_AUTH_TRACE",
+	"PROTON_AUTH_TRACE_ID",
 	"TMPDIR",
 	"TMP",
 	"TEMP",
+	// Windows locates the user profile, git's global configuration and
+	// system DLLs through these; they carry no secrets.
+	"USERPROFILE",
+	"HOMEDRIVE",
+	"HOMEPATH",
+	"APPDATA",
+	"LOCALAPPDATA",
+	"SYSTEMROOT",
+	"WINDIR",
+	"COMSPEC",
+	"PATHEXT",
 }
 
 // filteredEnv returns environment variables that match the allowlist.
@@ -174,21 +224,52 @@ func matchesAllowlist(key string) bool {
 	return false
 }
 
+// commandTimeout returns the wall-clock budget for one bridge command moving
+// transferSize bytes (0 for commands that move no payload).
+func (bc *BridgeClient) commandTimeout(transferSize int64) time.Duration {
+	if transferSize <= 0 {
+		return bc.timeout
+	}
+	extra := transferSize / transferMinBytesPerSecond
+	if extra >= int64(maxBridgeCommandTimeout/time.Second) {
+		return maxBridgeCommandTimeout
+	}
+	total := bc.timeout + time.Duration(extra)*time.Second
+	if total > maxBridgeCommandTimeout {
+		return maxBridgeCommandTimeout
+	}
+	return total
+}
+
+// commandArgv returns the program and arguments for a bridge command. A
+// JavaScript entry point (.js/.cjs/.mjs) runs under node; anything else is
+// an executable such as the single-executable-application build and runs
+// directly.
+func (bc *BridgeClient) commandArgv(command string) (string, []string) {
+	switch strings.ToLower(filepath.Ext(bc.cliBin)) {
+	case ".js", ".cjs", ".mjs":
+		return bc.nodeBin, []string{bc.cliBin, "bridge", command}
+	default:
+		return bc.cliBin, []string{"bridge", command}
+	}
+}
+
 // runBridgeCommand executes a proton-drive-cli bridge command as a subprocess.
 func (bc *BridgeClient) runBridgeCommand(command string, request map[string]any) (*BridgeResponse, error) {
-	// Non-blocking semaphore acquire
-	select {
-	case bc.semaphore <- struct{}{}:
-		defer func() { <-bc.semaphore }()
-	default:
-		return nil, fmt.Errorf("bridge concurrency limit reached (%d)", bc.maxConcurrent)
-	}
+	return bc.runBridgeCommandSized(command, request, 0)
+}
 
-	ctx, cancel := context.WithTimeout(context.Background(), bc.timeout)
+// runBridgeCommandSized executes a bridge command whose timeout is scaled by
+// the size of the object it transfers.
+func (bc *BridgeClient) runBridgeCommandSized(command string, request map[string]any, transferSize int64) (*BridgeResponse, error) {
+	timeout := bc.commandTimeout(transferSize)
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, bc.nodeBin, bc.cliBin, "bridge", command)
+	program, args := bc.commandArgv(command)
+	cmd := exec.CommandContext(ctx, program, args...)
 	cmd.Env = bc.filteredEnv()
+	configureBridgeProcess(cmd)
 
 	stdinBytes, err := json.Marshal(request)
 	if err != nil {
@@ -200,12 +281,21 @@ func (bc *BridgeClient) runBridgeCommand(command string, request map[string]any)
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
-	err = cmd.Run()
+	err = cmd.Start()
+	if err == nil {
+		bc.mu.Lock()
+		bc.active = cmd
+		bc.mu.Unlock()
+		err = cmd.Wait()
+		bc.mu.Lock()
+		bc.active = nil
+		bc.mu.Unlock()
+	}
 
 	resp, parseErr := parseBridgeOutput(stdout.Bytes(), stderr.Bytes())
 	if parseErr != nil {
 		if ctx.Err() == context.DeadlineExceeded {
-			return nil, fmt.Errorf("bridge %s timed out after %s", command, bc.timeout)
+			return nil, &BridgeTimeoutError{Command: command, Timeout: timeout}
 		}
 		if err != nil {
 			stderrText := sanitizeStderr(stderr.String())
@@ -346,8 +436,11 @@ func parseBridgeEnvelope(raw []byte) (*BridgeResponse, error) {
 	return &resp, nil
 }
 
-// parseBridgeOutput extracts a JSON envelope from stdout, tolerating non-JSON
-// noise (e.g. debug logging) by scanning from the last line backwards.
+// parseBridgeOutput extracts the JSON envelope from stdout. The bridge
+// contract allows only the envelope on stdout; the backwards line scan keeps
+// the adapter working when a dependency of the CLI prints to stdout (Node
+// runtime warnings), and still rejects output whose last object is not a
+// valid envelope.
 func parseBridgeOutput(stdout, _ []byte) (*BridgeResponse, error) {
 	trimmed := bytes.TrimSpace(stdout)
 	if len(trimmed) == 0 {
@@ -432,20 +525,22 @@ func (bc *BridgeClient) InitLFSStorage(creds OperationCredentials) error {
 }
 
 // Upload runs `bridge upload` to encrypt and store a file in Proton Drive.
-func (bc *BridgeClient) Upload(creds OperationCredentials, oid, filePath string) error {
+// size is the object size announced by git-lfs and extends the timeout.
+func (bc *BridgeClient) Upload(creds OperationCredentials, oid, filePath string, size int64) error {
 	req := buildCredentials(creds, bc.storageBase, bc.appVersion)
 	req["oid"] = oid
 	req["path"] = filePath
-	_, err := bc.runBridgeCommand("upload", req)
+	_, err := bc.runBridgeCommandSized("upload", req, size)
 	return err
 }
 
-// Download runs `bridge download` to decrypt and retrieve a file from Proton Drive.
-func (bc *BridgeClient) Download(creds OperationCredentials, oid, outputPath string) error {
+// Download runs `bridge download` to decrypt and retrieve a file from Proton
+// Drive. size is the object size announced by git-lfs and extends the timeout.
+func (bc *BridgeClient) Download(creds OperationCredentials, oid, outputPath string, size int64) error {
 	req := buildCredentials(creds, bc.storageBase, bc.appVersion)
 	req["oid"] = oid
 	req["outputPath"] = outputPath
-	_, err := bc.runBridgeCommand("download", req)
+	_, err := bc.runBridgeCommandSized("download", req, size)
 	return err
 }
 
@@ -455,8 +550,9 @@ func (bc *BridgeClient) Exists(creds OperationCredentials, oid string) (bool, er
 	req["oid"] = oid
 	resp, err := bc.runBridgeCommand("exists", req)
 	if err != nil {
-		// A 404 error means the object does not exist — not a failure.
-		if strings.Contains(err.Error(), "[404]") || strings.Contains(err.Error(), "not found") {
+		// A 404 envelope means the object is absent, which is not a failure.
+		var bridgeErr *BridgeError
+		if errors.As(err, &bridgeErr) && bridgeErr.Code == 404 {
 			return false, nil
 		}
 		return false, err
@@ -575,7 +671,7 @@ func validateBridgeBoolMapKeys(command string, results map[string]bool) error {
 
 // resolveNodeBinary returns the path to the Node.js binary.
 func resolveNodeBinary() string {
-	if bin := os.Getenv("NODE_BIN"); bin != "" {
+	if bin := envTrim(EnvNodeBin); bin != "" {
 		return bin
 	}
 	if path, err := exec.LookPath("node"); err == nil {

@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Proton LFS Documentation</title>
+  <!--
+    Landing page of https://sevenofnine-labs.github.io/proton-lfs-cli/.
+    Deployed by .github/workflows/docs.yml; the guides/ tree is the honkit
+    build of SUMMARY.md, so every guides/ link below must name a page listed
+    there.
+  -->
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      max-width: 900px;
+      margin: 50px auto;
+      padding: 20px;
+      line-height: 1.6;
+      color: #333;
+    }
+    h1 {
+      border-bottom: 3px solid #6d4aff;
+      padding-bottom: 10px;
+      color: #1a1a1a;
+    }
+    .intro {
+      margin: 20px 0;
+      padding: 20px;
+      background: #e8f4fd;
+      border-radius: 8px;
+      border-left: 4px solid #0066cc;
+    }
+    .section {
+      margin: 30px 0;
+      padding: 25px;
+      background: #f8f9fa;
+      border-radius: 8px;
+      border-left: 4px solid #6d4aff;
+    }
+    .section h2 {
+      margin-top: 0;
+      color: #6d4aff;
+    }
+    a {
+      color: #6d4aff;
+      text-decoration: none;
+      font-weight: 500;
+    }
+    a:hover {
+      text-decoration: underline;
+    }
+    .badge {
+      display: inline-block;
+      padding: 4px 10px;
+      background: #6d4aff;
+      color: white;
+      border-radius: 4px;
+      font-size: 0.85em;
+      margin-left: 10px;
+      font-weight: 600;
+    }
+    .external-badge {
+      background: #28a745;
+    }
+    ul {
+      margin: 15px 0;
+      padding-left: 20px;
+    }
+    li {
+      margin: 8px 0;
+    }
+    footer {
+      margin-top: 60px;
+      padding-top: 20px;
+      border-top: 1px solid #ddd;
+      text-align: center;
+      color: #666;
+      font-size: 0.9em;
+    }
+    code {
+      background: #f4f4f4;
+      padding: 2px 6px;
+      border-radius: 3px;
+      font-family: 'Courier New', monospace;
+      font-size: 0.9em;
+    }
+  </style>
+</head>
+<body>
+  <h1>Proton LFS Documentation</h1>
+
+  <div class="intro">
+    <p><strong>Proton LFS</strong> is a Git LFS custom transfer adapter that stores Git LFS objects end-to-end encrypted in Proton Drive.</p>
+    <p>This documentation covers the Go adapter, the system tray app and the integration with the <code>proton-drive-cli</code> bridge.</p>
+  </div>
+
+  <div class="section">
+    <h2>Guides <span class="badge">Markdown</span></h2>
+    <p>Architecture, operations, testing and security documentation built from <code>SUMMARY.md</code>.</p>
+    <ul>
+      <li><a href="guides/index.html">Documentation home</a></li>
+      <li><a href="guides/docs/project/current-state.html">Current state</a></li>
+      <li><a href="guides/docs/architecture/overview.html">Architecture overview</a></li>
+      <li><a href="guides/docs/architecture/proton-sdk-bridge.html">Proton SDK bridge</a></li>
+      <li><a href="guides/docs/architecture/subprocess-integration.html">Subprocess integration</a></li>
+      <li><a href="guides/docs/architecture/architecture.html">Architecture diagrams</a></li>
+      <li><a href="guides/docs/architecture/feature-audit.html">Feature audit</a></li>
+      <li><a href="guides/docs/security/threat-model.html">Threat model</a></li>
+      <li><a href="guides/docs/testing/integration-testing.html">Integration testing</a></li>
+    </ul>
+  </div>
+
+  <div class="section">
+    <h2>Reference</h2>
+    <p>Exhaustive tables derived from the code: flags, files, states and error codes.</p>
+    <ul>
+      <li><a href="guides/docs/reference/adapter.html">Adapter flags and environment</a></li>
+      <li><a href="guides/docs/reference/adapter-errors.html">Adapter errors</a></li>
+      <li><a href="guides/docs/reference/status-file.html">Status file</a></li>
+      <li><a href="guides/docs/reference/config-file.html">Config file</a></li>
+      <li><a href="guides/docs/reference/tray.html">Tray app and CLI helpers</a></li>
+    </ul>
+  </div>
+
+  <div class="section">
+    <h2>Operations</h2>
+    <ul>
+      <li><a href="guides/docs/operations/adapter-configuration.html">Adapter configuration</a></li>
+      <li><a href="guides/docs/operations/deployment.html">Deployment</a></li>
+      <li><a href="guides/docs/operations/releasing.html">Releasing</a></li>
+      <li><a href="guides/docs/operations/live-canary-runbook.html">Live canary runbook</a></li>
+      <li><a href="guides/docs/operations/tray-platform-release-checklist.html">Tray platform release checklist</a></li>
+      <li><a href="https://github.com/SevenOfNine-labs/proton-lfs-cli/releases">GitHub Releases</a> (platform bundles, standalone adapter binaries, <code>SHA256SUMS.txt</code>)</li>
+    </ul>
+  </div>
+
+  <div class="section">
+    <h2>History</h2>
+    <p>Past audits and decisions, each banner naming the page that supersedes it.</p>
+    <ul>
+      <li><a href="guides/docs/history/proton-sdk-update-2026-11-05.html">Proton SDK update 2026-11-05</a></li>
+      <li><a href="guides/docs/history/proton-auth-news-audit-2026-06-22.html">Proton auth news audit 2026-06-22</a></li>
+      <li><a href="guides/docs/history/proton-auth-news-audit-2026-06-21.html">Proton auth news audit 2026-06-21</a></li>
+      <li><a href="guides/docs/history/proton-auth-hardening-plan.html">Proton auth hardening plan 2026-05-22</a></li>
+      <li><a href="guides/docs/history/feature-audit-findings-2026-06-22.html">Feature audit findings 2026-06-22</a></li>
+      <li><a href="guides/docs/history/go-proton-api-analysis.html">go-proton-api analysis 2026-02-16</a></li>
+    </ul>
+  </div>
+
+  <div class="section">
+    <h2>proton-drive-cli bridge <span class="badge external-badge">Submodule</span></h2>
+    <p>TypeScript CLI, bridge protocol and JSON schemas of the <code>proton-drive-cli</code> submodule.</p>
+    <ul>
+      <li><a href="https://sevenofnine-labs.github.io/proton-drive-cli/">proton-drive-cli documentation</a></li>
+      <li><a href="https://sevenofnine-labs.github.io/proton-drive-cli/typescript/index.html">TypeScript API reference</a></li>
+      <li><a href="https://sevenofnine-labs.github.io/proton-drive-cli/guides/docs/reference/bridge-protocol.html">Bridge protocol reference</a> and
+          <a href="https://sevenofnine-labs.github.io/proton-drive-cli/guides/docs/reference/doctor.html">doctor reference</a></li>
+      <li><a href="https://sevenofnine-labs.github.io/proton-drive-cli/schemas/bridge/v1/request.schema.json">Bridge request schema</a> and
+          <a href="https://sevenofnine-labs.github.io/proton-drive-cli/schemas/bridge/v1/response-envelope.schema.json">response envelope schema</a></li>
+    </ul>
+  </div>
+
+  <div class="section">
+    <h2>Quick links</h2>
+    <ul>
+      <li><a href="https://github.com/SevenOfNine-labs/proton-lfs-cli">GitHub repository</a></li>
+      <li><a href="https://github.com/SevenOfNine-labs/proton-lfs-cli/blob/main/README.md">README</a></li>
+      <li><a href="https://github.com/SevenOfNine-labs/proton-lfs-cli/blob/main/USAGE.md">Usage guide</a></li>
+      <li><a href="https://github.com/SevenOfNine-labs/proton-lfs-cli/blob/main/SECURITY.md">Security policy</a></li>
+      <li><a href="https://github.com/SevenOfNine-labs/proton-drive-cli">Submodule: proton-drive-cli</a></li>
+    </ul>
+  </div>
+
+  <footer>
+    <p>Generated with Honkit | <a href="https://github.com/SevenOfNine-labs/proton-lfs-cli">GitHub</a></p>
+  </footer>
+</body>
+</html>

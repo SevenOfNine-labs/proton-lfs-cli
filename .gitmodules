@@ -1,6 +1,6 @@
 [submodule "submodules/git-lfs"]
 	path = submodules/git-lfs
-	url = https://github.com/SevenOfNine-ai/git-lfs.git
+	url = https://github.com/git-lfs/git-lfs.git
 [submodule "submodules/pass-cli"]
 	path = submodules/pass-cli
 	url = https://github.com/protonpass/pass-cli.git

@@ -2,12 +2,19 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strings"
+	"time"
 
 	"fyne.io/systray"
+	"github.com/gofrs/flock"
+
+	"github.com/SevenOfNine-labs/proton-lfs-cli/internal/config"
 )
 
 // Version is stamped at build time via -ldflags.
@@ -66,7 +73,10 @@ func main() {
 			os.Exit(1)
 		}
 	}
-	if !acquireLock() {
+	locked, err := acquireInstanceLock()
+	if err != nil {
+		trayLog.Printf("single-instance lock unavailable, continuing: %v", err)
+	} else if !locked {
 		fmt.Fprintln(os.Stderr, "proton-lfs-cli is already running")
 		os.Exit(0)
 	}
@@ -92,76 +102,115 @@ Credential providers: git-credential, pass-cli
 `
 
 func onReady() {
+	if err := migrateGitLFSRegistration(); err != nil {
+		trayLog.Printf("git config migration failed: %v", err)
+	}
 	setupMenu()
 	startStatusWatcher()
 }
 
-// augmentPath inherits the user's full shell PATH so that binaries
-// installed via Homebrew, nvm, ~/.local/bin, etc. are available.
-// macOS apps launched from Finder/Spotlight get a minimal PATH that
-// excludes most user-installed tools.
+func onExit() {
+	stopStatusWatcher()
+	releaseInstanceLock()
+}
+
+// loginShellPathTimeout bounds the login shell started by augmentPath. Shell
+// startup files can block (for example on a network mount or an interactive
+// prompt), and the tray must not hang before its icon appears.
+const loginShellPathTimeout = 5 * time.Second
+
+// augmentPath adopts the PATH of the user's login shell on macOS and Linux.
+// Apps started from Finder, Spotlight or a LaunchAgent inherit launchd's
+// minimal PATH (/usr/bin:/bin:/usr/sbin:/sbin), and XDG autostart entries
+// inherit the display manager's environment, which does not run the login
+// files of shells such as zsh; both lack Homebrew, nvm and ~/.local/bin
+// where pass-cli and node are installed. Windows programs inherit the
+// user's PATH from the registry.
 func augmentPath() {
-	out, err := exec.Command("zsh", "-lc", "echo $PATH").Output()
-	if err != nil {
+	if runtime.GOOS == "windows" {
 		return
 	}
-	shellPath := strings.TrimSpace(string(out))
+	ctx, cancel := context.WithTimeout(context.Background(), loginShellPathTimeout)
+	defer cancel()
+	shellPath, err := loginShellPath(ctx, os.Getenv("SHELL"))
+	if err != nil {
+		trayLog.Printf("login shell PATH not adopted: %v", err)
+		return
+	}
 	if shellPath != "" {
 		_ = os.Setenv("PATH", shellPath)
 	}
 }
 
-func onExit() {
-	stopStatusWatcher()
-	releaseLock()
+// loginShellPath runs shell as a login shell and returns the PATH it exports.
+// An empty shell falls back to zsh, the macOS default login shell since
+// 10.15. Only the last output line is used: login startup files may print
+// banners before the shell evaluates the command, and printf '%s' writes the
+// PATH without a trailing newline so it is always that last line.
+func loginShellPath(ctx context.Context, shell string) (string, error) {
+	shell = strings.TrimSpace(shell)
+	if shell == "" {
+		shell = "zsh"
+	}
+	cmd := exec.CommandContext(ctx, shell, "-lc", `printf '%s' "$PATH"`)
+	cmd.WaitDelay = time.Second
+	out, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	lines := strings.Split(string(out), "\n")
+	return strings.TrimSpace(lines[len(lines)-1]), nil
 }
 
-// acquireLock prevents multiple instances from running simultaneously.
-// Returns true if the lock was acquired, false if another instance is running.
-func acquireLock() bool {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return true // can't determine home dir, allow launch
-	}
-	dir := home + "/.proton-lfs-cli"
-	_ = os.MkdirAll(dir, 0o700)
-	lockPath := dir + "/tray.lock"
+// trayLockFileName is the advisory lock file inside config.AppDir that marks
+// a running tray instance.
+const trayLockFileName = "tray.lock"
 
-	// Try to create exclusively — fails if file already exists
-	f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+// instanceLock is held for the lifetime of the tray process. The lock is an
+// OS advisory lock (flock(2) on Unix, LockFileEx on Windows) that the kernel
+// releases when the process exits, so a crashed instance never leaves a stale
+// lock behind.
+var instanceLock *flock.Flock
+
+// acquireInstanceLock takes the single-instance lock. It returns false when
+// another tray instance holds it.
+func acquireInstanceLock() (bool, error) {
+	dir, err := config.AppDirPath()
 	if err != nil {
-		// File exists — check if the PID inside is still alive
-		data, readErr := os.ReadFile(lockPath)
-		if readErr == nil {
-			var pid int
-			if _, err := fmt.Sscanf(string(data), "%d", &pid); err == nil && pid > 0 {
-				// Check if process is still running
-				if proc, err := os.FindProcess(pid); err == nil {
-					if proc.Signal(nil) == nil {
-						return false // still alive
-					}
-				}
-			}
-		}
-		// Stale lock — remove and retry
-		_ = os.Remove(lockPath)
-		f, err = os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
-		if err != nil {
-			return false
-		}
+		return false, err
 	}
-	_, _ = fmt.Fprintf(f, "%d", os.Getpid())
-	_ = f.Close()
-	lockFile = lockPath
-	return true
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return false, err
+	}
+	lock, locked, err := tryInstanceLock(filepath.Join(dir, trayLockFileName))
+	if err != nil || !locked {
+		return false, err
+	}
+	instanceLock = lock
+	return true, nil
 }
 
-var lockFile string
-
-func releaseLock() {
-	if lockFile != "" {
-		_ = os.Remove(lockFile)
+// tryInstanceLock attempts a non-blocking exclusive lock on path. The
+// returned Flock must be unlocked by the caller when locked is true.
+func tryInstanceLock(path string) (lock *flock.Flock, locked bool, err error) {
+	lock = flock.New(path)
+	locked, err = lock.TryLock()
+	if err != nil {
+		return nil, false, err
 	}
+	if !locked {
+		_ = lock.Close()
+		return nil, false, nil
+	}
+	return lock, true, nil
+}
+
+func releaseInstanceLock() {
+	if instanceLock == nil {
+		return
+	}
+	_ = instanceLock.Unlock()
+	instanceLock = nil
 }
 
 // hasHelpFlag returns true if args contains --help or -h.

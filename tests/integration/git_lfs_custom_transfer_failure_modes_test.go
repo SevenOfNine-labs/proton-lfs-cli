@@ -152,7 +152,11 @@ exit 42
 	}
 }
 
-func TestGitLFSCustomTransferFailsWhenAdapterDoesNotRespond(t *testing.T) {
+// TestGitLFSCustomTransferFailsWhenAdapterExitsWithoutResponse covers an
+// adapter that reads the transfer request and exits 0 without answering.
+// git-lfs has no activity timeout for custom adapters; it fails when the
+// adapter closes stdout.
+func TestGitLFSCustomTransferFailsWhenAdapterExitsWithoutResponse(t *testing.T) {
 	s := setupRepositoryForUpload(t)
 
 	adapterScript := writeExecutableScript(t, `#!/usr/bin/env bash
@@ -167,15 +171,13 @@ exit 0
 `)
 	configureScriptCustomTransfer(t, s.repoPath, s.env, s.gitBin, adapterScript)
 
-	// Avoid long hangs if the adapter never responds to the transfer request.
-	mustRun(t, s.repoPath, s.env, s.gitBin, "config", "lfs.activitytimeout", "1")
 	out, err := runCmd(s.repoPath, s.env, s.gitBin, "push", "origin", "main")
 	if err == nil {
-		t.Fatalf("expected git push to fail when adapter stalls, output:\n%s", out)
+		t.Fatalf("expected git push to fail when the adapter exits without responding, output:\n%s", out)
 	}
 
 	lower := strings.ToLower(out)
-	if !strings.Contains(lower, "error") && !strings.Contains(lower, "timeout") {
-		t.Fatalf("expected timeout/failure output, got:\n%s", out)
+	if !strings.Contains(lower, "error") && !strings.Contains(lower, "exit") {
+		t.Fatalf("expected transfer failure output, got:\n%s", out)
 	}
 }

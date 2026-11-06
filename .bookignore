@@ -15,9 +15,7 @@ go.sum
 Makefile
 .env*
 !.env.example
-yarn.lock
 package.json
-.yarnrc.yml
 .markdownlint.json
 .lychee.toml
 .golangci.yml
@@ -25,3 +23,4 @@ package.json
 CLAUDE.md
 AGENTS.md
 LICENSE
+docs/site

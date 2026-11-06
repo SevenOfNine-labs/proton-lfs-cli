@@ -19,9 +19,9 @@ login permission flags. It may send optional `dataCredentialProvider` and
 
 The adapter (`cmd/adapter/bridge.go`) communicates with `proton-drive-cli` using:
 
-1. **Spawn**: `node <proton-drive-cli-path> bridge <command>`
+1. **Spawn**: `node <dist/index.js> bridge <command>` for a `.js` entry point, or `<proton-drive-cli> bridge <command>` for the standalone executable (`--drive-cli-bin`)
 2. **Stdin**: JSON payload with local unlock selectors and operation parameters
-3. **Stdout**: JSON response envelope `{ ok: true/false, payload: {...}, error: "...", code: 400-500 }`
+3. **Stdout**: one JSON response envelope line, `{ ok: true, payload }` or `{ ok: false, error, code, details }`
 4. **Stderr**: Diagnostic logs (not parsed for responses)
 
 The Go adapter validates the top-level response envelope strictly. `ok` must
@@ -42,8 +42,7 @@ malformed `exists` and batch helper payloads instead of inferring success.
 - `download`: Download a file from Proton Drive by OID.
 - `exists`: Check whether a file exists by OID.
 - `delete`: Delete a file by OID.
-- `list`: List files in a Proton Drive folder.
-- `refresh`: Refresh an existing session token.
+- `list`: List files in a Proton Drive folder (used by `proton-lfs-tray scope-diagnostics --live`, not by transfers).
 - `batch-exists`: Check multiple OIDs. Private root helper only; not accepted
   as a Git LFS custom transfer event.
 - `batch-delete`: Delete multiple OIDs. Private cleanup/maintenance helper
@@ -58,9 +57,13 @@ malformed `exists` and batch helper payloads instead of inferring success.
 - Local unlock selectors are passed via stdin (not visible in `ps` output)
 - OID validation: strict 64-character hex regex before subprocess spawn
 - Path traversal prevention: reject paths containing `..`
-- Subprocess pool: maximum 10 concurrent operations
-- Timeout: 5 minutes per operation (configurable via `PROTON_DRIVE_CLI_TIMEOUT_MS`)
+- One subprocess per command; timeout `--bridge-timeout` / `PROTON_LFS_BRIDGE_TIMEOUT` (default 5 minutes) plus one second per 256 KiB for transfers, with the process group killed on expiry
 - Session tokens stored in `~/.proton-drive-cli/session.json` with 0600 permissions
+
+The complete request, payload and error-code tables are in proton-drive-cli's
+bridge protocol reference (`submodules/proton-drive-cli/docs/reference/bridge-protocol.md`,
+published on the [proton-drive-cli documentation site](https://sevenofnine-labs.github.io/proton-drive-cli/));
+the Go client is described in [Subprocess Integration](subprocess-integration.md).
 
 ## Requirements Propagated From Git LFS
 
@@ -81,7 +84,7 @@ malformed `exists` and batch helper payloads instead of inferring success.
 3. Remote session revocation can still make the first live SDK call fail after
    offline `ready`; this must be reported as an auth failure, not retried as an
    automatic login.
-4. No streaming for large files (>2GB may timeout -- increase `PROTON_DRIVE_CLI_TIMEOUT_MS`).
+4. The sdk backend reports progress once per object after the bridge command returns; the bridge timeout grows with the object size (`--bridge-timeout` plus one second per 256 KiB), and `--bridge-timeout` raises the base.
 
 ## Next Hardening Targets
 

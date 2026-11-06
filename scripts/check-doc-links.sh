@@ -5,11 +5,9 @@ md_files_file=$(mktemp)
 matches_file=$(mktemp)
 trap 'rm -f "${md_files_file}" "${matches_file}"' EXIT
 
-if command -v rg >/dev/null 2>&1; then
-  rg --files -g '*.md' -g '!submodules/**' | sort >"${md_files_file}"
-else
-  find . -type f -name '*.md' -not -path './submodules/*' | sed 's#^./##' | sort >"${md_files_file}"
-fi
+# Tracked Markdown files only (git ls-files honours .gitignore on every host,
+# unlike find), excluding submodules.
+git ls-files -z -- "*.md" ":!submodules/**" | tr "\0" "\n" | sort >"${md_files_file}"
 
 if [[ ! -s "${md_files_file}" ]]; then
   echo "No markdown files found"

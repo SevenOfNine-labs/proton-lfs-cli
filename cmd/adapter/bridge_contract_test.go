@@ -108,7 +108,6 @@ func stringSet(values []string) map[string]struct{} {
 func TestBridgeContractRequestFieldsAreKnown(t *testing.T) {
 	schema := readBridgeContract[contractSchema](t, "request.schema.json")
 	expected := sortedStrings([]string{
-		"dataPassword",
 		"dataCredentialProvider",
 		"dataCredentialHost",
 		"appVersion",
@@ -292,6 +291,41 @@ func TestBridgeContractErrorCodesAreClassified(t *testing.T) {
 		if backendErr.Code != entry.HTTPStatus || backendErr.ErrorCode != wantRoot {
 			t.Fatalf("bridge error code %q mapped to code=%d errorCode=%s, want code=%d errorCode=%s",
 				code, backendErr.Code, backendErr.ErrorCode, entry.HTTPStatus, wantRoot)
+		}
+	}
+}
+
+// TestBridgeContractPayloadSchemasMatchGoParsers checks the strict payload
+// parsers in bridge.go against schemas/bridge/v1/payloads/*.schema.json, so
+// a field added on the TypeScript side cannot silently break every transfer.
+func TestBridgeContractPayloadSchemasMatchGoParsers(t *testing.T) {
+	type payloadSchema struct {
+		AdditionalProperties bool                       `json:"additionalProperties"`
+		Required             []string                   `json:"required"`
+		Properties           map[string]json.RawMessage `json:"properties"`
+	}
+
+	exists := readBridgeContract[payloadSchema](t, filepath.Join("payloads", "exists.schema.json"))
+	if exists.AdditionalProperties {
+		t.Fatal("exists payload schema must forbid additional properties (Go parses it strictly)")
+	}
+	if got, want := sortedKeys(exists.Properties), sortedStrings([]string{"oid", "exists"}); strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("exists payload properties = %v, Go parser accepts %v", got, want)
+	}
+	if _, err := parseBridgeExistsPayload([]byte(`{"oid":"` + strings.Repeat("a", 64) + `","exists":true}`)); err != nil {
+		t.Fatalf("Go parser rejects a schema-valid exists payload: %v", err)
+	}
+
+	for _, name := range []string{"batch-exists.schema.json", "batch-delete.schema.json"} {
+		schema := readBridgeContract[payloadSchema](t, filepath.Join("payloads", name))
+		if schema.AdditionalProperties {
+			t.Fatalf("%s must forbid additional properties", name)
+		}
+		if got := sortedKeys(schema.Properties); strings.Join(got, ",") != "results" {
+			t.Fatalf("%s properties = %v, Go parser accepts only results", name, got)
+		}
+		if _, err := parseBridgeBoolMapPayload("batch", []byte(`{"results":{"`+strings.Repeat("b", 64)+`":true}}`)); err != nil {
+			t.Fatalf("Go parser rejects a schema-valid %s payload: %v", name, err)
 		}
 	}
 }

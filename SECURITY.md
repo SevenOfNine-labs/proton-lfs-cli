@@ -2,7 +2,9 @@
 
 ## Project Maturity
 
-This repository is pre-production. Do not use it to store production or sensitive data until the production readiness gates in `docs/project/project-plan.md` are complete.
+This repository is pre-production. Do not use it to store production or
+sensitive data; `docs/project/current-state.md` records what is implemented
+and what is open, and `docs/security/threat-model.md` the trust boundaries.
 
 ## Reporting A Vulnerability
 

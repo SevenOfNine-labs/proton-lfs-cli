@@ -1,5 +1,7 @@
 # Proton SDK Update Audit - 2026-11-05
 
+> Historical record as of 2026-11-05; superseded by `docs/project/current-state.md`, which carries the open items of this audit, and by the submodule's `docs/operations/configuration.md` for build requirements. File paths named here are as of that date.
+
 This note records the review done while moving the vendored official Proton
 Drive SDK from `a3fc5e54` (js/v0.18.0 era, pinned 2026-06-22) to tag
 `js/v0.23.0` (`8a44654a`, 2026-10-09), and what was adapted in

@@ -1,7 +1,7 @@
 package main
 
 import (
-	"proton-lfs-cli/internal/config"
+	"github.com/SevenOfNine-labs/proton-lfs-cli/internal/config"
 )
 
 // Backend modes — re-exported from internal/config for package main usage.
@@ -10,7 +10,7 @@ const (
 	BackendSDK   = config.BackendSDK
 )
 
-// Credential providers
+// Credential provider kinds (mailbox/data password provider)
 const (
 	CredentialProviderPassCLI       = config.CredentialProviderPassCLI
 	CredentialProviderGitCredential = config.CredentialProviderGitCredential
@@ -20,7 +20,6 @@ const (
 const (
 	DefaultDriveCLIBin        = config.DefaultDriveCLIBin
 	DefaultStorageBase        = config.DefaultStorageBase
-	DefaultCredentialProvider = config.DefaultCredentialProvider
 	DefaultDataCredentialHost = config.DefaultDataCredentialHost
 )
 
@@ -33,9 +32,9 @@ const (
 	EnvBackend                = config.EnvBackend
 	EnvAllowMockTransfers     = config.EnvAllowMockTransfers
 	EnvLocalStoreDir          = config.EnvLocalStoreDir
-	EnvCredentialProvider     = config.EnvCredentialProvider
 	EnvDataCredentialProvider = config.EnvDataCredentialProvider
 	EnvDataCredentialHost     = config.EnvDataCredentialHost
+	EnvBridgeTimeout          = config.EnvBridgeTimeout
 )
 
 func envTrim(key string) string {
