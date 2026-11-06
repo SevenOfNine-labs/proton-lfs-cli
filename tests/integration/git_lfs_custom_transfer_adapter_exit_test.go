@@ -13,10 +13,9 @@ import (
 	"time"
 )
 
-// These tests cover a custom transfer adapter that exits in the middle of a
-// transfer without sending a complete message. git-lfs has no activity
-// timeout for custom adapters (lfs.activitytimeout applies to its HTTP
-// client only), so the failure is detected when the adapter's stdout closes.
+// lfs.activitytimeout applies to the git-lfs HTTP client only (git-lfs
+// docs/man/git-lfs-config.adoc); a custom adapter that exits mid-transfer is
+// detected when its stdout closes.
 
 const (
 	// adapterExitDelayMS is how long the helper adapter waits after the
@@ -46,12 +45,10 @@ func buildMidTransferExitAdapter(t *testing.T, root string) string {
 	return outPath
 }
 
-func configureMidTransferExitCustomTransfer(t *testing.T, repoPath string, env []string, gitBin, adapterPath, storePath, exitOn string) {
+func configureMidTransferExitCustomTransfer(t *testing.T, repoPath string, env []string, gitBin, adapterPath, exitOn string) {
 	t.Helper()
 
-	args := "--local-store-dir=" + storePath +
-		" --exit-on=" + exitOn +
-		" --delay-ms=" + strconv.Itoa(adapterExitDelayMS)
+	args := "--exit-on=" + exitOn + " --delay-ms=" + strconv.Itoa(adapterExitDelayMS)
 
 	mustRun(t, repoPath, env, gitBin, "config", "lfs.customtransfer.proton.path", adapterPath)
 	mustRun(t, repoPath, env, gitBin, "config", "lfs.customtransfer.proton.args", args)
@@ -85,7 +82,7 @@ func TestGitLFSCustomTransferAdapterExitsMidUpload(t *testing.T) {
 	oid := mustReadSingleOID(t, s)
 
 	adapter := buildMidTransferExitAdapter(t, s.root)
-	configureMidTransferExitCustomTransfer(t, s.repoPath, s.env, s.gitBin, adapter, s.storePath, "upload")
+	configureMidTransferExitCustomTransfer(t, s.repoPath, s.env, s.gitBin, adapter, "upload")
 
 	start := time.Now()
 	out, err := runCmd(s.repoPath, s.env, s.gitBin, "push", "origin", "main")
@@ -109,7 +106,7 @@ func TestGitLFSCustomTransferAdapterExitsMidDownload(t *testing.T) {
 	mustRun(t, clonePath, s.env, s.gitLFSBin, "install", "--local")
 
 	adapter := buildMidTransferExitAdapter(t, s.root)
-	configureMidTransferExitCustomTransfer(t, clonePath, s.env, s.gitBin, adapter, s.storePath, "download")
+	configureMidTransferExitCustomTransfer(t, clonePath, s.env, s.gitBin, adapter, "download")
 
 	start := time.Now()
 	out, err := runCmd(clonePath, s.env, s.gitLFSBin, "pull", "origin", "main")

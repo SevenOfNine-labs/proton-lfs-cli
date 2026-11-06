@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"runtime"
 	"strings"
+	"sync/atomic"
 
 	"fyne.io/systray"
 
@@ -29,20 +30,21 @@ var (
 
 // Menu items that get updated dynamically.
 var (
-	mStatus       *systray.MenuItem
-	mSession      *systray.MenuItem
-	mTransfers    *systray.MenuItem
-	mRefresh      *systray.MenuItem
-	mPrimaryAuth  *systray.MenuItem
-	mDataPassword *systray.MenuItem
-	mRecheck      *systray.MenuItem
-	mCredGit      *systray.MenuItem
-	mCredPass     *systray.MenuItem
-	mRegister     *systray.MenuItem
-	mOpenLogs     *systray.MenuItem
-	mDoctor       *systray.MenuItem
+	mStatus      *systray.MenuItem
+	mSession     *systray.MenuItem
+	mTransfers   *systray.MenuItem
+	mRefresh     *systray.MenuItem
+	mPrimaryAuth *systray.MenuItem
+	mRecheck     *systray.MenuItem
+	mCredGit     *systray.MenuItem
+	mCredPass    *systray.MenuItem
+	mRegister    *systray.MenuItem
+	mOpenLogs    *systray.MenuItem
+	mDoctor      *systray.MenuItem
 
-	currentAuthAction authMenuAction
+	// currentAuthAction holds the authMenuAction the poll goroutine last
+	// applied; the menu goroutine reads it.
+	currentAuthAction atomic.Value
 )
 
 type authMenuAction string
@@ -82,13 +84,12 @@ func setupMenu() {
 	systray.AddSeparator()
 
 	mPrimaryAuth = systray.AddMenuItem("Connect to Proton...", "Start browser sign-in")
-	mDataPassword = systray.AddMenuItem("Configure Data Password...", "Open mailbox/data password setup instructions")
 	mRecheck = systray.AddMenuItem("Recheck Status", "Refresh tray readiness state")
 
 	systray.AddSeparator()
 
-	mCredPass = systray.AddMenuItemCheckbox("Use Proton Pass", "Store browser-fork key password in Proton Pass CLI", false)
-	mCredGit = systray.AddMenuItemCheckbox("Use Git Credential Manager", "Store browser-fork key password in the OS credential manager", false)
+	mCredPass = systray.AddMenuItemCheckbox("Use Proton Pass", "The next Connect to Proton stores the key password in Proton Pass CLI", false)
+	mCredGit = systray.AddMenuItemCheckbox("Use Git Credential Manager", "The next Connect to Proton stores the key password in the OS credential manager", false)
 
 	prefs := config.LoadPrefs()
 	applyCredCheckmarks(prefs.KeyPasswordProvider)
@@ -107,7 +108,6 @@ func setupMenu() {
 
 	mQuit := systray.AddMenuItem("Quit Proton LFS", "Quit Proton LFS tray")
 
-	// Event loop
 	go func() {
 		for {
 			select {
@@ -117,8 +117,6 @@ func setupMenu() {
 				switchCredentialProvider(config.CredentialProviderPassCLI)
 			case <-mPrimaryAuth.ClickedCh:
 				handlePrimaryAuthAction()
-			case <-mDataPassword.ClickedCh:
-				openDataPasswordGuide()
 			case <-mRecheck.ClickedCh:
 				recheckStatus()
 			case <-mRegister.ClickedCh:
@@ -138,7 +136,8 @@ func setupMenu() {
 }
 
 func handlePrimaryAuthAction() {
-	switch currentAuthAction {
+	action, _ := currentAuthAction.Load().(authMenuAction)
+	switch action {
 	case authActionConnect:
 		connectToProton()
 	case authActionDisconnect:
@@ -188,9 +187,7 @@ func registerGitLFS() {
 		sendNotification("Error: adapter binary not found")
 		return
 	}
-	prefs := config.LoadPrefs()
-	args := buildProtonTransferArgsFromPrefs(prefs, findDriveCLI())
-	if err := writeGitLFSRegistration(adapterPath, args); err != nil {
+	if err := writeGitLFSRegistration(adapterPath, buildProtonTransferArgs(findDriveCLI())); err != nil {
 		trayLog.Printf("register: %v", err)
 		sendNotification("Error: git config failed")
 		return
@@ -254,46 +251,11 @@ func runDoctor() {
 		sendNotification("Error: CLI not found")
 		return
 	}
-	prefs := config.LoadPrefs()
-	args := []string{
-		shellQuoteArg(driveCLI),
-		"doctor",
-		"--key-password-provider",
-		shellQuoteArg(prefs.KeyPasswordProvider),
-	}
-	if prefs.DataCredentialProvider != "" {
-		args = append(args,
-			"--data-credential-provider",
-			shellQuoteArg(prefs.DataCredentialProvider),
-			"--data-credential-host",
-			shellQuoteArg(resolveDataCredentialHost(prefs)),
-		)
-	}
+	// Without --key-password-provider, doctor checks the provider and host
+	// recorded in the session (proton-drive-cli src/cli/doctor.ts).
+	args := []string{shellQuoteArg(driveCLI), "doctor"}
 	openInTerminal(strings.Join(args, " ")+"; echo; echo 'Press Enter to close...'; read -r",
 		"Doctor could not open terminal")
-}
-
-func openDataPasswordGuide() {
-	host := config.DefaultDataCredentialHost
-	script := strings.Join([]string{
-		"echo 'Proton LFS data-password setup'",
-		"echo",
-		fmt.Sprintf("echo 'Store the Proton mailbox/data password under https://%s.'", host),
-		"echo 'Then set PROTON_DATA_CREDENTIAL_PROVIDER or update Git LFS args with --data-credential-provider.'",
-		"echo",
-		"echo 'Recommended provider: pass-cli'",
-		"echo",
-		"echo 'Press Enter to close...'",
-		"read -r",
-	}, "; ")
-	openInTerminal(script, "Configure data password in your credential provider")
-}
-
-func resolveDataCredentialHost(prefs config.Preferences) string {
-	if strings.TrimSpace(prefs.DataCredentialHost) != "" {
-		return strings.TrimSpace(prefs.DataCredentialHost)
-	}
-	return config.DefaultDataCredentialHost
 }
 
 // sendNotification shows a desktop notification: a macOS banner through
@@ -344,10 +306,8 @@ func openInTerminal(script, fallback string) {
 }
 
 // launchTerminal starts cmd and calls onFailure when the start fails or the
-// terminal exits non-zero. The exit is awaited in a goroutine because
-// emulators that host the command in-process (xterm) return only when the
-// window closes. cleanup releases resources the command owns and runs only
-// when the process never started; a started command cleans up itself.
+// terminal exits non-zero; xterm exits only when its window closes. cleanup
+// runs only when cmd never started, since a started command cleans up itself.
 func launchTerminal(cmd *exec.Cmd, cleanup func(), onFailure func()) {
 	if err := cmd.Start(); err != nil {
 		trayLog.Printf("terminal: start failed: %v", err)

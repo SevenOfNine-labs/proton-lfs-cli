@@ -10,7 +10,6 @@ import (
 
 // Status states written by the adapter for the tray app to observe.
 const (
-	StateIdle         = "idle"          // No operations in progress
 	StateTransferring = "transferring"  // Transfer in progress
 	StateOK           = "ok"            // Last operation succeeded
 	StateError        = "error"         // Last operation failed
@@ -21,7 +20,7 @@ const (
 
 // StatusReport is the JSON structure written to the status file.
 type StatusReport struct {
-	State       string    `json:"state"`                 // Current operation state (idle, transferring, ok, error, rate_limited, auth_required, captcha)
+	State       string    `json:"state"`                 // Current operation state (transferring, ok, error, rate_limited, auth_required, captcha)
 	LastOID     string    `json:"lastOid,omitempty"`     // OID of last operation
 	LastOp      string    `json:"lastOp,omitempty"`      // Type of last operation (upload, download)
 	Error       string    `json:"error,omitempty"`       // Human-readable error message
@@ -29,7 +28,6 @@ type StatusReport struct {
 	ErrorDetail string    `json:"errorDetail,omitempty"` // Additional error context or recovery suggestions
 	Retryable   bool      `json:"retryable,omitempty"`   // Whether retry may succeed without user action
 	Temporary   bool      `json:"temporary,omitempty"`   // Whether the failure is expected to be transient
-	RetryCount  int       `json:"retryCount,omitempty"`  // Number of retry attempts (for transient errors)
 	Timestamp   time.Time `json:"timestamp"`             // Timestamp of this status update
 }
 

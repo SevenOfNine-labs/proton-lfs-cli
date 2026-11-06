@@ -1,26 +1,19 @@
 #!/usr/bin/env node
 
 /**
- * Mock proton-drive-cli bridge subprocess
- * Simulates the proton-drive-cli bridge command protocol:
- *   node <script> bridge <command>
- * Reads JSON from stdin, writes JSON to stdout
- *
- * For E2E testing, set MOCK_BRIDGE_STORAGE_DIR to a directory path.
- * Upload will store file content keyed by OID; download will write it
- * to the requested outputPath.
+ * Stand-in for `proton-drive-cli bridge <command>`: one JSON request on stdin,
+ * one response envelope on stdout (submodules/proton-drive-cli/schemas/bridge/v1).
+ * Objects are stored under MOCK_BRIDGE_STORAGE_DIR at <oid[0:2]>/<oid[2:4]>/<oid>.
  */
 
 const fs = require('fs');
 const path = require('path');
 
-// argv: [node, script, 'bridge', command]
 const subcommand = process.argv[2];
 const command = process.argv[3] || '';
 
 const STORAGE_DIR = (process.env.MOCK_BRIDGE_STORAGE_DIR || '/tmp/mock-bridge-storage').trim();
 
-// Only respond to 'bridge' subcommand
 if (subcommand !== 'bridge') {
   process.stdout.write(JSON.stringify({
     ok: false,
@@ -44,14 +37,11 @@ function write(payload, exitCode = 0) {
   process.exit(exitCode);
 }
 
-// Simulate process crash
 if (process.env.MOCK_BRIDGE_CRASH === '1') {
   process.exit(137);
 }
 
-// Simulate timeout (hang)
 if (process.env.MOCK_BRIDGE_HANG === '1') {
-  // Do nothing, let timeout kill us
   setTimeout(() => {}, 999999);
   return;
 }
@@ -65,28 +55,19 @@ function storagePath(oid) {
 if (command === 'auth-state') {
   const state = process.env.MOCK_BRIDGE_AUTH_STATE || 'ready';
   const hasSession = state !== 'needs_login';
-  const sessionValid = state === 'ready' || state === 'needs_data_password' || state === 'needs_key_password';
-  const keyPasswordPersisted = process.env.MOCK_BRIDGE_KEY_PASSWORD_PERSISTED === 'true' || state === 'needs_key_password';
   const keyPasswordAvailable =
-    process.env.MOCK_BRIDGE_KEY_PASSWORD_AVAILABLE === 'true' ||
-    (keyPasswordPersisted && state !== 'needs_key_password');
+    process.env.MOCK_BRIDGE_KEY_PASSWORD_AVAILABLE === 'true' || state === 'ready';
   write({
     ok: true,
     payload: {
       state,
       hasSession,
-      sessionValid,
+      sessionValid: state === 'ready' || state === 'needs_key_password',
       sessionExpired: state === 'session_expired',
       sessionUidPresent: hasSession,
-      passwordMode: Number(process.env.MOCK_BRIDGE_PASSWORD_MODE || (state === 'needs_data_password' ? 2 : 1)),
-      authMode: process.env.MOCK_BRIDGE_AUTH_MODE || (state === 'needs_key_password' ? 'browser-fork' : undefined),
-      keyPasswordPersisted,
       keyPasswordAvailable,
-      keyPasswordProvider: process.env.MOCK_BRIDGE_KEY_PASSWORD_PROVIDER || (keyPasswordPersisted ? 'git-credential' : undefined),
-      keyPasswordHost: process.env.MOCK_BRIDGE_KEY_PASSWORD_HOST || (keyPasswordPersisted ? 'proton-drive-key.proton-lfs-cli.local' : undefined),
-      hasExplicitDataPassword: Boolean(request.dataPassword),
-      dataCredentialProvider: request.dataCredentialProvider,
-      dataCredentialHost: request.dataCredentialHost,
+      keyPasswordProvider: process.env.MOCK_BRIDGE_KEY_PASSWORD_PROVIDER || 'git-credential',
+      keyPasswordHost: process.env.MOCK_BRIDGE_KEY_PASSWORD_HOST || 'proton-drive-key.proton-lfs-cli.local',
       willAttemptNetwork: false,
       errors: [],
       actions: []
@@ -95,7 +76,6 @@ if (command === 'auth-state') {
 }
 
 if (command === 'init') {
-  // Ensure the storage base directory exists
   fs.mkdirSync(STORAGE_DIR, { recursive: true });
   write({
     ok: true,
@@ -123,7 +103,6 @@ if (command === 'upload') {
     write({ ok: false, code: 404, error: 'source object missing' }, 1);
   }
 
-  // Store file content for E2E roundtrip
   let fileSize = 123;
   const sourcePath = request.path;
   if (sourcePath && fs.existsSync(sourcePath)) {
@@ -147,7 +126,6 @@ if (command === 'upload') {
 }
 
 if (command === 'download') {
-  // Retrieve stored content for E2E roundtrip
   const objectPath = storagePath(request.oid);
   if (fs.existsSync(objectPath) && request.outputPath) {
     const outputDir = path.dirname(request.outputPath);

@@ -14,20 +14,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/SevenOfNine-labs/proton-lfs-cli/internal/bridgeproto"
 	"github.com/SevenOfNine-labs/proton-lfs-cli/internal/config"
 )
 
 const scopeLiveAckValue = "I_UNDERSTAND_THIS_TOUCHES_A_REAL_PROTON_ACCOUNT"
 
 var runScopeBridge = runDriveScopeBridgeCommand
-
-type scopeBridgeEnvelope struct {
-	OK      bool            `json:"ok"`
-	Payload json.RawMessage `json:"payload,omitempty"`
-	Error   string          `json:"error,omitempty"`
-	Code    int             `json:"code,omitempty"`
-	Details json.RawMessage `json:"details,omitempty"`
-}
 
 type scopeDiagnosticsReport struct {
 	GeneratedAt string                     `json:"generatedAt"`
@@ -47,9 +40,6 @@ type scopeDiagnosticsConfig struct {
 	DriveCLIFound                  bool   `json:"driveCliFound"`
 	DriveCLIPath                   string `json:"driveCliPath,omitempty"`
 	KeyPasswordProvider            string `json:"keyPasswordProvider"`
-	DataCredentialProvider         string `json:"dataCredentialProvider,omitempty"`
-	DataCredentialHost             string `json:"dataCredentialHost,omitempty"`
-	DataCredentialSource           string `json:"dataCredentialSource,omitempty"`
 	StorageBase                    string `json:"storageBase"`
 	AdapterRequestAppVersion       string `json:"adapterRequestAppVersion"`
 	AdapterRequestAppVersionSource string `json:"adapterRequestAppVersionSource"`
@@ -63,11 +53,7 @@ type scopeDiagnosticsSession struct {
 	Path                   string   `json:"path,omitempty"`
 	FileMode               string   `json:"fileMode,omitempty"`
 	UIDFingerprint         string   `json:"uidFingerprint,omitempty"`
-	SessionIDFingerprint   string   `json:"sessionIdFingerprint,omitempty"`
 	Scopes                 []string `json:"scopes,omitempty"`
-	PasswordMode           int      `json:"passwordMode,omitempty"`
-	AuthMode               string   `json:"authMode,omitempty"`
-	KeyPasswordPersisted   bool     `json:"keyPasswordPersisted,omitempty"`
 	TokenExpiresAt         string   `json:"tokenExpiresAt,omitempty"`
 	AccessTokenPresent     bool     `json:"accessTokenPresent,omitempty"`
 	RefreshTokenPresent    bool     `json:"refreshTokenPresent,omitempty"`
@@ -100,7 +86,6 @@ func cliScopeDiagnostics(w io.Writer, args []string) int {
 	}
 
 	prefs := config.LoadPrefs()
-	dataProvider, dataHost, dataSource := resolveScopeDataCredential(prefs)
 	driveCLI := findDriveCLI()
 
 	report := scopeDiagnosticsReport{
@@ -118,9 +103,6 @@ func cliScopeDiagnostics(w io.Writer, args []string) int {
 			DriveCLIFound:                  driveCLI != "",
 			DriveCLIPath:                   displayPath(driveCLI),
 			KeyPasswordProvider:            prefs.KeyPasswordProvider,
-			DataCredentialProvider:         dataProvider,
-			DataCredentialHost:             dataHost,
-			DataCredentialSource:           dataSource,
 			StorageBase:                    config.EnvOrDefault(config.EnvStorageBase, config.DefaultStorageBase),
 			AdapterRequestAppVersion:       envOrUnset(config.EnvAppVersion),
 			AdapterRequestAppVersionSource: appVersionSource(),
@@ -139,7 +121,7 @@ func cliScopeDiagnostics(w io.Writer, args []string) int {
 		return 1
 	}
 
-	baseRequest := buildScopeBridgeRequest(dataProvider, dataHost)
+	baseRequest := buildScopeBridgeRequest()
 	authRun := executeScopeBridgeRun(driveCLI, "auth-state", false, "local bridge auth-state inspection", baseRequest)
 	report.AuthState = &authRun
 	report.Commands = append(report.Commands, "bridge auth-state")
@@ -217,41 +199,14 @@ func writeScopeDiagnostics(w io.Writer, report scopeDiagnosticsReport) {
 	_ = enc.Encode(report)
 }
 
-func resolveScopeDataCredential(prefs config.Preferences) (provider, host, source string) {
-	if provider = config.EnvTrim(config.EnvDataCredentialProvider); provider != "" {
-		host = config.EnvOrDefault(config.EnvDataCredentialHost, config.DefaultDataCredentialHost)
-		return provider, host, "env"
-	}
-	if provider = strings.TrimSpace(prefs.DataCredentialProvider); provider != "" {
-		host = strings.TrimSpace(prefs.DataCredentialHost)
-		if host == "" {
-			host = config.DefaultDataCredentialHost
-		}
-		return provider, host, "prefs"
-	}
-	gitArgs := readGitLFSConfig().TransferArgs
-	if provider = parseFlagValue(gitArgs, "--data-credential-provider"); provider != "" {
-		host = parseFlagValue(gitArgs, "--data-credential-host")
-		if host == "" {
-			host = config.DefaultDataCredentialHost
-		}
-		return provider, host, "git-config"
-	}
-	return "", "", ""
-}
-
-func buildScopeBridgeRequest(dataProvider, dataHost string) map[string]any {
+// buildScopeBridgeRequest returns the request fields the adapter sends with
+// every bridge command: storageBase and, when set, appVersion.
+func buildScopeBridgeRequest() map[string]any {
 	req := map[string]any{
 		"storageBase": config.EnvOrDefault(config.EnvStorageBase, config.DefaultStorageBase),
 	}
 	if appVersion := config.EnvTrim(config.EnvAppVersion); appVersion != "" {
 		req["appVersion"] = appVersion
-	}
-	if dataProvider != "" {
-		req["dataCredentialProvider"] = dataProvider
-		if dataHost != "" {
-			req["dataCredentialHost"] = dataHost
-		}
 	}
 	return req
 }
@@ -266,13 +221,13 @@ func executeScopeBridgeRun(driveCLI, command string, network bool, target string
 	}
 	resp, err := runScopeBridge(driveCLI, command, request)
 	if err != nil {
-		run.ProcessError = redactSubprocessOutput(err.Error())
+		run.ProcessError = bridgeproto.RedactText(err.Error())
 		run.Error = run.ProcessError
 		return run
 	}
 	run.OK = resp.OK
 	run.Code = resp.Code
-	run.Error = redactSubprocessOutput(resp.Error)
+	run.Error = bridgeproto.RedactText(resp.Error)
 	run.Details = parseScopeDetails(resp.Details)
 	run.ErrorCode = stringFromAny(run.Details["errorCode"])
 	run.ProtonCode = intFromAny(run.Details["protonCode"])
@@ -285,16 +240,16 @@ func executeScopeBridgeRun(driveCLI, command string, network bool, target string
 	return run
 }
 
-func runDriveScopeBridgeCommand(driveCLI, command string, request map[string]any) (scopeBridgeEnvelope, error) {
+func runDriveScopeBridgeCommand(driveCLI, command string, request map[string]any) (bridgeproto.Response, error) {
 	body, err := json.Marshal(request)
 	if err != nil {
-		return scopeBridgeEnvelope{}, fmt.Errorf("marshal bridge request: %w", err)
+		return bridgeproto.Response{}, fmt.Errorf("marshal bridge request: %w", err)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), driveCLITimeout)
 	defer cancel()
 	cmd := driveCLICommand(ctx, driveCLI, "bridge", command)
 	cmd.Stdin = bytes.NewReader(body)
-	cmd.Env = os.Environ()
+	cmd.Env = bridgeproto.FilterEnv(os.Environ())
 	if passCLI := discoverPassCLIBinary(); passCLI != "" {
 		cmd.Env = append(cmd.Env, "PROTON_PASS_CLI_BIN="+passCLI)
 	}
@@ -302,36 +257,17 @@ func runDriveScopeBridgeCommand(driveCLI, command string, request map[string]any
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	runErr := cmd.Run()
-	resp, parseErr := parseScopeBridgeOutput(stdout.Bytes())
+	resp, parseErr := bridgeproto.ParseOutput(stdout.Bytes())
 	if parseErr != nil {
 		if stderr.Len() > 0 {
-			return scopeBridgeEnvelope{}, fmt.Errorf("%w: %s", parseErr, redactSubprocessOutput(strings.TrimSpace(stderr.String())))
+			return bridgeproto.Response{}, fmt.Errorf("%w: %s", parseErr, bridgeproto.RedactText(strings.TrimSpace(stderr.String())))
 		}
 		if runErr != nil {
-			return scopeBridgeEnvelope{}, fmt.Errorf("%w: %v", parseErr, runErr)
+			return bridgeproto.Response{}, fmt.Errorf("%w: %v", parseErr, runErr)
 		}
-		return scopeBridgeEnvelope{}, parseErr
+		return bridgeproto.Response{}, parseErr
 	}
-	return resp, nil
-}
-
-func parseScopeBridgeOutput(stdout []byte) (scopeBridgeEnvelope, error) {
-	trimmed := bytes.TrimSpace(stdout)
-	if len(trimmed) == 0 {
-		return scopeBridgeEnvelope{}, fmt.Errorf("empty stdout from bridge subprocess")
-	}
-	lines := bytes.Split(trimmed, []byte("\n"))
-	for i := len(lines) - 1; i >= 0; i-- {
-		line := bytes.TrimSpace(lines[i])
-		if len(line) == 0 || line[0] != '{' {
-			continue
-		}
-		var resp scopeBridgeEnvelope
-		if err := json.Unmarshal(line, &resp); err == nil {
-			return resp, nil
-		}
-	}
-	return scopeBridgeEnvelope{}, fmt.Errorf("no JSON bridge response found")
+	return *resp, nil
 }
 
 func readScopeSessionDiagnostics() scopeDiagnosticsSession {
@@ -356,12 +292,8 @@ func readScopeSessionDiagnostics() scopeDiagnosticsSession {
 		return out
 	}
 	out.UIDFingerprint = fingerprint(meta.UID)
-	out.SessionIDFingerprint = fingerprint(meta.SessionID)
 	out.Scopes = append([]string(nil), meta.Scopes...)
 	sort.Strings(out.Scopes)
-	out.PasswordMode = meta.PasswordMode
-	out.AuthMode = meta.AuthMode
-	out.KeyPasswordPersisted = meta.KeyPasswordPersisted
 	if expiry := tokenExpiry(meta); !expiry.IsZero() {
 		out.TokenExpiresAt = expiry.UTC().Format(time.RFC3339)
 	}
@@ -370,27 +302,18 @@ func readScopeSessionDiagnostics() scopeDiagnosticsSession {
 	return out
 }
 
-func parseScopeDetails(raw json.RawMessage) map[string]any {
-	if len(bytes.TrimSpace(raw)) == 0 {
+// parseScopeDetails decodes the envelope's details, a JSON-encoded object in a
+// string (schemas/bridge/v1/response-envelope.schema.json).
+func parseScopeDetails(detailsString string) map[string]any {
+	detailsString = strings.TrimSpace(detailsString)
+	if detailsString == "" {
 		return nil
 	}
-	var detailsString string
-	if err := json.Unmarshal(raw, &detailsString); err == nil {
-		detailsString = strings.TrimSpace(detailsString)
-		if detailsString == "" {
-			return nil
-		}
-		var details map[string]any
-		if err := json.Unmarshal([]byte(detailsString), &details); err == nil {
-			return redactMap(details)
-		}
-		return map[string]any{"raw": redactSubprocessOutput(detailsString)}
-	}
 	var details map[string]any
-	if err := json.Unmarshal(raw, &details); err == nil {
-		return redactMap(details)
+	if err := json.Unmarshal([]byte(detailsString), &details); err != nil {
+		return map[string]any{"raw": bridgeproto.RedactText(detailsString)}
 	}
-	return map[string]any{"raw": redactSubprocessOutput(string(raw))}
+	return redactMap(details)
 }
 
 func parseScopePayload(raw json.RawMessage) map[string]any {
@@ -399,7 +322,7 @@ func parseScopePayload(raw json.RawMessage) map[string]any {
 	}
 	var payload map[string]any
 	if err := json.Unmarshal(raw, &payload); err != nil {
-		return map[string]any{"raw": redactSubprocessOutput(string(raw))}
+		return map[string]any{"raw": bridgeproto.RedactText(string(raw))}
 	}
 	return redactMap(payload)
 }
@@ -451,16 +374,18 @@ func redactMap(in map[string]any) map[string]any {
 	return out
 }
 
+// redactValue masks the value of a sensitive key except a boolean, which
+// only reports presence (keyPasswordAvailable, accessTokenPresent).
 func redactValue(key string, value any) any {
-	if isSensitiveDiagnosticKey(key) {
+	if _, isBool := value.(bool); bridgeproto.IsSensitiveKey(key) && !isBool {
 		if value == nil || fmt.Sprint(value) == "" {
 			return value
 		}
-		return "[redacted]"
+		return bridgeproto.Redacted
 	}
 	switch v := value.(type) {
 	case string:
-		return redactSubprocessOutput(v)
+		return bridgeproto.RedactText(v)
 	case map[string]any:
 		return redactMap(v)
 	case []any:
@@ -472,23 +397,6 @@ func redactValue(key string, value any) any {
 	default:
 		return value
 	}
-}
-
-func isSensitiveDiagnosticKey(key string) bool {
-	lowerKey := strings.ToLower(key)
-	if strings.Contains(lowerKey, "provider") ||
-		strings.Contains(lowerKey, "host") ||
-		strings.HasPrefix(lowerKey, "has") ||
-		strings.HasSuffix(lowerKey, "persisted") ||
-		strings.HasSuffix(lowerKey, "available") ||
-		strings.HasSuffix(lowerKey, "mode") {
-		return false
-	}
-	return strings.Contains(lowerKey, "token") ||
-		strings.Contains(lowerKey, "password") ||
-		strings.Contains(lowerKey, "secret") ||
-		strings.Contains(lowerKey, "sessionid") ||
-		lowerKey == "uid"
 }
 
 func cloneMap(in map[string]any) map[string]any {

@@ -1,3 +1,5 @@
+// Tests in this file cite line numbers of the Git LFS custom transfer
+// specification, submodules/git-lfs/docs/custom-transfers.md.
 package main
 
 import (
@@ -443,9 +445,6 @@ func TestRunDownloadMultiChunkProgressMonotonic(t *testing.T) {
 	_ = os.Remove(complete.Path)
 }
 
-// --- Protocol Compliance Tests ---
-// Spec: submodules/git-lfs/docs/custom-transfers.md
-
 // TestSpecUploadCompleteOmitsPath asserts upload complete has no "path" field.
 // Spec lines 185-190: upload complete is { "event": "complete", "oid": "..." }
 // with no path field (path is only required for downloads).
@@ -877,18 +876,15 @@ func TestSpecPerTransferErrorChain(t *testing.T) {
 		t.Fatalf("expected at least 5 responses, got %d", len(msgs))
 	}
 
-	// Transfer 1: error complete
 	if msgs[1].Event != EventComplete || msgs[1].Error == nil {
 		t.Fatalf("transfer 1 should be error completion, got %+v", msgs[1])
 	}
-	// Transfer 2: progress + success complete
 	if msgs[2].Event != EventProgress {
 		t.Fatalf("transfer 2 progress expected, got %+v", msgs[2])
 	}
 	if msgs[3].Event != EventComplete || msgs[3].Error != nil {
 		t.Fatalf("transfer 2 should succeed, got %+v", msgs[3])
 	}
-	// Transfer 3: error complete (bad OID)
 	if msgs[4].Event != EventComplete || msgs[4].Error == nil {
 		t.Fatalf("transfer 3 should be error completion, got %+v", msgs[4])
 	}

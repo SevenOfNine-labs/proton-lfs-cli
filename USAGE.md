@@ -33,12 +33,13 @@ curl -fsSL https://raw.githubusercontent.com/SevenOfNine-labs/proton-lfs-cli/mai
 
 Options are environment variables: `INSTALL_DIR` (default `/usr/local/bin`),
 `VERSION` (a release tag, default latest) and `VERIFY_CHECKSUM`
-(`auto` verifies against the release's `SHA256SUMS.txt` and warns when no
-entry exists; `required` fails without a matching checksum; `skip`).
+(`required`, the default, verifies the download against the release's
+`SHA256SUMS.txt` and fails when the file, the asset's entry or a matching
+hash is missing; `skip` installs without a check).
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/SevenOfNine-labs/proton-lfs-cli/main/scripts/install-adapter.sh \
-  | INSTALL_DIR=~/.local/bin VERSION=v0.2.0 VERIFY_CHECKSUM=required bash
+  | INSTALL_DIR=~/.local/bin VERSION=v0.2.0 bash
 ```
 
 > **Note:** The script installs only the Go adapter binary, which is all the
@@ -66,6 +67,15 @@ sha256sum -c --ignore-missing SHA256SUMS.txt      # shasum -a 256 -c on macOS
   quarantine attribute once (`xattr -dr com.apple.quarantine /Applications/ProtonLFS.app`);
   the app is ad-hoc signed, not notarized.
 - Linux and Windows: extract and put the three programs on `PATH`.
+
+After installing or updating, write the global Git LFS settings for the
+installed programs and sign in whenever `proton-lfs-tray status` does not
+report `logged in, key password in …`:
+
+```bash
+proton-lfs-tray register
+proton-drive-cli login        # or Connect to Proton in the tray
+```
 
 See [Deployment](docs/operations/deployment.md) for details.
 
@@ -140,7 +150,6 @@ Transfers: Ready
 Refresh: Due in 23h
 ─────────────────────────────
 Disconnect from Proton          (Connect to Proton... when signed out)
-Configure Data Password...      (enabled only when a data password is missing)
 Recheck Status
 ─────────────────────────────
 ✓ Use Proton Pass
@@ -155,20 +164,25 @@ Run Doctor...
 Quit Proton LFS
 ```
 
-`Status` is `Ready` only when a browser-fork session is saved, its token is
-not expired, its key password is recorded, and no local blocker is known;
-otherwise it reads `Setup needed` (signed in but blocked) or `Not connected`.
+`Status` is `Ready` when a session file written by `proton-drive-cli login`
+exists (with `uid`, tokens, key-password provider and host) and no
+non-recoverable refresh failure is recorded for it; an expired access token
+only adds `token refresh due` to the session line, because transfers refresh
+it; otherwise it reads `Setup needed` (signed in but blocked) or
+`Not connected`. The tray does not query the credential provider: a missing
+key-password entry is reported when a transfer starts and by
+`Run Doctor...`.
 
 ### Status indicators
 
-The icon has four images; the adapter's status file has seven states:
+The icon has four images; the adapter's status file has six states:
 
-| Icon | States | Meaning |
+| Icon | When | Meaning |
 | --- | --- | --- |
-| Grey | `idle` while not signed in | No session, or nothing reported yet |
-| Green | `idle`, `ok` | Ready; the tooltip names the last transfer |
-| Blue | `transferring` | Transfer in progress (tooltip: Uploading…/Downloading…) |
-| Red | `error`, `rate_limited`, `auth_required`, `captcha` | The tooltip names which; also shown while sign-in is missing or blocked |
+| Grey | No session file | Not connected |
+| Green | Ready, and the status file is missing or reports `ok` | Ready |
+| Blue | Signed in and ready, status `transferring` | Transfer in progress (tooltip: Uploading…/Downloading…); the adapter itself never writes this state |
+| Red | Readiness blocked (`Setup needed`), or status `error`, `rate_limited`, `auth_required`, `captcha` | The tooltip names which |
 
 Status is read from `~/.proton-lfs/status.json` every 5 seconds; see
 [Status File Reference](docs/reference/status-file.md).
@@ -189,30 +203,33 @@ The choice is saved as `keyPasswordProvider` in `~/.proton-lfs/config.json`
 
 `Connect to Proton...` runs
 `proton-drive-cli login --key-password-provider <provider> -q`. A browser
-window opens on Proton's sign-in page; after approval the CLI saves session
-tokens to `~/.proton-drive-cli/session.json` and stores the key password in
-the chosen provider. The tray then shows `Proton LFS Ready`, or
-`Signed in; setup needed` when a local blocker remains. If Proton
+window opens on Proton's sign-in page, where two-factor authentication and
+CAPTCHA are completed too; after approval the CLI stores the key password
+the fork delivers in the chosen provider and saves the session tokens to
+`~/.proton-drive-cli/session.json`. The tray then shows `Proton LFS Ready`,
+or `Signed in; setup needed` when a local blocker remains. If Proton
 rate-limited the sign-in, the tray refuses another attempt for one hour.
 
-The tray refreshes the session token 10 minutes before it expires (every 12
-hours when no expiry is known). A recoverable failure is retried after one
-minute; a rejected refresh token (Proton code 10013) stops the refresh for
-that session and the menu shows `Reconnect required` until you connect again.
+The tray refreshes the session token from 10 minutes (at most half the
+token lifetime) before it expires on; a session without a recorded expiry is
+refreshed 12 hours after its last write. A recoverable failure is retried
+after 1, 2, 4, ... minutes, at most every 30 minutes. When Proton rejects the
+refresh token, proton-drive-cli signs the session out and the menu shows
+`Not connected` until you connect again.
 
 ### Enable LFS Backend
 
 Writes the three `git config --global` keys described in
 [Register the custom transfer adapter](#3-register-the-custom-transfer-adapter)
-with `--backend sdk --drive-cli-bin <bundled proton-drive-cli>` and, when a
-data-credential provider is configured, the `--data-credential-*` flags.
+with `--backend sdk --drive-cli-bin <bundled proton-drive-cli>`.
 `proton-lfs-tray register` does the same from the command line.
 
 ### Open Logs and Run Doctor
 
 `Open Logs` tails `~/.proton-lfs/tray.log` in a terminal. `Run Doctor...`
-runs `proton-drive-cli doctor` with the configured providers; the doctor is
-offline and reports whether a transfer can be attempted.
+runs `proton-drive-cli doctor`, which checks the key-password provider and
+host recorded in the session; the doctor is offline and reports whether a
+transfer can be attempted.
 
 ### Start at System Login
 
@@ -366,37 +383,22 @@ git commit -m "Add design file"
 git push
 ```
 
-Before each transfer session the adapter runs the offline
-`bridge auth-state` check and refuses to transfer unless it reports `ready`;
-the error names what to do (see [Troubleshooting](#troubleshooting)).
+Before each transfer session the adapter runs the `bridge auth-state` check
+and refuses to transfer unless it reports `ready` or `session_expired`
+(`bridge init` refreshes an expired access token); the error names what to
+do (see [Troubleshooting](#troubleshooting)).
 
 ### Two-factor authentication and CAPTCHA
 
 Both are completed in the browser during `proton-drive-cli login`. Transfer
-commands never prompt; they stop with `two_factor_required` or
+commands never prompt; a CAPTCHA demanded during a transfer stops it with
 `captcha_required`.
 
-### Two-password accounts (mailbox/data password)
+### Two-password accounts
 
-Browser-fork sessions unlock Drive with the stored key password, also for
-accounts in two-password mode. Configure a separate data-password entry only
-when `proton-drive-cli doctor` or `bridge auth-state` reports
-`needs_data_password`. The entry lives under the host
-`proton-data.proton-lfs-cli.local`:
-
-```bash
-# git credential helper
-printf "protocol=https\nhost=proton-data.proton-lfs-cli.local\nusername=your.email@proton.me\npassword=<mailbox-data-password>\n\n" | git credential approve
-git config lfs.customtransfer.proton.args "--backend sdk --drive-cli-bin /path/to/proton-drive-cli --data-credential-provider git-credential"
-```
-
-For Proton Pass, create a login item with URL
-`https://proton-data.proton-lfs-cli.local` in any vault and use
-`--data-credential-provider pass-cli`. Check the result offline:
-
-```bash
-proton-drive-cli doctor --key-password-provider pass-cli --data-credential-provider pass-cli --require-data-password
-```
+The browser fork delivers the key password for every account type, so an
+account with a separate mailbox password needs no extra setup: transfers
+unlock Drive with the stored key password.
 
 ## Key-password providers
 
@@ -434,7 +436,14 @@ helper (macOS Keychain, Windows Credential Manager, Linux Secret Service).
 `--key-password-provider`, then `PROTON_KEY_PASSWORD_PROVIDER`, then
 `pass-cli`. The tray passes the provider from `~/.proton-lfs/config.json`.
 `--key-password-host` / `PROTON_KEY_PASSWORD_HOST` change the host (rarely
-needed).
+needed). `login` records both in the session; every later command (bridge,
+doctor, logout) uses the recorded values.
+
+### Lifecycle of the key-password entry
+
+`proton-drive-cli logout` (or `Disconnect from Proton`) removes the entry; a
+login that yields a new session UID removes the previous UID's entry; a
+refresh token Proton rejects signs the session out and removes the entry.
 
 ## Global vs Per-Repo Configuration
 
@@ -448,17 +457,6 @@ git config --global lfs.standalonetransferagent proton
 ```
 
 Per-repository settings override global ones.
-
-## Upgrading from 0.1.x
-
-- The adapter no longer accepts `--credential-provider`. The tray removes it
-  from `lfs.customtransfer.proton.args` when it starts; without the tray, run
-  `proton-lfs-tray register` or delete the option from that setting by hand.
-- `~/.proton-lfs/config.json` stores the key-password provider as
-  `keyPasswordProvider`; a file with the earlier `credentialProvider` key is
-  read and rewritten on the next save.
-- The macOS autostart agent is now `com.proton.lfs-tray`; toggling "Start at
-  System Login" removes the earlier `com.proton.git-lfs-tray` agent.
 
 ## Troubleshooting
 
@@ -478,17 +476,18 @@ GIT_TRACE=1 git push
 | --- | --- | --- |
 | `transfer "proton": not found` | `lfs.customtransfer.proton.path` is wrong or the adapter is not executable | `git config lfs.customtransfer.proton.path` and check the file |
 | `no ready Proton Drive session; run proton-drive-cli login …` (`needs_login`) | No saved session | `proton-drive-cli login --key-password-provider <provider>` or "Connect to Proton..." |
-| `Proton Drive session is expired …` / `… is invalid …` (`session_expired`, `session_invalid`) | Token expired and was not refreshed, or the session file is damaged | Run `proton-drive-cli login` again; the tray refreshes tokens while it runs |
-| `stored browser-fork key password required …` (`needs_key_password`) | The key password is missing from the provider (pass-cli logged out, item deleted, provider changed) | For pass-cli run `pass-cli login`; then `proton-drive-cli login` again with the same provider |
-| `mailbox/data password required …` (`needs_data_password`) | Two-password account whose session cannot use the key password | Store the mailbox password and add `--data-credential-provider` (see above) |
+| `Proton Drive session is invalid …` (`session_invalid`) | The session file was not written by `proton-drive-cli login` | Run `proton-drive-cli login` again |
+| `session is invalid or expired` (`auth_required`) | Proton rejected the refresh token and proton-drive-cli signed the session out | Run `proton-drive-cli login` again |
+| `stored browser-fork key password required …` (`needs_key_password`, `key_password_required`) | The key password is missing from the provider recorded in the session (pass-cli logged out, item deleted) or does not unlock the account keys | For pass-cli run `pass-cli login`; then `proton-drive-cli login` again |
 | `Proton rejected this app/session authorization scope` (`insufficient_scope`, Proton 9101) | The app identity or session scope is rejected by Proton | `proton-lfs-tray scope-diagnostics`, then follow `docs/operations/live-canary-runbook.md`; do not retry login |
 | `rate limited by proton api` | Proton rate limit | Wait; the tray blocks sign-in for one hour after a rate-limited login |
 | `captcha verification required` | Proton requires CAPTCHA | Run `proton-drive-cli login` and complete it in the browser |
 | `bridge <command> timed out after 5m0s` | Large object or slow network exceeded the base timeout | Add `--bridge-timeout 20m` (or `PROTON_LFS_BRIDGE_TIMEOUT`) to the adapter arguments |
 | `node not found` in Make targets | Node.js is managed by nvm/fnm and not visible to Make's shell | `make test-integration-sdk NODE="$(command -v node)"` |
-| Tray icon stays grey | No session, or no status file yet | Connect, then push or pull an LFS object to create `~/.proton-lfs/status.json` |
+| Tray icon stays grey | No session file | "Connect to Proton..." |
 | "Error: CLI not found" in the tray | `proton-drive-cli` is not next to the tray binary | Reinstall with `make install` or check the `.app` bundle structure |
-| `Refresh: Reconnect required` | Proton rejected the refresh token (code 10013) | "Connect to Proton..." creates a new session |
+| `Refresh: Reconnect required` | A non-recoverable refresh failure was recorded for the saved session | "Connect to Proton..." creates a new session |
+| Tray switches to `Not connected` after a refresh | Proton rejected the refresh token; proton-drive-cli signed the session out | "Connect to Proton..." |
 
 ## Adapter CLI Reference
 
@@ -509,8 +508,6 @@ stdout following the
 | `--drive-cli-bin` | `PROTON_DRIVE_CLI_BIN` | `submodules/proton-drive-cli/dist/index.js` | proton-drive-cli entry point: a `.js` file run with node, or the standalone executable (sdk backend) |
 | `--local-store-dir` | `PROTON_LFS_LOCAL_STORE_DIR` | (none) | Object directory of the local backend |
 | `--allow-mock-transfers` | `ADAPTER_ALLOW_MOCK_TRANSFERS` | `false` | Simulate transfers (protocol tests only) |
-| `--data-credential-provider` | `PROTON_DATA_CREDENTIAL_PROVIDER` | (none) | Mailbox/data password provider: `pass-cli` or `git-credential` |
-| `--data-credential-host` | `PROTON_DATA_CREDENTIAL_HOST` | `proton-data.proton-lfs-cli.local` | Host/key of the mailbox/data password entry |
 | `--bridge-timeout` | `PROTON_LFS_BRIDGE_TIMEOUT` | `5m` | Base timeout per bridge command; uploads and downloads add 1 s per 256 KiB |
 | `--debug` | — | `false` | Debug logging to stderr |
 | `--version` | — | — | Print version and exit |

@@ -1,9 +1,8 @@
 name: Build Artifacts
 
-# Cross-compiles the standalone adapter for every supported target and uploads
-# the binaries as workflow artifacts. Releases are created only by
-# release-bundle.yml, which calls this workflow (workflow_call) and attaches
-# these artifacts next to the platform bundles.
+# Cross-compiles the standalone adapter for every target as workflow
+# artifacts; release-bundle.yml calls it (workflow_call) and attaches them to
+# the release.
 on:
   push:
     branches:

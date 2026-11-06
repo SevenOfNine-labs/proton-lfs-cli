@@ -18,41 +18,32 @@ truth: `internal/config/prefs.go` (structure, defaults, load/save) and
 
 | Field | Type | Default | Meaning |
 | --- | --- | --- | --- |
-| `keyPasswordProvider` | string | `pass-cli` | Where `proton-drive-cli login` stores the browser-fork key password: `pass-cli` or `git-credential`. Passed as `--key-password-provider` to login and doctor. |
-| `dataCredentialProvider` | string | absent | Provider of the mailbox/data password of a two-password account (`pass-cli` or `git-credential`). When set, `register` adds `--data-credential-provider` and `--data-credential-host` to the adapter arguments. |
-| `dataCredentialHost` | string | absent | Host/key of that password. When a provider is set and the host is empty, `proton-data.proton-lfs-cli.local` is used. |
-| `enabled` | bool | `true` | Written with every save; no component reads it at present. |
+| `keyPasswordProvider` | string | `pass-cli` | Where `proton-drive-cli login` stores the browser-fork key password: `pass-cli` or `git-credential`. Passed as `--key-password-provider` to `login`. An empty or absent value reads as `pass-cli`. |
+
+This field is the whole file. Any other key is ignored when the file
+is read and dropped by the next save.
 
 Example:
 
 ```json
 {
-  "keyPasswordProvider": "git-credential",
-  "enabled": true
+  "keyPasswordProvider": "git-credential"
 }
 ```
-
-## Former key
-
-Files written before November 2026 stored the key-password provider under
-`credentialProvider`. `LoadPrefs` reads that key when `keyPasswordProvider` is
-absent; the next save writes `keyPasswordProvider` and drops the former key.
-No code reads `credentialProvider` for any other purpose, and the adapter
-never receives it.
 
 ## Who reads and writes it
 
 | Component | Access |
 | --- | --- |
-| Tray menu "Use Proton Pass" / "Use Git Credential Manager" | writes `keyPasswordProvider` |
-| `proton-lfs-tray config [provider]` | prints or writes `keyPasswordProvider` |
-| Tray "Connect to Proton..." and `proton-lfs-tray login` | read `keyPasswordProvider` |
-| Tray "Enable LFS Backend" and `proton-lfs-tray register` | read the data-credential fields to build `lfs.customtransfer.proton.args` |
-| Tray "Run Doctor..." | reads all provider fields for the doctor arguments |
-| `proton-lfs-tray status` | prints `keyPasswordProvider` as `Provider:` |
-| `proton-lfs-tray scope-diagnostics` | reports the providers (environment first, then this file, then the git arguments) |
-| `git-lfs-proton-adapter` | does not read this file; its settings arrive as flags written by `register` |
+| Tray menu "Use Proton Pass" / "Use Git Credential Manager" | writes `keyPasswordProvider`; the check mark is on "Use Git Credential Manager" for `git-credential` and on "Use Proton Pass" for any other value |
+| `proton-lfs-tray config [provider]` | prints `keyPasswordProvider`, or validates and writes it |
+| Tray "Connect to Proton..." and `proton-lfs-tray login` | read `keyPasswordProvider` for `proton-drive-cli login --key-password-provider` |
+| `proton-lfs-tray register` | prints `keyPasswordProvider` as `provider:`; the git registration does not contain it |
+| `proton-lfs-tray status` | prints `keyPasswordProvider` as `Provider: <provider> (next login)`; the `Session:` line shows the provider recorded in the session |
+| `proton-lfs-tray scope-diagnostics` | reports it as `config.keyPasswordProvider` |
+| `git-lfs-proton-adapter` | does not read this file; transfers use the provider and host recorded in the saved session |
 
-The data-credential fields have no tray UI; set them by editing the file, or
-configure the adapter directly with `--data-credential-provider` in
-`lfs.customtransfer.proton.args` or `PROTON_DATA_CREDENTIAL_PROVIDER`.
+The provider recorded in `~/.proton-drive-cli/session.json` by the last
+`login` is the one later proton-drive-cli commands (bridge commands,
+`doctor`, `logout`) use. Changing `keyPasswordProvider` takes effect with the
+next Connect.

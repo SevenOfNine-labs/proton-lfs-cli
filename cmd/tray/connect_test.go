@@ -7,13 +7,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"reflect"
 	"runtime"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/SevenOfNine-labs/proton-lfs-cli/internal/bridgeproto"
 	"github.com/SevenOfNine-labs/proton-lfs-cli/internal/config"
 )
 
@@ -49,7 +49,7 @@ func TestWithAuthTraceEnvSkipsEmptyTraceID(t *testing.T) {
 
 func TestRedactSubprocessOutput(t *testing.T) {
 	input := `{"AccessToken":"access-token","RefreshToken":"refresh-token","UID":"uid-123"} Bearer secret-token password=hunter2`
-	got := redactSubprocessOutput(input)
+	got := bridgeproto.RedactText(input)
 	for _, forbidden := range []string{"access-token", "refresh-token", "uid-123", "secret-token", "hunter2"} {
 		if strings.Contains(got, forbidden) {
 			t.Fatalf("redacted output leaked %q: %s", forbidden, got)
@@ -60,22 +60,25 @@ func TestRedactSubprocessOutput(t *testing.T) {
 	}
 }
 
-func TestBuildTrayLoginArgsUsesBrowserForkKeyPasswordProviderOnly(t *testing.T) {
+func TestProtonDriveLoginWithTracePassesArgsAndTraceEnv(t *testing.T) {
 	setupTrayLogForTest(t)
-	args, ok := buildTrayLoginArgs(config.CredentialProviderPassCLI)
-	if !ok {
-		t.Fatal("expected login args to be built")
+	if runtime.GOOS == "windows" {
+		t.Skip("needs a POSIX shell")
+	}
+	script := filepath.Join(t.TempDir(), "proton-drive-cli")
+	body := "#!/bin/sh\necho \"args=$*\"\necho \"trace=$PROTON_AUTH_TRACE_ID\"\n"
+	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
 	}
 
-	want := []string{"--key-password-provider", config.CredentialProviderPassCLI}
-	if !reflect.DeepEqual(args, want) {
-		t.Fatalf("unexpected login args:\n got: %#v\nwant: %#v", args, want)
+	out, err := protonDriveLoginWithTrace(script, config.CredentialProviderGitCredential, "trace-1",
+		"--key-password-provider", config.CredentialProviderGitCredential)
+	if err != nil {
+		t.Fatalf("login: %v", err)
 	}
-	for _, forbidden := range []string{"--auth-mode", "--credential-provider"} {
-		for _, arg := range args {
-			if arg == forbidden {
-				t.Fatalf("login args must not contain %s: %#v", forbidden, args)
-			}
+	for _, want := range []string{"args=login --key-password-provider git-credential -q", "trace=trace-1"} {
+		if !strings.Contains(string(out), want) {
+			t.Fatalf("output missing %q:\n%s", want, out)
 		}
 	}
 }
@@ -146,11 +149,9 @@ func TestActiveAuthRateLimitIgnoresExpiredOrNonLoginStatus(t *testing.T) {
 }
 
 func TestRedactSubprocessOutputRedactsSecretBeforeLaterMarker(t *testing.T) {
-	// A JSON token that appears before a Bearer marker must be redacted too:
-	// cutting the string at the first marker found in a fixed marker order
-	// would have kept everything before that marker, including the token.
+	// A JSON token before a Bearer marker is redacted as well.
 	input := `{"accessToken":"LEAKED-SECRET"} ... Bearer xyz`
-	got := redactSubprocessOutput(input)
+	got := bridgeproto.RedactText(input)
 	if strings.Contains(got, "LEAKED-SECRET") {
 		t.Fatalf("access token leaked: %s", got)
 	}
@@ -236,14 +237,33 @@ func TestRedactSubprocessOutputCoversObjectAndWordForms(t *testing.T) {
 		`session_id: abc123secret`,
 	}
 	for _, input := range cases {
-		got := redactSubprocessOutput(input)
+		got := bridgeproto.RedactText(input)
 		for _, secret := range []string{"eyJabc.def", "r3fr3sh", "u-1", "abc123secret"} {
 			if strings.Contains(got, secret) {
 				t.Fatalf("redaction leaked %q from %q: %s", secret, input, got)
 			}
 		}
 	}
-	if got := redactSubprocessOutput(`{"accessToken":"x1"}`); got != `{"accessToken":"[redacted]"}` {
+	if got := bridgeproto.RedactText(`{"accessToken":"x1"}`); got != `{"accessToken":"[redacted]"}` {
 		t.Fatalf("redacted JSON must stay well-formed, got %s", got)
+	}
+}
+
+func TestLogSubprocessOutputBoundsAndRedactsLongOutput(t *testing.T) {
+	var logged bytes.Buffer
+	original := trayLog
+	trayLog = log.New(&logged, "", 0)
+	t.Cleanup(func() { trayLog = original })
+
+	secret := `"accessToken":"` + strings.Repeat("s", 2*maxLoggedSubprocessOutput) + `"`
+	logSubprocessOutput("test", []byte(strings.Repeat("x", 300*1024)+" "+secret))
+	if logged.Len() > 2*maxLoggedSubprocessOutput {
+		t.Fatalf("logged %d bytes, want at most about %d", logged.Len(), maxLoggedSubprocessOutput)
+	}
+
+	logged.Reset()
+	logSubprocessOutput("test", []byte(strings.Repeat("y", maxLoggedSubprocessOutput-40)+secret))
+	if strings.Contains(logged.String(), strings.Repeat("s", 16)) {
+		t.Fatalf("a secret cut at the log bound must still be redacted: %q", logged.String()[logged.Len()-80:])
 	}
 }

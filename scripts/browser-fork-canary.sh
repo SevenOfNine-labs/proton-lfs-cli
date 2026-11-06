@@ -41,9 +41,6 @@ validate_browser_fork_login_args() {
   while [[ "${i}" -lt "${#login_args[@]}" ]]; do
     token="${login_args[${i}]}"
     case "${token}" in
-      --auth-mode | --auth-mode=*)
-        fail "LIVE_BROWSER_FORK_LOGIN_ARGS must not set --auth-mode; login is browser-fork-only."
-        ;;
       --key-password-provider | --key-password-host)
         i=$((i + 1))
         if [[ "${i}" -ge "${#login_args[@]}" ]]; then
@@ -97,7 +94,7 @@ if ! doctor_output="$("${NODE_BIN}" "${DRIVE_CLI_BIN}" doctor --json "${doctor_a
 fi
 printf '%s\n' "${doctor_output}"
 
-if ! printf '%s\n' "${doctor_output}" | "${GO_BIN}" run ./scripts/check_doctor_readiness.go --require-auth-mode browser-fork --require-state ready --require-transfer --quiet; then
+if ! printf '%s\n' "${doctor_output}" | "${GO_BIN}" run ./scripts/check_doctor_readiness.go --require-state ready --require-transfer --quiet; then
   fail "Offline doctor did not mark transfers ready after browser-fork login."
 fi
 

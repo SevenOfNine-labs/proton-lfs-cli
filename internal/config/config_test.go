@@ -3,7 +3,6 @@ package config
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -61,7 +60,7 @@ func TestAppDirPathWithoutHome(t *testing.T) {
 	if p, err := StatusFilePath(); err == nil {
 		t.Fatalf("StatusFilePath() without HOME = %q, want error", p)
 	}
-	if err := WriteStatus(StatusReport{State: StateIdle}); err == nil {
+	if err := WriteStatus(StatusReport{State: StateOK}); err == nil {
 		t.Fatal("WriteStatus without HOME must fail instead of writing into the working directory")
 	}
 }
@@ -98,20 +97,11 @@ func TestConstants(t *testing.T) {
 	if DefaultDriveCLIBin != "submodules/proton-drive-cli/dist/index.js" {
 		t.Fatalf("DefaultDriveCLIBin = %q", DefaultDriveCLIBin)
 	}
-	if DefaultDataCredentialHost != "proton-data.proton-lfs-cli.local" {
-		t.Fatalf("DefaultDataCredentialHost = %q", DefaultDataCredentialHost)
-	}
 	if DefaultDriveCLIAppVersion != "external-drive-protonlfscli@0.1.2" {
 		t.Fatalf("DefaultDriveCLIAppVersion = %q", DefaultDriveCLIAppVersion)
 	}
 	if EnvDriveCLIBin != "PROTON_DRIVE_CLI_BIN" {
 		t.Fatalf("EnvDriveCLIBin = %q", EnvDriveCLIBin)
-	}
-	if EnvDataCredentialProvider != "PROTON_DATA_CREDENTIAL_PROVIDER" {
-		t.Fatalf("EnvDataCredentialProvider = %q", EnvDataCredentialProvider)
-	}
-	if EnvDataCredentialHost != "PROTON_DATA_CREDENTIAL_HOST" {
-		t.Fatalf("EnvDataCredentialHost = %q", EnvDataCredentialHost)
 	}
 }
 
@@ -176,13 +166,9 @@ func TestStatusErrorState(t *testing.T) {
 
 func TestPrefsRoundTrip(t *testing.T) {
 	tmpDir := t.TempDir()
-	// Override HOME so PrefsFilePath points to tmpDir
 	t.Setenv("HOME", tmpDir)
 
-	prefs := Preferences{
-		KeyPasswordProvider: CredentialProviderGitCredential,
-		Enabled:             true,
-	}
+	prefs := Preferences{KeyPasswordProvider: CredentialProviderGitCredential}
 	if err := SavePrefs(prefs); err != nil {
 		t.Fatalf("SavePrefs: %v", err)
 	}
@@ -190,9 +176,6 @@ func TestPrefsRoundTrip(t *testing.T) {
 	got := LoadPrefs()
 	if got.KeyPasswordProvider != CredentialProviderGitCredential {
 		t.Fatalf("KeyPasswordProvider = %q", got.KeyPasswordProvider)
-	}
-	if !got.Enabled {
-		t.Fatal("Enabled should be true")
 	}
 }
 
@@ -202,9 +185,6 @@ func TestPrefsLoadMissingReturnsDefaults(t *testing.T) {
 	defaults := DefaultPreferences()
 	if got.KeyPasswordProvider != defaults.KeyPasswordProvider {
 		t.Fatalf("got %q, want default %q", got.KeyPasswordProvider, defaults.KeyPasswordProvider)
-	}
-	if got.Enabled != defaults.Enabled {
-		t.Fatalf("Enabled = %v, want %v", got.Enabled, defaults.Enabled)
 	}
 }
 
@@ -221,30 +201,19 @@ func TestPrefsLoadCorruptReturnsDefaults(t *testing.T) {
 	}
 }
 
-func TestPrefsLoadMigratesFormerKeyPasswordProviderKey(t *testing.T) {
+func TestPrefsLoadWithoutKeyPasswordProviderUsesDefault(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	dir := filepath.Join(home, AppDir)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	former := []byte(`{"credentialProvider":"git-credential","enabled":true}`)
-	if err := os.WriteFile(filepath.Join(dir, ConfigFileName), former, 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, ConfigFileName), []byte(`{"keyPasswordProvider":""}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
 	got := LoadPrefs()
-	if got.KeyPasswordProvider != CredentialProviderGitCredential {
-		t.Fatalf("former credentialProvider key not migrated: %+v", got)
-	}
-	if err := SavePrefs(got); err != nil {
-		t.Fatal(err)
-	}
-	saved, err := os.ReadFile(filepath.Join(dir, ConfigFileName))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(saved), `"keyPasswordProvider": "git-credential"`) || strings.Contains(string(saved), "credentialProvider\"") {
-		t.Fatalf("saved prefs must use the current key only:\n%s", saved)
+	if got.KeyPasswordProvider != DefaultKeyPasswordProvider {
+		t.Fatalf("LoadPrefs() = %+v, want the default provider", got)
 	}
 }

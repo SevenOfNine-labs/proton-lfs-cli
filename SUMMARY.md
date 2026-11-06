@@ -3,6 +3,7 @@
 - [Introduction](README.md)
 - [Usage Guide](USAGE.md)
 - [Security Policy](SECURITY.md)
+- [Documentation Index](docs/README.md)
 
 ## Project
 
@@ -39,12 +40,3 @@
 ## Security
 
 - [Threat Model](docs/security/threat-model.md)
-
-## History
-
-- [Proton SDK Update 2026-11-05](docs/history/proton-sdk-update-2026-11-05.md)
-- [Proton Auth News Audit 2026-06-22](docs/history/proton-auth-news-audit-2026-06-22.md)
-- [Proton Auth News Audit 2026-06-21](docs/history/proton-auth-news-audit-2026-06-21.md)
-- [Proton Auth Hardening Plan 2026-05-22](docs/history/proton-auth-hardening-plan.md)
-- [Feature Audit Findings 2026-06-22](docs/history/feature-audit-findings-2026-06-22.md)
-- [go-proton-api Analysis 2026-02-16](docs/history/go-proton-api-analysis.md)

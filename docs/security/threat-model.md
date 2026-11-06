@@ -25,8 +25,8 @@
 - `exec.CommandContext` with explicit arguments (not shell string) — no shell interpretation
 - OID validated against `/^[a-f0-9]{64}$/i` before subprocess spawn
 - File paths validated against `..` traversal and null bytes before use
-- Credentials passed via stdin JSON, not command-line arguments
-- Subprocess environment is filtered via allowlist — only PATH, HOME, NODE_*, MOCK_BRIDGE_*, etc. are forwarded
+- Bridge requests (storage base, app version, OIDs and paths) travel as stdin JSON, never as command-line arguments; they carry no credentials
+- Subprocess environment is filtered via allowlist (`internal/bridgeproto/env.go`): only named variables such as `PATH`, `HOME`, `NODE_BIN` and the credential-tool settings are forwarded
 
 **Tests**: `cmd/adapter/bridge_test.go` (filteredEnv, matchesAllowlist tests)
 
@@ -36,20 +36,28 @@
 
 **Mitigations**:
 
-- Account credentials are not accepted by Git LFS transfer commands
-- Local unlock selectors are passed via stdin JSON to subprocess (not visible in `ps aux`)
-- Credential flow: browser-fork login stores a UID-scoped key-password entry via proton-drive-cli; Go transfers send only optional mailbox/data-password selectors (`dataCredentialProvider`, `dataCredentialHost`)
-- **No HTTP layer** — credentials never traverse network connections, even localhost
-- **Passwords are never persisted to disk** — `saveSession()` strips `mailboxPassword` before writing
-- **Passwords are never accepted via transfer CLI flags** — browser login and local unlock storage are handled by proton-drive-cli
-- Browser-fork sessions use UID-scoped key-password material for Drive unlocks;
-  explicit data-password credentials are separate fallback entries and account
-  login passwords are not reused by transfers
-- Session file (`~/.proton-drive-cli/session.json`) contains only revocable tokens (sessionId, accessToken, refreshToken)
+- The account password is entered only on Proton's browser sign-in page
+  (`proton-drive-cli login`, browser session fork); no program in this
+  repository or in proton-drive-cli accepts or stores it
+- The fork delivers the key password for every account type;
+  proton-drive-cli stores it, keyed by the session UID, in the configured
+  provider (`pass-cli` or `git credential`) under
+  `proton-drive-key.proton-lfs-cli.local`, reads it back to verify, and
+  removes it when the session cannot be saved
+- Key-password lifecycle: `proton-drive-cli logout` removes the entry; a
+  login that yields a new session UID removes the entry of the previous UID;
+  a refresh token the API rejects signs the session out and removes it
+- The Go adapter resolves no credential and sends none: bridge requests carry
+  only `storageBase`, `appVersion` and the command fields (OIDs and paths)
+- **No HTTP layer** — the adapter talks to proton-drive-cli over subprocess
+  pipes, never over a network connection, even localhost
+- Session file (`~/.proton-drive-cli/session.json`) contains only revocable
+  tokens and metadata (`uid`, `accessToken`, `refreshToken`, `scopes`,
+  `keyPasswordProvider`, `keyPasswordHost`, `tokenExpiresAt`), no password
 - Session directory `0700`, session file `0600` (owner-only)
-- Error messages sanitized — no credential values in responses or logs
-- Usernames are not logged (prevents email leak to log files)
-- Account-login credential resolution is absent from the Go adapter and transfer bridge
+- Error messages sanitized: stderr quoted in adapter errors and the tray log
+  are redacted by `internal/bridgeproto` (bearer tokens, secret-named fields,
+  URL userinfo) before they are cut to length
 
 **Tests**: `tests/integration/credential_security_test.go`
 
@@ -86,9 +94,10 @@
 
 - Session file at `~/.proton-drive-cli/session.json` contains only revocable tokens (no passwords)
 - Directory permissions: `0700` (set by `ensureDir`)
-- File permissions: `0600` (set by atomic write)
+- File permissions: `0600` (set by atomic write, `write-file-atomic`)
 - Session stored in user home directory, not shared locations
-- `proton-drive-cli logout` deletes the local session file; it makes no API call, so a token that may have leaked is revoked in the Proton account settings ("log out all other sessions")
+- `proton-drive-cli logout` removes the key-password entry, revokes the session on the server (`DELETE /auth/v4`; a failed revocation is logged and the local cleanup still completes) and deletes the session file and crypto cache
+- A session revoked elsewhere (Proton account settings, "log out all other sessions") fails at its next API call; a refresh token the API rejects with a Proton error body and HTTP 4xx other than 408 and 429 signs the local session out
 
 **Validation**: `TestCredentialSessionFilePermissions` in integration tests
 
@@ -109,9 +118,9 @@
 
 **Mitigations**:
 
-- Environment allowlist in `bridge.go` — only approved prefixes/names forwarded
-- Allowed: `PATH`, `HOME`, `USER`, `SHELL`, `LANG`, `LC_*`, `TERM`, `NODE_ENV`, `NODE_OPTIONS`, `NODE_PATH`, `NODE_BIN`, `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_CACHE_HOME`, `XDG_RUNTIME_DIR`, `TMPDIR`, `TMP`, `TEMP`, the Windows profile and system variables (`USERPROFILE`, `HOMEDRIVE`, `HOMEPATH`, `APPDATA`, `LOCALAPPDATA`, `SYSTEMROOT`, `WINDIR`, `COMSPEC`, `PATHEXT`), `MOCK_BRIDGE_*`, and the variables proton-drive-cli reads: `PROTON_DRIVE_CLI_APP_VERSION`, `PROTON_KEY_PASSWORD_PROVIDER`, `PROTON_KEY_PASSWORD_HOST`, `PROTON_DATA_CREDENTIAL_PROVIDER`, `PROTON_DATA_CREDENTIAL_HOST`, `PROTON_PASS_CLI_BIN`, `PROTON_AUTH_TRACE`, `PROTON_AUTH_TRACE_ID`
-- Secret-shaped variables (`PROTON_PASSWORD`, `PROTON_DATA_PASSWORD`, `PROTON_SECOND_FACTOR_CODE`) are not on the allowlist and are never forwarded; `proton-drive-cli doctor` fails when the last two are set in its own environment
+- Environment allowlist in `internal/bridgeproto/env.go` — only approved prefixes/names forwarded
+- Allowed: `PATH`, `HOME`, `USER`, `SHELL`, `LANG`, `LC_*`, `TERM`, `NODE_ENV`, `NODE_OPTIONS`, `NODE_PATH`, `NODE_BIN`, `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_CACHE_HOME`, `XDG_RUNTIME_DIR`, `TMPDIR`, `TMP`, `TEMP`, the Windows profile and system variables (`USERPROFILE`, `HOMEDRIVE`, `HOMEPATH`, `APPDATA`, `LOCALAPPDATA`, `SYSTEMROOT`, `WINDIR`, `COMSPEC`, `PATHEXT`), `MOCK_BRIDGE_*`, the variables bridge commands read: `PROTON_DRIVE_CLI_APP_VERSION`, `PROTON_PASS_CLI_BIN`, `PROTON_AUTH_TRACE`, `PROTON_AUTH_TRACE_ID`, and the configuration of the processes they start: `PROTON_PASS_SESSION_DIR`, `PROTON_PASS_KEY_PROVIDER`, `PROTON_PASS_ENCRYPTION_KEY`, `PROTON_PASS_LINUX_KEYRING`, `DBUS_SESSION_BUS_ADDRESS`, `GIT_CONFIG_GLOBAL`, `GCM_*`
+- Every other variable, secret-shaped names such as `PROTON_PASSWORD` included, is dropped; no proton-drive-cli command reads a password from the environment. `PROTON_PASS_ENCRYPTION_KEY` is forwarded only because pass-cli's `env` key provider reads its local-key secret from it; the user who sets it already exposes it to every process of that shell
 - Test coverage verifies allowlist behavior
 
 **Tests**: `cmd/adapter/bridge_test.go` (TestFilteredEnv, TestMatchesAllowlist)
@@ -123,16 +132,13 @@
 **Mitigations**:
 
 - `execFile` used (not `exec`) — prevents shell injection in the git binary path
-- 10-second timeout prevents hanging on interactive credential helpers
-- Browser-fork key-password flow: git credential helper -> proton-drive-cli
-  key-password store. Git LFS transfers never request account credentials from
-  the helper.
-- `git credential approve/reject` used for proper credential lifecycle management
+- Attributes travel on stdin, never as command-line arguments; values containing CR, LF or NUL are rejected
+- 10-second timeout on every call, and `GIT_TERMINAL_PROMPT=0` with empty `GIT_ASKPASS`/`SSH_ASKPASS`, so a missing entry fails instead of prompting
+- `git credential fill/approve/reject` manage the key-password entry's lifecycle (read, store, remove)
 - When `--key-password-provider git-credential` is used, the browser-fork key
   password is stored entirely within proton-drive-cli's key-password flow; it
-  never passes through the Go adapter.
-- When `dataCredentialProvider=git-credential` is used, the mailbox/data password is resolved from a separate host/key (`proton-data.proton-lfs-cli.local` by default)
-- The Go adapter resolves no credentials from any provider; proton-drive-cli does, and only for the key password and the optional data password
+  never passes through the Go adapter
+- The Go adapter resolves no credentials from any provider; proton-drive-cli does, and only for the key password
 
 **Note**: The security of stored credentials depends on the underlying credential helper (macOS Keychain, Windows Credential Manager, etc.). The git credential protocol itself does not encrypt data in transit between git and the helper.
 

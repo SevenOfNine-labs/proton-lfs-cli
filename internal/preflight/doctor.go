@@ -13,10 +13,9 @@ import (
 // DoctorAuthState is the subset of proton-drive-cli doctor authState JSON used
 // by root preflight gates.
 type DoctorAuthState struct {
-	State    string   `json:"state"`
-	AuthMode string   `json:"authMode,omitempty"`
-	Actions  []string `json:"actions,omitempty"`
-	Errors   []string `json:"errors,omitempty"`
+	State   string   `json:"state"`
+	Actions []string `json:"actions,omitempty"`
+	Errors  []string `json:"errors,omitempty"`
 }
 
 // DoctorReadiness is the parsed readiness surface emitted by
@@ -34,7 +33,6 @@ type DoctorReadinessRequirements struct {
 	RequireLiveCanary bool
 	RequireTransfer   bool
 	RequireState      string
-	RequireAuthMode   string
 }
 
 type rawDoctorReport struct {
@@ -134,13 +132,6 @@ func ValidateDoctorReadiness(
 			readiness.blockerSummary(),
 		)
 	}
-	if requirements.RequireAuthMode != "" && readiness.AuthState.AuthMode != requirements.RequireAuthMode {
-		return readiness, fmt.Errorf("offline doctor auth mode mismatch: want %s, got %s (%s)",
-			requirements.RequireAuthMode,
-			emptyAsUnknown(readiness.AuthState.AuthMode),
-			readiness.blockerSummary(),
-		)
-	}
 	if requirements.RequireTransfer && !readiness.CanAttemptTransfer {
 		return readiness, fmt.Errorf("offline doctor blocked transfers (%s)", readiness.blockerSummary())
 	}
@@ -153,9 +144,6 @@ func ValidateDoctorReadiness(
 
 func (readiness DoctorReadiness) blockerSummary() string {
 	parts := []string{"authState=" + readiness.AuthState.State}
-	if readiness.AuthState.AuthMode != "" {
-		parts = append(parts, "authMode="+readiness.AuthState.AuthMode)
-	}
 	if len(readiness.AuthState.Actions) > 0 {
 		parts = append(parts, "actions="+strings.Join(readiness.AuthState.Actions, " | "))
 	}
@@ -163,11 +151,4 @@ func (readiness DoctorReadiness) blockerSummary() string {
 		parts = append(parts, "errors="+strings.Join(readiness.AuthState.Errors, " | "))
 	}
 	return strings.Join(parts, "; ")
-}
-
-func emptyAsUnknown(value string) string {
-	if value == "" {
-		return "<unset>"
-	}
-	return value
 }

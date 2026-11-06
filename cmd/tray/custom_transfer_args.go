@@ -9,20 +9,12 @@ import (
 
 var shellWordRe = regexp.MustCompile(`^[A-Za-z0-9_@/.-]+$`)
 
-// buildProtonTransferArgsFromPrefs renders lfs.customtransfer.proton.args for
-// the adapter. The browser-fork key-password provider is not part of the
-// transfer arguments: the adapter never logs in, so it never carries a
-// --credential-provider flag.
-func buildProtonTransferArgsFromPrefs(prefs config.Preferences, driveCLIPath string) string {
+// buildProtonTransferArgs renders lfs.customtransfer.proton.args for the
+// adapter: the SDK backend and, when known, the proton-drive-cli path.
+func buildProtonTransferArgs(driveCLIPath string) string {
 	args := []string{"--backend", config.BackendSDK}
 	if driveCLIPath != "" {
 		args = append(args, "--drive-cli-bin", driveCLIPath)
-	}
-	if dataProvider := strings.TrimSpace(prefs.DataCredentialProvider); dataProvider != "" {
-		args = append(args,
-			"--data-credential-provider", dataProvider,
-			"--data-credential-host", resolveDataCredentialHost(prefs),
-		)
 	}
 	return strings.Join(shellQuoteArgs(args), " ")
 }

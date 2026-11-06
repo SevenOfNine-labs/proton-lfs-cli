@@ -35,11 +35,9 @@ jobs:
           version: v2.8.0
           install-only: true
 
-      # Same commands as locally: gofmt over every Go tree, go vet over ./...
-      # (go.mod `ignore` keeps submodules/ and node_modules/ out) plus the
-      # integration-tagged tests, golangci-lint with .golangci.yml
-      # (build-tags: integration). CI=true makes a missing golangci-lint fatal.
-      - name: gofmt, go vet, golangci-lint
+      # The local make targets; go.mod `ignore` keeps submodules/ and
+      # node_modules/ out of ./..., and CI=true makes golangci-lint mandatory.
+      - name: gofmt, go vet, golangci-lint, comment policy
         env:
           CI: "true"
         run: make fmt-check lint

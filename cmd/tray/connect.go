@@ -18,9 +18,8 @@ const authRateLimitCooldown = time.Hour
 // a browser spawned by proton-drive-cli login) must not keep the tray waiting.
 const subprocessWaitDelay = 5 * time.Second
 
-// connectToProton runs the tray Connect flow.
-// Browser-fork authentication is the only account login path. The tray never
-// resolves stored account passwords or invokes direct SRP login.
+// connectToProton runs `proton-drive-cli login`, the browser-fork sign-in,
+// with the configured key-password provider.
 func connectToProton() {
 	if remaining, blocked := activeAuthRateLimit(time.Now()); blocked {
 		trayLog.Printf("connect: auth rate limit active; skipping login for %s", formatCooldown(remaining))
@@ -42,14 +41,9 @@ func connectToProton() {
 	traceID := newAuthTraceID()
 	trayLog.Printf("connect: auth trace id = %s", traceID)
 
-	loginArgs, ok := buildTrayLoginArgs(provider)
-	if !ok {
-		return
-	}
-
 	sendNotification("Connecting…")
 	go func() {
-		out, err := protonDriveLoginWithTrace(driveCLI, provider, traceID, loginArgs...)
+		out, err := protonDriveLoginWithTrace(driveCLI, provider, traceID, "--key-password-provider", provider)
 		if err != nil {
 			trayLog.Printf("connect: login failed: %v", err)
 			if isAuthRateLimitedOutput(out) {
@@ -76,20 +70,14 @@ func connectToProton() {
 	}()
 }
 
-func buildTrayLoginArgs(provider string) ([]string, bool) {
-	trayLog.Print("connect: starting browser-fork login")
-	return []string{"--key-password-provider", provider}, true
-}
-
 func protonDriveLoginWithTrace(driveCLI string, provider string, traceID string, args ...string) ([]byte, error) {
 	cmdArgs := append([]string{"login"}, args...)
 	cmdArgs = append(cmdArgs, "-q")
 	trayLog.Printf("connect: exec %s %v", driveCLI, cmdArgs)
 	cmd := exec.Command(driveCLI, cmdArgs...)
 	cmd.Env = append(cmd.Environ(), withAuthTraceEnv(nil, traceID)...)
-	// proton-drive-cli resolves pass-cli through PROTON_PASS_CLI_BIN; a macOS
-	// .app bundle starts with launchd's minimal PATH, so the tray passes the
-	// absolute path it discovered.
+	// proton-drive-cli resolves pass-cli through PROTON_PASS_CLI_BIN, which
+	// carries the absolute path because launchd's PATH lacks it.
 	if provider == config.CredentialProviderPassCLI {
 		if passCLI := discoverPassCLIBinary(); passCLI != "" {
 			cmd.Env = append(cmd.Env, "PROTON_PASS_CLI_BIN="+passCLI)
@@ -100,17 +88,14 @@ func protonDriveLoginWithTrace(driveCLI string, provider string, traceID string,
 	}
 	out, err := runLoggedCommand("connect", cmd)
 	if err != nil {
-		trayLog.Printf("connect: exec failed: %v\n  output: %s", err, out)
+		trayLog.Printf("connect: exec failed: %v", err)
 	}
 	return out, err
 }
 
 // runLoggedCommand runs cmd, logs every output line (redacted) under prefix,
-// and returns the combined stdout and stderr. Output is split into lines by
-// lineLogger rather than bufio.Scanner: the scanner stops at
-// bufio.MaxScanTokenSize (64 KiB) and a stopped reader leaves the child
-// blocked on a full pipe, which deadlocked cmd.Wait. exec.Cmd drains the
-// pipes itself when Stdout and Stderr are writers, bounded by WaitDelay.
+// and returns the combined stdout and stderr. lineLogger has no line-length
+// limit, unlike bufio.Scanner (bufio.MaxScanTokenSize).
 func runLoggedCommand(prefix string, cmd *exec.Cmd) ([]byte, error) {
 	var out bytes.Buffer
 	var outMu sync.Mutex

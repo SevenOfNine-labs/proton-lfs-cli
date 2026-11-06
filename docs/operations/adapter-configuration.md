@@ -8,8 +8,8 @@ the settings fit together.
 
 ## Environment Variables
 
-Read by `git-lfs-proton-adapter` (each is the default of the flag named in
-the reference page):
+Read by `git-lfs-proton-adapter` (each of the first five is the default of
+the flag named in the reference page):
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
@@ -17,43 +17,44 @@ the reference page):
 | `ADAPTER_ALLOW_MOCK_TRANSFERS` | `false` | Enables mock transfer mode (protocol tests only) |
 | `PROTON_LFS_LOCAL_STORE_DIR` | empty | Local backend object root |
 | `PROTON_DRIVE_CLI_BIN` | `submodules/proton-drive-cli/dist/index.js` | proton-drive-cli entry point: a `.js` file run with node, or the standalone executable |
-| `NODE_BIN` | `node` on `PATH` | Node.js binary for a `.js` entry point |
 | `PROTON_LFS_BRIDGE_TIMEOUT` | `5m` | Base timeout per bridge command (Go duration); uploads and downloads add 1 s per 256 KiB |
-| `PROTON_DATA_CREDENTIAL_PROVIDER` | empty | Optional provider of the mailbox/data password (`pass-cli`, `git-credential`) |
-| `PROTON_DATA_CREDENTIAL_HOST` | `proton-data.proton-lfs-cli.local` | Credential host/key of that entry |
-| `LFS_STORAGE_BASE` | `LFS` | Remote base folder (`/<base>/ab/cd/<oid>`) |
-| `PROTON_APP_VERSION` | empty | Optional Proton `x-pm-appversion` override, forwarded as the bridge `appVersion` field |
-| `PROTON_LFS_STATUS_FILE` | `~/.proton-lfs/status.json` | Status file location |
+| `NODE_BIN` | `node` on `PATH` | Node.js binary for a `.js` entry point |
+| `LFS_STORAGE_BASE` | `LFS` | Remote base folder (`/<base>/ab/cd/<oid>`), sent as the bridge `storageBase` field |
+| `PROTON_APP_VERSION` | empty | Optional Proton `x-pm-appversion` override, sent as the bridge `appVersion` field |
+| `PROTON_LFS_STATUS_FILE` | `~/.proton-lfs/status.json` | Status file location (also read by the tray) |
 
-Forwarded unchanged to proton-drive-cli when set (they are on the
-subprocess environment allowlist):
+Read by proton-drive-cli. The adapter forwards the variables of the first
+three rows to the bridge subprocess (they are on its environment
+allowlist); the key-password variables are read only by
+`proton-drive-cli login` and are not forwarded:
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `PROTON_KEY_PASSWORD_PROVIDER` | `pass-cli` | Provider of the browser-fork key password, used by `proton-drive-cli login` and `doctor` |
-| `PROTON_KEY_PASSWORD_HOST` | `proton-drive-key.proton-lfs-cli.local` | Host/key of that entry |
 | `PROTON_PASS_CLI_BIN` | `pass-cli` | Proton Pass CLI binary path |
 | `PROTON_DRIVE_CLI_APP_VERSION` | `external-drive-protonlfscli@<cli version>` | proton-drive-cli's own app-version default |
 | `PROTON_AUTH_TRACE`, `PROTON_AUTH_TRACE_ID` | unset | Redacted `[AUTH_TRACE]` lines on stderr and their correlation id; the tray sets both during Connect |
+| `PROTON_KEY_PASSWORD_PROVIDER` | `pass-cli` | Provider that `login` stores the browser-fork key password in |
+| `PROTON_KEY_PASSWORD_HOST` | `proton-drive-key.proton-lfs-cli.local` | Host/key of that entry |
 
-The Go adapter does **not** resolve Proton account credentials and never
-sends account username/password selectors to proton-drive-cli. Account login
-is browser-fork-only and happens outside Git LFS transfers with
+The Go adapter does **not** resolve Proton credentials and never sends
+account or credential fields to proton-drive-cli. Account login is
+browser-fork-only and happens outside Git LFS transfers with
 `proton-drive-cli login --key-password-provider <provider>`. Transfer bridge
-requests carry only `storageBase`, optional `appVersion`, and, for
-two-password accounts, `{ "dataCredentialProvider": "<name>", "dataCredentialHost": "<host>" }`.
+requests carry only `storageBase`, `appVersion` (when set) and the command
+fields (`oid`, `path`, `outputPath`, `oids`).
 
 ## Key-Password Provider
 
-`proton-drive-cli login` derives a key password during browser sign-in and
-stores it, keyed by the session UID, under
+`proton-drive-cli login` receives the key password from the browser session
+fork, for every account type, and stores it, keyed by the session UID, under
 `proton-drive-key.proton-lfs-cli.local` in the chosen provider. The CLI
 creates and verifies that entry itself; it is never created by hand. The
 provider is chosen by `--key-password-provider`, then
-`PROTON_KEY_PASSWORD_PROVIDER`, then the default `pass-cli`. The tray stores
-the choice as `keyPasswordProvider` in `~/.proton-lfs/config.json`
-([Config File](../reference/config-file.md)) and passes it to `login` and
-`doctor`.
+`PROTON_KEY_PASSWORD_PROVIDER`, then the default `pass-cli`, and recorded in
+the session; every later command (bridge, doctor, logout) uses the recorded
+provider and host. The tray stores the choice as `keyPasswordProvider` in
+`~/.proton-lfs/config.json` ([Config File](../reference/config-file.md)) and
+passes it to `login`.
 
 ### pass-cli (default)
 
@@ -83,54 +84,54 @@ reads it back with `git credential fill` for host
 credential helper is configured (macOS Keychain, Windows Credential Manager,
 Linux Secret Service).
 
-## Mailbox/Data Password (two-password accounts)
+### Lifecycle of the entry
 
-Browser-fork sessions with a stored key password unlock Drive without a
-separate data credential, also for accounts Proton reports as two-password
-mode. Configure one only when `proton-drive-cli doctor` or
-`bridge auth-state` reports `needs_data_password`. The entry lives under the
-separate host `proton-data.proton-lfs-cli.local`:
+- `proton-drive-cli logout` removes it, revokes the session and deletes the
+  session file and crypto cache.
+- A login that yields a new session UID removes the entry of the previous UID.
+- A refresh token the API rejects with a Proton error body and HTTP 4xx
+  other than 408 and 429, while no other process has rotated it, signs the
+  session out: `session.json`, the
+  crypto cache and the entry are deleted, and `auth-state` reports
+  `needs_login`.
+- A stored key password that does not decrypt the account keys makes
+  transfers fail with `key_password_required`; `proton-drive-cli login`
+  stores a new one.
 
-```bash
-printf "protocol=https\nhost=proton-data.proton-lfs-cli.local\nusername=user@proton.me\npassword=<mailbox-data-password>\n\n" | git credential approve
-git config lfs.customtransfer.proton.args "--backend sdk --data-credential-provider git-credential"
-```
-
-For Proton Pass, create a login item with URL
-`https://proton-data.proton-lfs-cli.local` and use
-`--data-credential-provider pass-cli` or
-`PROTON_DATA_CREDENTIAL_PROVIDER=pass-cli`. Without a configured provider,
-a session that needs the data password fails with `data_password_required`;
-the adapter never reuses account-login material and never logs in from a
-transfer.
+## Offline Doctor
 
 Check the configuration offline before a transfer or a live canary:
 
 ```bash
-proton-drive-cli doctor --key-password-provider git-credential --data-credential-provider git-credential
+proton-drive-cli doctor
+proton-drive-cli doctor --key-password-provider git-credential --json
 ```
 
-The doctor checks the credential entries, the session file's permissions and
-shape, secret environment variables and the bridge entry point without
-contacting Proton (`submodules/proton-drive-cli/docs/reference/doctor.md`).
-A `ready` result is a local readiness statement, not a remote session
-validation: a session Proton revoked server-side fails at the first SDK call
-with an auth error and is never retried with a login.
+Without options the doctor verifies the provider and host recorded in the
+session; `--key-password-provider` and `--key-password-host` verify another
+entry. It checks the bridge entry point (`drive-cli-bin`), the UID-scoped
+key-password entry (`key-password-credential`) and the session file's
+permissions and shape (`session-file`) without contacting Proton, and
+reports `ok`, `summary`, `authState`, `canAttemptTransfer`,
+`canAttemptLiveCanary` and `checks`
+(`submodules/proton-drive-cli/docs/reference/doctor.md`). A `ready` result is
+a local readiness statement, not a remote session validation: a session
+Proton revoked server-side fails at the first SDK call with an auth error
+and is never retried with a login.
 
 ## Session Refresh
 
 The tray refresh heartbeat is token maintenance only. It calls
-`proton-drive-cli session refresh --json` 10 minutes before `tokenExpiresAt`
-(every 12 hours when no expiry is recorded); the result preserves redacted
-HTTP and Proton API details without printing token values. Recoverable
-failures and timeouts are retried after one minute. Non-recoverable failures,
-including Proton `10013` `Invalid refresh token`, are remembered for the same
-saved session and shown as `Refresh: Reconnect required` /
-`Transfers: Reconnect required`; the tray does not keep retrying and does not
-start login automatically.
-
-A successful browser-fork Connect creates a new session and clears the
-same-session refresh blocker.
+`proton-drive-cli session refresh --json` from 10 minutes (at most half the
+token lifetime) before `tokenExpiresAt` on; a session without
+`tokenExpiresAt` is refreshed 12 hours after `session.json` was last
+written. The result preserves redacted HTTP and Proton API details without
+printing token values. Recoverable failures and timeouts are retried with
+binary exponential backoff from 1 to 30 minutes. Non-recoverable failures are remembered for the same session UID
+and the tray does not start login automatically. A rejected refresh token
+signs the session out in proton-drive-cli, after which the tray shows
+`Not connected`; a successful browser-fork Connect creates a new session and
+clears the tray's refresh state.
 
 ## Helper Script
 
@@ -139,10 +140,11 @@ pass-cli login
 eval "$(./scripts/export-pass-env.sh)"
 ```
 
-The script verifies with `pass-cli info` that pass-cli is authenticated and
-exports `PROTON_PASS_CLI_BIN`. It also unsets the former account-credential
-reference variables; proton-drive-cli searches provider vaults directly for
-the key-password and optional data-password entries.
+The script checks that the pass-cli binary exists and is logged in
+(`pass-cli info`) and prints one line,
+`export PROTON_PASS_CLI_BIN=<binary>`. Options: `--pass-cli <bin>` (default
+`$PROTON_PASS_CLI_BIN`, else `pass-cli`) and `--skip-check` (no binary or
+login check). `make pass-env` runs it.
 
 ## proton-drive-cli App Identity
 
@@ -152,12 +154,13 @@ the key-password and optional data-password entries.
 | `PROTON_DRIVE_CLI_APP_VERSION` | `external-drive-protonlfscli@<cli version>` | proton-drive-cli's default Proton app-version header (version part follows its `package.json`) |
 
 Proton's SDK README requires third-party clients to identify as
-`external-drive-{name}@{major.minor.patch}[-stable|beta|alpha][+build]`, where
-`{name}` uses lowercase letters and underscores. The official `cli-drive`
-identity is reserved for Proton's own CLI and is rejected by proton-drive-cli.
-The Go default `DefaultDriveCLIAppVersion` must equal proton-drive-cli's
-default; `internal/config/app_version_test.go` checks it against the
-submodule's `package.json` version.
+`external-drive-{name}@{major.minor.patch}`, optionally followed by a
+`-stable`, `-beta` or `-alpha` channel and a `+build` suffix, where `{name}`
+uses lowercase letters and underscores. The official `cli-drive` identity is
+reserved for Proton's own CLI and is rejected by proton-drive-cli. The Go
+default `DefaultDriveCLIAppVersion` must equal proton-drive-cli's default;
+`internal/config/app_version_test.go` checks it against the submodule's
+`package.json` version.
 
 ## Redacted Scope Diagnostics
 
@@ -168,9 +171,9 @@ rejects the saved session during the live metadata gate:
 proton-lfs-tray scope-diagnostics
 ```
 
-This local mode prints JSON evidence only: credential-provider selections,
-session-file shape, redacted session identifiers, token presence flags, token
-expiry, local scope names, app-version inputs, and the offline
+This local mode prints JSON evidence only: the key-password provider
+selection, session-file presence and mode, a UID fingerprint, token presence
+flags, token expiry, local scope names, app-version inputs, and the offline
 `bridge auth-state` result. It does not contact Proton.
 
 To perform the one read-only server probe, use the same explicit live canary

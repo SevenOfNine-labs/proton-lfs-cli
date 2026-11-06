@@ -4,37 +4,28 @@ import (
 	"github.com/SevenOfNine-labs/proton-lfs-cli/internal/config"
 )
 
-// Backend modes — re-exported from internal/config for package main usage.
+// Backend modes (internal/config).
 const (
 	BackendLocal = config.BackendLocal
 	BackendSDK   = config.BackendSDK
 )
 
-// Credential provider kinds (mailbox/data password provider)
-const (
-	CredentialProviderPassCLI       = config.CredentialProviderPassCLI
-	CredentialProviderGitCredential = config.CredentialProviderGitCredential
-)
-
 // Default values
 const (
-	DefaultDriveCLIBin        = config.DefaultDriveCLIBin
-	DefaultStorageBase        = config.DefaultStorageBase
-	DefaultDataCredentialHost = config.DefaultDataCredentialHost
+	DefaultDriveCLIBin = config.DefaultDriveCLIBin
+	DefaultStorageBase = config.DefaultStorageBase
 )
 
 // Environment variable names
 const (
-	EnvDriveCLIBin            = config.EnvDriveCLIBin
-	EnvNodeBin                = config.EnvNodeBin
-	EnvStorageBase            = config.EnvStorageBase
-	EnvAppVersion             = config.EnvAppVersion
-	EnvBackend                = config.EnvBackend
-	EnvAllowMockTransfers     = config.EnvAllowMockTransfers
-	EnvLocalStoreDir          = config.EnvLocalStoreDir
-	EnvDataCredentialProvider = config.EnvDataCredentialProvider
-	EnvDataCredentialHost     = config.EnvDataCredentialHost
-	EnvBridgeTimeout          = config.EnvBridgeTimeout
+	EnvDriveCLIBin        = config.EnvDriveCLIBin
+	EnvNodeBin            = config.EnvNodeBin
+	EnvStorageBase        = config.EnvStorageBase
+	EnvAppVersion         = config.EnvAppVersion
+	EnvBackend            = config.EnvBackend
+	EnvAllowMockTransfers = config.EnvAllowMockTransfers
+	EnvLocalStoreDir      = config.EnvLocalStoreDir
+	EnvBridgeTimeout      = config.EnvBridgeTimeout
 )
 
 func envTrim(key string) string {

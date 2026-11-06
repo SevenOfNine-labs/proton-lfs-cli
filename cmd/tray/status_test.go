@@ -11,6 +11,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/SevenOfNine-labs/proton-lfs-cli/internal/bridgeproto"
 	"github.com/SevenOfNine-labs/proton-lfs-cli/internal/config"
 )
 
@@ -37,11 +38,22 @@ func resetRefreshForStatusTest(t *testing.T, now time.Time) {
 	origState := refreshState
 	refreshState = sessionRefreshState{}
 	refreshMu.Unlock()
+	sessionChange.Lock()
+	origChange := struct {
+		seen bool
+		uid  string
+		at   time.Time
+	}{sessionChange.seen, sessionChange.uid, sessionChange.at}
+	sessionChange.seen, sessionChange.uid, sessionChange.at = false, "", time.Time{}
+	sessionChange.Unlock()
 	t.Cleanup(func() {
 		refreshNow = origNow
 		refreshMu.Lock()
 		refreshState = origState
 		refreshMu.Unlock()
+		sessionChange.Lock()
+		sessionChange.seen, sessionChange.uid, sessionChange.at = origChange.seen, origChange.uid, origChange.at
+		sessionChange.Unlock()
 	})
 }
 
@@ -102,9 +114,9 @@ func TestTruncate(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := truncate(tc.input, tc.limit)
+			got := bridgeproto.Truncate(tc.input, tc.limit)
 			if got != tc.expected {
-				t.Fatalf("truncate(%q, %d) = %q, expected %q", tc.input, tc.limit, got, tc.expected)
+				t.Fatalf("bridgeproto.Truncate(%q, %d) = %q, expected %q", tc.input, tc.limit, got, tc.expected)
 			}
 		})
 	}
@@ -122,12 +134,12 @@ func TestTruncateMultibyteInput(t *testing.T) {
 		{"😀😀😀", 2, "😀…"},
 	}
 	for _, tc := range cases {
-		got := truncate(tc.input, tc.limit)
+		got := bridgeproto.Truncate(tc.input, tc.limit)
 		if got != tc.want {
-			t.Errorf("truncate(%q, %d) = %q, want %q", tc.input, tc.limit, got, tc.want)
+			t.Errorf("bridgeproto.Truncate(%q, %d) = %q, want %q", tc.input, tc.limit, got, tc.want)
 		}
 		if !utf8.ValidString(got) {
-			t.Errorf("truncate(%q, %d) = %q is not valid UTF-8", tc.input, tc.limit, got)
+			t.Errorf("bridgeproto.Truncate(%q, %d) = %q is not valid UTF-8", tc.input, tc.limit, got)
 		}
 	}
 }
@@ -212,124 +224,87 @@ func TestSessionFilePath(t *testing.T) {
 	}
 }
 
-func TestInspectAuthReadinessBlocksPasswordLoginSessionWithoutDataCredential(t *testing.T) {
+func validStatusTestSession(now time.Time) sessionMetadata {
+	return sessionMetadata{
+		UID:                 "uid-123",
+		AccessToken:         "access",
+		RefreshToken:        "refresh",
+		Scopes:              []string{"drive"},
+		KeyPasswordProvider: "pass-cli",
+		KeyPasswordHost:     "proton-drive-key.proton-lfs-cli.local",
+		TokenExpiresAt:      now.Add(24 * time.Hour).UnixMilli(),
+	}
+}
+
+func TestInspectAuthReadinessReadyForValidSession(t *testing.T) {
 	now := time.Date(2026, 6, 23, 18, 0, 0, 0, time.UTC)
 	resetRefreshForStatusTest(t, now)
 	home := setupFakeHome(t, fakeHomeOpts{configJSON: `{"keyPasswordProvider":"pass-cli"}`})
-	setupGitConfig(t, "")
-	writeSessionForStatusTest(t, home, sessionMetadata{
-		SessionID:      "session-id",
-		UID:            "uid-123",
-		AccessToken:    "access",
-		RefreshToken:   "refresh",
-		Scopes:         []string{"drive"},
-		PasswordMode:   2,
-		TokenExpiresAt: now.Add(24 * time.Hour).UnixMilli(),
-	})
+	writeSessionForStatusTest(t, home, validStatusTestSession(now))
 
 	readiness := inspectAuthReadiness(now)
-	if !readiness.blocked || readiness.ready {
-		t.Fatalf("expected blocked readiness, got %#v", readiness)
+	if !readiness.ready || readiness.blocked || !readiness.signedIn {
+		t.Fatalf("expected ready readiness, got %#v", readiness)
 	}
-	if readiness.statusTitle != "Status: Setup needed" {
-		t.Fatalf("unexpected status title: %s", readiness.statusTitle)
-	}
-	if readiness.transferTitle != "Transfers: Data password needed" {
-		t.Fatalf("unexpected transfer title: %s", readiness.transferTitle)
-	}
-	if !readiness.dataPasswordActive {
-		t.Fatal("data-password action should be enabled for a password-login session without stored unlock material")
+	if readiness.statusTitle != "Status: Ready" || readiness.transferTitle != "Transfers: Ready" {
+		t.Fatalf("unexpected titles: %s; %s", readiness.statusTitle, readiness.transferTitle)
 	}
 	if readiness.action != authActionDisconnect {
-		t.Fatalf("signed-in blocked state should offer disconnect, got %s", readiness.action)
+		t.Fatalf("signed-in state should offer disconnect, got %s", readiness.action)
 	}
 }
 
-func TestInspectAuthReadinessReadyForBrowserForkTwoPasswordWithoutDataCredential(t *testing.T) {
+func TestInspectAuthReadinessWithoutSessionOffersConnect(t *testing.T) {
 	now := time.Date(2026, 6, 23, 18, 0, 0, 0, time.UTC)
 	resetRefreshForStatusTest(t, now)
-	home := setupFakeHome(t, fakeHomeOpts{configJSON: `{"keyPasswordProvider":"pass-cli"}`})
-	setupGitConfig(t, "")
-	writeSessionForStatusTest(t, home, sessionMetadata{
-		SessionID:            "session-id",
-		UID:                  "uid-123",
-		AccessToken:          "access",
-		RefreshToken:         "refresh",
-		Scopes:               []string{"drive"},
-		PasswordMode:         2,
-		AuthMode:             "browser-fork",
-		KeyPasswordPersisted: true,
-		TokenExpiresAt:       now.Add(24 * time.Hour).UnixMilli(),
-	})
+	setupFakeHome(t, fakeHomeOpts{})
 
 	readiness := inspectAuthReadiness(now)
-	if !readiness.ready || readiness.blocked {
-		t.Fatalf("expected ready readiness, got %#v", readiness)
+	if readiness.signedIn || readiness.ready || readiness.blocked {
+		t.Fatalf("expected signed-out readiness, got %#v", readiness)
 	}
-	if readiness.statusTitle != "Status: Ready" {
-		t.Fatalf("unexpected status title: %s", readiness.statusTitle)
-	}
-	if readiness.transferTitle != "Transfers: Ready" {
-		t.Fatalf("unexpected transfer title: %s", readiness.transferTitle)
-	}
-	if readiness.dataPasswordActive {
-		t.Fatal("data-password action should not be active for browser-fork key material")
+	if readiness.action != authActionConnect || readiness.sessionTitle != "Session: Not connected" {
+		t.Fatalf("unexpected signed-out readiness: %#v", readiness)
 	}
 }
 
-func TestInspectAuthReadinessBlocksBrowserForkMissingKeyPassword(t *testing.T) {
+func TestInspectAuthReadinessBlocksInvalidSessions(t *testing.T) {
 	now := time.Date(2026, 6, 23, 18, 0, 0, 0, time.UTC)
-	resetRefreshForStatusTest(t, now)
-	home := setupFakeHome(t, fakeHomeOpts{configJSON: `{"keyPasswordProvider":"pass-cli"}`})
-	setupGitConfig(t, "")
-	writeSessionForStatusTest(t, home, sessionMetadata{
-		SessionID:      "session-id",
-		UID:            "uid-123",
-		AccessToken:    "access",
-		RefreshToken:   "refresh",
-		Scopes:         []string{"drive"},
-		PasswordMode:   1,
-		AuthMode:       "browser-fork",
-		TokenExpiresAt: now.Add(24 * time.Hour).UnixMilli(),
-	})
+	invalid := validStatusTestSession(now)
+	invalid.RefreshToken = ""
+	noKeyPasswordProvider := validStatusTestSession(now)
+	noKeyPasswordProvider.KeyPasswordProvider = ""
+	aliasProvider := validStatusTestSession(now)
+	aliasProvider.KeyPasswordProvider = "pass"
+	blankHost := validStatusTestSession(now)
+	blankHost.KeyPasswordHost = "  "
+	cases := []struct {
+		name         string
+		meta         sessionMetadata
+		sessionTitle string
+	}{
+		{"missing refresh token", invalid, "Session: Invalid"},
+		{"missing key-password provider", noKeyPasswordProvider, "Session: Invalid"},
+		{"provider alias", aliasProvider, "Session: Invalid"},
+		{"blank key-password host", blankHost, "Session: Invalid"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			resetRefreshForStatusTest(t, now)
+			home := setupFakeHome(t, fakeHomeOpts{})
+			writeSessionForStatusTest(t, home, tc.meta)
 
-	readiness := inspectAuthReadiness(now)
-	if !readiness.blocked || readiness.ready {
-		t.Fatalf("expected blocked readiness, got %#v", readiness)
-	}
-	if readiness.transferTitle != "Transfers: Reconnect required" {
-		t.Fatalf("unexpected transfer title: %s", readiness.transferTitle)
-	}
-	if readiness.dataPasswordActive {
-		t.Fatal("data-password action should not be active for missing key-password blocker")
-	}
-}
-
-func TestInspectAuthReadinessReadyWithConfiguredDataCredential(t *testing.T) {
-	now := time.Date(2026, 6, 23, 18, 0, 0, 0, time.UTC)
-	resetRefreshForStatusTest(t, now)
-	home := setupFakeHome(t, fakeHomeOpts{
-		configJSON: `{"keyPasswordProvider":"pass-cli","dataCredentialProvider":"pass-cli"}`,
-	})
-	setupGitConfig(t, "")
-	writeSessionForStatusTest(t, home, sessionMetadata{
-		SessionID:            "session-id",
-		UID:                  "uid-123",
-		AccessToken:          "access",
-		RefreshToken:         "refresh",
-		Scopes:               []string{"drive"},
-		PasswordMode:         2,
-		AuthMode:             "browser-fork",
-		KeyPasswordPersisted: true,
-		TokenExpiresAt:       now.Add(24 * time.Hour).UnixMilli(),
-	})
-
-	readiness := inspectAuthReadiness(now)
-	if !readiness.ready || readiness.blocked {
-		t.Fatalf("expected ready readiness, got %#v", readiness)
-	}
-	if readiness.transferTitle != "Transfers: Ready" {
-		t.Fatalf("unexpected transfer title: %s", readiness.transferTitle)
+			readiness := inspectAuthReadiness(now)
+			if !readiness.blocked || readiness.ready {
+				t.Fatalf("expected blocked readiness, got %#v", readiness)
+			}
+			if readiness.sessionTitle != tc.sessionTitle || readiness.statusTitle != "Status: Setup needed" {
+				t.Fatalf("unexpected titles: %s; %s", readiness.sessionTitle, readiness.statusTitle)
+			}
+			if readiness.action != authActionDisconnect {
+				t.Fatalf("signed-in blocked state should offer disconnect, got %s", readiness.action)
+			}
+		})
 	}
 }
 
@@ -349,6 +324,36 @@ func TestDecideRefreshUsesTokenExpiry(t *testing.T) {
 	nearExpiry := sessionMetadata{TokenExpiresAt: now.Add(5 * time.Minute).UnixMilli()}
 	if decision := decideRefresh(now, nearExpiry, sessionRefreshState{}); !decision.Attempt {
 		t.Fatalf("near-expiry token should refresh, got %#v", decision)
+	}
+}
+
+func TestDecideRefreshWithoutExpiryRefreshesAfterFallback(t *testing.T) {
+	written := time.Date(2026, 6, 23, 6, 0, 0, 0, time.UTC)
+	meta := sessionMetadata{UID: "session-1", WrittenAt: written}
+
+	before := written.Add(refreshFallbackInterval - time.Minute)
+	decision := decideRefresh(before, meta, sessionRefreshState{NextAttempt: written.Add(refreshFallbackInterval)})
+	if decision.Attempt || !decision.NextAttempt.Equal(written.Add(refreshFallbackInterval)) {
+		t.Fatalf("before the fallback interval: %#v", decision)
+	}
+
+	// A NextAttempt stored by an earlier tick must not postpone the refresh.
+	after := written.Add(refreshFallbackInterval + time.Minute)
+	stale := sessionRefreshState{NextAttempt: after.Add(refreshFallbackInterval)}
+	if decision := decideRefresh(after, meta, stale); !decision.Attempt {
+		t.Fatalf("a session written %s ago must refresh, got %#v", refreshFallbackInterval+time.Minute, decision)
+	}
+}
+
+func TestReadSessionMetadataRecordsWriteTime(t *testing.T) {
+	now := time.Date(2026, 6, 23, 18, 0, 0, 0, time.UTC)
+	resetRefreshForStatusTest(t, now)
+	home := setupFakeHome(t, fakeHomeOpts{})
+	writeSessionForStatusTest(t, home, validStatusTestSession(now))
+
+	meta, ok := readSessionMetadata()
+	if !ok || meta.WrittenAt.IsZero() {
+		t.Fatalf("readSessionMetadata() = %#v, %v; want the file modification time", meta, ok)
 	}
 }
 
@@ -397,13 +402,13 @@ func TestParseRefreshCommandResultAndTerminalFailure(t *testing.T) {
 func TestDecideRefreshStopsAfterTerminalFailureForSameSession(t *testing.T) {
 	now := time.Date(2026, 6, 23, 18, 0, 0, 0, time.UTC)
 	meta := sessionMetadata{
-		SessionID:      "session-1",
+		UID:            "session-1",
 		TokenExpiresAt: now.Add(5 * time.Minute).UnixMilli(),
 	}
 	health := sessionRefreshState{
-		LastError:       "Invalid refresh token",
-		ActionRequired:  true,
-		ActionSessionID: "session-1",
+		LastError:      "Invalid refresh token",
+		ActionRequired: true,
+		FailureUID:     "session-1",
 	}
 
 	decision := decideRefresh(now, meta, health)
@@ -418,13 +423,13 @@ func TestDecideRefreshStopsAfterTerminalFailureForSameSession(t *testing.T) {
 func TestDecideRefreshAllowsNewSessionAfterTerminalFailure(t *testing.T) {
 	now := time.Date(2026, 6, 23, 18, 0, 0, 0, time.UTC)
 	meta := sessionMetadata{
-		SessionID:      "session-2",
+		UID:            "session-2",
 		TokenExpiresAt: now.Add(5 * time.Minute).UnixMilli(),
 	}
 	health := sessionRefreshState{
-		LastError:       "Invalid refresh token",
-		ActionRequired:  true,
-		ActionSessionID: "session-1",
+		LastError:      "Invalid refresh token",
+		ActionRequired: true,
+		FailureUID:     "session-1",
 	}
 
 	decision := decideRefresh(now, meta, health)
@@ -437,23 +442,13 @@ func TestInspectAuthReadinessBlocksTerminalRefreshFailure(t *testing.T) {
 	now := time.Date(2026, 6, 23, 18, 0, 0, 0, time.UTC)
 	resetRefreshForStatusTest(t, now)
 	home := setupFakeHome(t, fakeHomeOpts{configJSON: `{"keyPasswordProvider":"pass-cli"}`})
-	setupGitConfig(t, "")
-	writeSessionForStatusTest(t, home, sessionMetadata{
-		SessionID:            "session-id",
-		UID:                  "uid-123",
-		AccessToken:          "access",
-		RefreshToken:         "refresh",
-		Scopes:               []string{"drive"},
-		PasswordMode:         1,
-		AuthMode:             "browser-fork",
-		KeyPasswordPersisted: true,
-		TokenExpiresAt:       now.Add(24 * time.Hour).UnixMilli(),
-	})
+	writeSessionForStatusTest(t, home, validStatusTestSession(now))
 	refreshMu.Lock()
 	refreshState = sessionRefreshState{
-		LastError:       "Invalid refresh token",
-		ActionRequired:  true,
-		ActionSessionID: "session-id",
+		LastAttempt:    time.Now(),
+		LastError:      "Invalid refresh token",
+		ActionRequired: true,
+		FailureUID:     "uid-123",
 	}
 	refreshMu.Unlock()
 
@@ -522,8 +517,8 @@ func TestPerformSessionRefreshTimeoutIsRecoverable(t *testing.T) {
 	if state.InProgress {
 		t.Fatal("refresh must not stay in progress after a timeout")
 	}
-	if state.ActionRequired || state.ActionSessionID != "" {
-		t.Fatalf("timeout must be recoverable, got %#v", state)
+	if state.ActionRequired || state.FailureUID != "session-1" {
+		t.Fatalf("timeout must be a recoverable failure of session-1, got %#v", state)
 	}
 	if !strings.Contains(state.LastError, "timed out") {
 		t.Fatalf("LastError = %q, want timeout message", state.LastError)
@@ -531,7 +526,7 @@ func TestPerformSessionRefreshTimeoutIsRecoverable(t *testing.T) {
 	if want := now.Add(refreshRetryInterval); !state.NextAttempt.Equal(want) {
 		t.Fatalf("NextAttempt = %s, want %s", state.NextAttempt, want)
 	}
-	meta := sessionMetadata{SessionID: "session-1", TokenExpiresAt: now.Add(5 * time.Minute).UnixMilli()}
+	meta := sessionMetadata{UID: "session-1", TokenExpiresAt: now.Add(5 * time.Minute).UnixMilli()}
 	if decision := decideRefresh(now.Add(2*refreshRetryInterval), meta, state); !decision.Attempt {
 		t.Fatalf("refresh must be retried after the backoff, got %#v", decision)
 	}
@@ -556,7 +551,7 @@ func TestPerformSessionRefreshRecordsResult(t *testing.T) {
 	}
 	performSessionRefresh(fake, "session-1")
 	state := snapshotRefreshState()
-	if state.InProgress || !state.ActionRequired || state.ActionSessionID != "session-1" {
+	if state.InProgress || !state.ActionRequired || state.FailureUID != "session-1" {
 		t.Fatalf("terminal failure not recorded: %#v", state)
 	}
 }
@@ -608,5 +603,260 @@ func TestTakeTraySnapshotReadsEachSourceOnce(t *testing.T) {
 	}
 	if *queries != 1 {
 		t.Fatalf("git queried %d times for one snapshot, want 1", *queries)
+	}
+}
+
+func TestNextRefreshAttemptLeadIsAtMostHalfTheLifetime(t *testing.T) {
+	now := time.Date(2026, 6, 23, 18, 0, 0, 0, time.UTC)
+	meta := sessionMetadata{WrittenAt: now, TokenExpiresAt: now.Add(4 * time.Minute).UnixMilli()}
+
+	if got, want := nextRefreshAttempt(now, meta, time.Time{}), now.Add(2*time.Minute); !got.Equal(want) {
+		t.Fatalf("next attempt = %s, want %s", got, want)
+	}
+	if decision := decideRefresh(now, meta, sessionRefreshState{}); decision.Attempt {
+		t.Fatalf("a token refreshed just now must not refresh again, got %#v", decision)
+	}
+}
+
+func TestNextRefreshAttemptWaitsRetryIntervalAfterSuccess(t *testing.T) {
+	now := time.Date(2026, 6, 23, 18, 0, 0, 0, time.UTC)
+	meta := sessionMetadata{TokenExpiresAt: now.Add(30 * time.Second).UnixMilli()}
+
+	if got, want := nextRefreshAttempt(now, meta, now), now.Add(refreshRetryInterval); !got.Equal(want) {
+		t.Fatalf("next attempt = %s, want %s", got, want)
+	}
+	if decision := decideRefresh(now.Add(5*time.Second), meta, sessionRefreshState{LastSuccess: now}); decision.Attempt {
+		t.Fatalf("refresh must wait refreshRetryInterval after a success, got %#v", decision)
+	}
+}
+
+func TestWithoutStaleFailureClearsFailureAfterSessionRewrite(t *testing.T) {
+	failedAt := time.Date(2026, 6, 23, 18, 0, 0, 0, time.UTC)
+	health := sessionRefreshState{
+		LastAttempt:    failedAt,
+		LastError:      "Invalid refresh token",
+		ActionRequired: true,
+		FailureUID:     "uid-123",
+	}
+
+	kept := withoutStaleFailure(sessionMetadata{UID: "uid-123", WrittenAt: failedAt.Add(-time.Minute)}, health)
+	if kept.LastError == "" || !kept.ActionRequired {
+		t.Fatalf("a failure after the last write must be kept, got %#v", kept)
+	}
+	cleared := withoutStaleFailure(sessionMetadata{UID: "uid-123", WrittenAt: failedAt.Add(time.Minute)}, health)
+	if cleared.LastError != "" || cleared.ActionRequired || cleared.FailureUID != "" || !cleared.NextAttempt.IsZero() {
+		t.Fatalf("a failure before the last write must be dropped, got %#v", cleared)
+	}
+}
+
+func TestMaybeRefreshSessionSkipsInvalidSession(t *testing.T) {
+	now := time.Date(2026, 6, 23, 18, 0, 0, 0, time.UTC)
+	resetRefreshForStatusTest(t, now)
+	home := setupFakeHome(t, fakeHomeOpts{})
+	meta := validStatusTestSession(now)
+	meta.KeyPasswordProvider = ""
+	meta.TokenExpiresAt = now.Add(-time.Hour).UnixMilli()
+	writeSessionForStatusTest(t, home, meta)
+	origFindDriveCLI := findDriveCLI
+	findDriveCLI = func() string { return "" }
+	t.Cleanup(func() { findDriveCLI = origFindDriveCLI })
+
+	maybeRefreshSession()
+
+	if state := snapshotRefreshState(); state.InProgress || !state.LastAttempt.IsZero() || state.LastError != "" {
+		t.Fatalf("an invalid session must not be refreshed, got %#v", state)
+	}
+}
+
+func TestPerformSessionRefreshNoSessionIsNotSuccess(t *testing.T) {
+	setupTrayLogForTest(t)
+	if runtime.GOOS == "windows" {
+		t.Skip("needs a POSIX shell")
+	}
+	now := time.Date(2026, 6, 23, 18, 0, 0, 0, time.UTC)
+	resetRefreshForStatusTest(t, now)
+	setupFakeHome(t, fakeHomeOpts{})
+
+	fake := filepath.Join(t.TempDir(), "proton-drive-cli")
+	script := "#!/bin/sh\necho '{\"ok\":true,\"refreshed\":false,\"state\":\"no_session\",\"action\":\"none\"}'\n"
+	if err := os.WriteFile(fake, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if !markRefreshStarted(now) {
+		t.Fatal("precondition: refresh not in progress")
+	}
+	performSessionRefresh(fake, "uid-123")
+
+	state := snapshotRefreshState()
+	if !state.LastSuccess.IsZero() {
+		t.Fatalf("no_session must not count as a refresh, got %#v", state)
+	}
+	if !state.ActionRequired || state.FailureUID != "uid-123" {
+		t.Fatalf("no_session must stop the refresh loop for the session, got %#v", state)
+	}
+}
+
+func TestInspectAuthReadinessExpiredTokenStaysReady(t *testing.T) {
+	now := time.Date(2026, 6, 23, 18, 0, 0, 0, time.UTC)
+	resetRefreshForStatusTest(t, now)
+	home := setupFakeHome(t, fakeHomeOpts{})
+	expired := validStatusTestSession(now)
+	expired.TokenExpiresAt = now.Add(-time.Minute).UnixMilli()
+	writeSessionForStatusTest(t, home, expired)
+
+	readiness := inspectAuthReadiness(now)
+	if !readiness.ready || readiness.blocked {
+		t.Fatalf("bridge commands refresh an expired access token; want ready, got %#v", readiness)
+	}
+	if readiness.sessionTitle != "Session: Signed in (pass-cli), token refresh due" {
+		t.Fatalf("unexpected session title: %s", readiness.sessionTitle)
+	}
+}
+
+func TestRefreshBackoffDoublesUpToMaximum(t *testing.T) {
+	cases := map[int]time.Duration{
+		1:  refreshRetryInterval,
+		2:  2 * refreshRetryInterval,
+		3:  4 * refreshRetryInterval,
+		6:  refreshMaxRetryInterval,
+		50: refreshMaxRetryInterval,
+	}
+	for failures, want := range cases {
+		if got := refreshBackoff(failures); got != want {
+			t.Errorf("refreshBackoff(%d) = %s, want %s", failures, got, want)
+		}
+	}
+}
+
+func TestWithoutStaleFailureDropsFailureOfAnotherSession(t *testing.T) {
+	failedAt := time.Date(2026, 6, 23, 18, 0, 0, 0, time.UTC)
+	health := sessionRefreshState{LastAttempt: failedAt, LastError: "session replaced", FailureUID: "uid-old", NextAttempt: failedAt.Add(time.Hour)}
+
+	got := withoutStaleFailure(sessionMetadata{UID: "uid-new", WrittenAt: failedAt.Add(-time.Second)}, health)
+	if got.LastError != "" || !got.NextAttempt.IsZero() {
+		t.Fatalf("a failure of another session uid must be dropped, got %#v", got)
+	}
+}
+
+func TestClearRefreshStateKeepsRunningRefresh(t *testing.T) {
+	now := time.Date(2026, 6, 23, 18, 0, 0, 0, time.UTC)
+	resetRefreshForStatusTest(t, now)
+	if !markRefreshStarted(now) {
+		t.Fatal("precondition: refresh not in progress")
+	}
+	clearRefreshState()
+	if markRefreshStarted(now) {
+		t.Fatal("a second refresh must not start while the first still runs")
+	}
+}
+
+func TestRefreshTitleForInvalidSession(t *testing.T) {
+	now := time.Date(2026, 6, 23, 18, 0, 0, 0, time.UTC)
+	meta := validStatusTestSession(now)
+	meta.KeyPasswordHost = ""
+	if got := refreshTitle(now, meta, true, sessionRefreshState{}); got != "Refresh: Reconnect required" {
+		t.Fatalf("refreshTitle() = %q, want Reconnect required", got)
+	}
+}
+
+func TestAuthFailureBeforeLastLoginDoesNotOverrideReadiness(t *testing.T) {
+	login := time.Date(2026, 6, 23, 18, 0, 0, 0, time.UTC)
+	ready := authReadiness{signedIn: true, ready: true, sessionChangedAt: login, tooltip: "Proton LFS - Ready"}
+	stale := traySnapshot{report: config.StatusReport{State: config.StateAuthRequired, Timestamp: login.Add(-time.Minute)}, hasReport: true, readiness: ready}
+	if icon, tip := resolveTrayIcon(stale); string(icon) != string(iconOK) || tip != "Proton LFS - Ready" {
+		t.Fatalf("an auth failure before the last login must not show, got tooltip %q", tip)
+	}
+	current := traySnapshot{report: config.StatusReport{State: config.StateAuthRequired, Timestamp: login.Add(time.Minute)}, hasReport: true, readiness: ready}
+	if icon, _ := resolveTrayIcon(current); string(icon) != string(iconError) {
+		t.Fatal("an auth failure after the last login must show the error icon")
+	}
+}
+
+func TestObserveSessionUIDRecordsLoginsOnly(t *testing.T) {
+	start := time.Date(2026, 6, 23, 18, 0, 0, 0, time.UTC)
+	resetRefreshForStatusTest(t, start)
+
+	if at := observeSessionUID("uid-1", start); !at.IsZero() {
+		t.Fatalf("the first observation has no change time, got %s", at)
+	}
+	if at := observeSessionUID("uid-1", start.Add(time.Hour)); !at.IsZero() {
+		t.Fatalf("a token refresh keeps the uid and is no change, got %s", at)
+	}
+	login := start.Add(2 * time.Hour)
+	if at := observeSessionUID("uid-2", login); !at.Equal(login) {
+		t.Fatalf("a new uid is a login at %s, got %s", login, at)
+	}
+}
+
+func TestLoginRateLimitYieldsToReadinessAfterLogin(t *testing.T) {
+	login := time.Date(2026, 6, 23, 18, 0, 0, 0, time.UTC)
+	ready := authReadiness{signedIn: true, ready: true, sessionChangedAt: login, tooltip: "Proton LFS - Ready"}
+	loginLimit := traySnapshot{report: config.StatusReport{State: config.StateRateLimited, LastOp: "login", Timestamp: login.Add(-time.Minute)}, hasReport: true, readiness: ready}
+	if icon, _ := resolveTrayIcon(loginLimit); string(icon) != string(iconOK) {
+		t.Fatal("a login rate limit before a successful login must yield to readiness")
+	}
+	transferLimit := loginLimit
+	transferLimit.report.LastOp = "upload"
+	if icon, _ := resolveTrayIcon(transferLimit); string(icon) != string(iconError) {
+		t.Fatal("a transfer rate limit is not resolved by a login")
+	}
+}
+
+func TestCurrentRefreshStateResetsBackoffForNewSession(t *testing.T) {
+	now := time.Date(2026, 6, 23, 18, 0, 0, 0, time.UTC)
+	resetRefreshForStatusTest(t, now)
+	refreshMu.Lock()
+	refreshState = sessionRefreshState{LastAttempt: now, LastError: "network", FailureUID: "uid-old", ConsecutiveFailures: 5}
+	refreshMu.Unlock()
+
+	currentRefreshState(sessionMetadata{UID: "uid-new"})
+	if state := snapshotRefreshState(); state.ConsecutiveFailures != 0 || state.LastError != "" {
+		t.Fatalf("a new session starts without the old backoff, got %#v", state)
+	}
+}
+
+func TestReadSessionMetadataTreatsUndecodableFileAsInvalidSession(t *testing.T) {
+	now := time.Date(2026, 6, 23, 18, 0, 0, 0, time.UTC)
+	resetRefreshForStatusTest(t, now)
+	home := setupFakeHome(t, fakeHomeOpts{})
+	dir := filepath.Join(home, ".proton-drive-cli")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "session.json"), []byte(`{"uid":123}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	readiness := inspectAuthReadiness(now)
+	if readiness.sessionTitle != "Session: Invalid" || readiness.action != authActionDisconnect {
+		t.Fatalf("an undecodable session file is an invalid session, got %#v", readiness)
+	}
+}
+
+func TestPerformSessionRefreshHonoursRetryAfter(t *testing.T) {
+	setupTrayLogForTest(t)
+	if runtime.GOOS == "windows" {
+		t.Skip("needs a POSIX shell")
+	}
+	now := time.Date(2026, 6, 23, 18, 0, 0, 0, time.UTC)
+	resetRefreshForStatusTest(t, now)
+	setupFakeHome(t, fakeHomeOpts{})
+
+	fake := filepath.Join(t.TempDir(), "proton-drive-cli")
+	script := "#!/bin/sh\necho '{\"ok\":false,\"state\":\"refresh_failed\",\"errorCode\":\"RATE_LIMITED\",\"recoverable\":true,\"retryAfter\":600}'\nexit 1\n"
+	if err := os.WriteFile(fake, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if !markRefreshStarted(now) {
+		t.Fatal("precondition: refresh not in progress")
+	}
+	performSessionRefresh(fake, "uid-123")
+
+	state := snapshotRefreshState()
+	if state.ActionRequired {
+		t.Fatalf("a rate-limited refresh is recoverable, got %#v", state)
+	}
+	if want := now.Add(10 * time.Minute); !state.NextAttempt.Equal(want) {
+		t.Fatalf("NextAttempt = %s, want the Retry-After %s", state.NextAttempt, want)
 	}
 }

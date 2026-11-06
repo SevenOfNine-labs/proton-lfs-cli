@@ -34,7 +34,6 @@ func shouldExit(event, exitOn string) bool {
 }
 
 func main() {
-	_ = flag.String("local-store-dir", "", "ignored; accepted for argument compatibility with adapter config")
 	exitOn := flag.String("exit-on", "both", "transfer event after which the adapter exits without completing: upload, download, or both")
 	delayMS := flag.Int("delay-ms", 15000, "delay before exiting, in milliseconds")
 	flag.Parse()
@@ -51,7 +50,7 @@ func main() {
 	dec := json.NewDecoder(os.Stdin)
 	enc := json.NewEncoder(os.Stdout)
 
-	// Stage 1 handshake: first message must be init and empty object response.
+	// Git LFS custom transfer specification, stage 1: init, answered with {}.
 	var initMsg inboundMessage
 	if err := dec.Decode(&initMsg); err != nil {
 		return

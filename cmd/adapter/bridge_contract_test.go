@@ -9,6 +9,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/SevenOfNine-labs/proton-lfs-cli/internal/bridgeproto"
 )
 
 type contractSchema struct {
@@ -108,8 +110,6 @@ func stringSet(values []string) map[string]struct{} {
 func TestBridgeContractRequestFieldsAreKnown(t *testing.T) {
 	schema := readBridgeContract[contractSchema](t, "request.schema.json")
 	expected := sortedStrings([]string{
-		"dataCredentialProvider",
-		"dataCredentialHost",
 		"appVersion",
 		"oid",
 		"path",
@@ -124,9 +124,7 @@ func TestBridgeContractRequestFieldsAreKnown(t *testing.T) {
 
 func TestBridgeContractRequestFieldRulesCoverRootRequests(t *testing.T) {
 	contract := readBridgeContract[bridgeRequestFieldRulesContract](t, "request-field-rules.json")
-	baseCredentialFields := []string{
-		"dataCredentialProvider",
-		"dataCredentialHost",
+	baseFields := []string{
 		"storageBase",
 		"appVersion",
 	}
@@ -135,14 +133,11 @@ func TestBridgeContractRequestFieldRulesCoverRootRequests(t *testing.T) {
 		command string
 		fields  []string
 	}{
-		{command: "auth-state", fields: baseCredentialFields},
-		{command: "init", fields: baseCredentialFields},
-		{command: "upload", fields: append(append([]string(nil), baseCredentialFields...), "oid", "path")},
-		{command: "download", fields: append(append([]string(nil), baseCredentialFields...), "oid", "outputPath")},
-		{command: "exists", fields: append(append([]string(nil), baseCredentialFields...), "oid")},
-		{command: "delete", fields: append(append([]string(nil), baseCredentialFields...), "oid")},
-		{command: "batch-exists", fields: append(append([]string(nil), baseCredentialFields...), "oids")},
-		{command: "batch-delete", fields: append(append([]string(nil), baseCredentialFields...), "oids")},
+		{command: "auth-state", fields: baseFields},
+		{command: "init", fields: baseFields},
+		{command: "upload", fields: append(append([]string(nil), baseFields...), "oid", "path")},
+		{command: "download", fields: append(append([]string(nil), baseFields...), "oid", "outputPath")},
+		{command: "exists", fields: append(append([]string(nil), baseFields...), "oid")},
 	}
 
 	for _, tc := range cases {
@@ -173,7 +168,7 @@ func TestBridgeContractResponseEnvelopeFieldsMatchGoStruct(t *testing.T) {
 		t.Fatalf("expected response schema to define success and failure envelopes, got %d variants", len(schema.OneOf))
 	}
 
-	want := jsonFieldNames(BridgeResponse{})
+	want := jsonFieldNames(bridgeproto.Response{})
 	for idx, variant := range schema.OneOf {
 		assertStringSlicesEqual(t, "bridge response fields variant "+string(rune('0'+idx)), sortedKeys(variant.Properties), want)
 	}
@@ -192,13 +187,11 @@ func TestBridgeContractAuthStatesAreClassifiedForTransfer(t *testing.T) {
 		errorCode ErrorCode
 		ok        bool
 	}{
-		"ready":               {ok: true},
-		"needs_login":         {code: 401, errorCode: ErrCodeAuthRequired},
-		"needs_data_password": {code: 401, errorCode: ErrCodeDataPasswordRequired},
-		"needs_key_password":  {code: 401, errorCode: ErrCodeKeyPasswordRequired},
-		"session_expired":     {code: 401, errorCode: ErrCodeAuthRequired},
-		"session_invalid":     {code: 401, errorCode: ErrCodeAuthRequired},
-		"configuration_error": {code: 400, errorCode: ErrCodeInvalidRequest},
+		"ready":              {ok: true},
+		"needs_login":        {code: 401, errorCode: ErrCodeAuthRequired},
+		"needs_key_password": {code: 401, errorCode: ErrCodeKeyPasswordRequired},
+		"session_expired":    {ok: true},
+		"session_invalid":    {code: 401, errorCode: ErrCodeAuthRequired},
 	}
 
 	for _, state := range states {
@@ -228,36 +221,33 @@ func TestBridgeContractAuthStatesAreClassifiedForTransfer(t *testing.T) {
 func TestBridgeContractErrorCodesAreClassified(t *testing.T) {
 	contract := readBridgeContract[bridgeErrorCodeContract](t, "error-code-map.json")
 	expected := map[string]ErrorCode{
-		"AUTH_FAILED":            ErrCodeAuthRequired,
-		"SESSION_EXPIRED":        ErrCodeAuthRequired,
-		"INVALID_CREDENTIALS":    ErrCodeAuthRequired,
-		"TWO_FACTOR_REQUIRED":    ErrCodeTwoFactorRequired,
-		"DATA_PASSWORD_REQUIRED": ErrCodeDataPasswordRequired,
-		"KEY_PASSWORD_REQUIRED":  ErrCodeKeyPasswordRequired,
-		"NETWORK_ERROR":          ErrCodeNetworkFailure,
-		"TIMEOUT":                ErrCodeNetworkFailure,
-		"CONNECTION_REFUSED":     ErrCodeNetworkFailure,
-		"API_ERROR":              ErrCodeServerError,
-		"INSUFFICIENT_SCOPE":     ErrCodeInsufficientScope,
-		"RATE_LIMITED":           ErrCodeRateLimited,
-		"QUOTA_EXCEEDED":         ErrCodeServerError,
-		"NOT_FOUND":              ErrCodeNotFound,
-		"FILE_NOT_FOUND":         ErrCodeNotFound,
-		"FILE_TOO_LARGE":         ErrCodeInvalidRequest,
-		"PERMISSION_DENIED":      ErrCodePermissionDenied,
-		"DISK_FULL":              ErrCodeServerError,
-		"UPLOAD_FAILED":          ErrCodeServerError,
-		"DOWNLOAD_FAILED":        ErrCodeServerError,
-		"ENCRYPTION_FAILED":      ErrCodeServerError,
-		"DECRYPTION_FAILED":      ErrCodeServerError,
-		"INVALID_FILE":           ErrCodeInvalidRequest,
-		"PATH_NOT_FOUND":         ErrCodeNotFound,
-		"INVALID_PATH":           ErrCodeInvalidRequest,
-		"NOT_A_FOLDER":           ErrCodeInvalidRequest,
-		"CAPTCHA_REQUIRED":       ErrCodeCaptchaRequired,
-		"UNKNOWN_ERROR":          ErrCodeServerError,
-		"VALIDATION_ERROR":       ErrCodeInvalidRequest,
-		"OPERATION_CANCELLED":    ErrCodeInvalidRequest,
+		"AUTH_FAILED":           ErrCodeAuthRequired,
+		"SESSION_EXPIRED":       ErrCodeAuthRequired,
+		"KEY_PASSWORD_REQUIRED": ErrCodeKeyPasswordRequired,
+		"NETWORK_ERROR":         ErrCodeNetworkFailure,
+		"TIMEOUT":               ErrCodeNetworkFailure,
+		"CONNECTION_REFUSED":    ErrCodeNetworkFailure,
+		"API_ERROR":             ErrCodeServerError,
+		"INSUFFICIENT_SCOPE":    ErrCodeInsufficientScope,
+		"RATE_LIMITED":          ErrCodeRateLimited,
+		"QUOTA_EXCEEDED":        ErrCodeServerError,
+		"NOT_FOUND":             ErrCodeNotFound,
+		"FILE_NOT_FOUND":        ErrCodeNotFound,
+		"FILE_TOO_LARGE":        ErrCodeInvalidRequest,
+		"PERMISSION_DENIED":     ErrCodePermissionDenied,
+		"DISK_FULL":             ErrCodeServerError,
+		"UPLOAD_FAILED":         ErrCodeServerError,
+		"DOWNLOAD_FAILED":       ErrCodeServerError,
+		"ENCRYPTION_FAILED":     ErrCodeServerError,
+		"DECRYPTION_FAILED":     ErrCodeServerError,
+		"INVALID_FILE":          ErrCodeInvalidRequest,
+		"PATH_NOT_FOUND":        ErrCodeNotFound,
+		"INVALID_PATH":          ErrCodeInvalidRequest,
+		"NOT_A_FOLDER":          ErrCodeInvalidRequest,
+		"CAPTCHA_REQUIRED":      ErrCodeCaptchaRequired,
+		"UNKNOWN_ERROR":         ErrCodeServerError,
+		"VALIDATION_ERROR":      ErrCodeInvalidRequest,
+		"OPERATION_CANCELLED":   ErrCodeInvalidRequest,
 	}
 
 	if len(contract.ErrorCodes) != len(expected) {
@@ -314,18 +304,5 @@ func TestBridgeContractPayloadSchemasMatchGoParsers(t *testing.T) {
 	}
 	if _, err := parseBridgeExistsPayload([]byte(`{"oid":"` + strings.Repeat("a", 64) + `","exists":true}`)); err != nil {
 		t.Fatalf("Go parser rejects a schema-valid exists payload: %v", err)
-	}
-
-	for _, name := range []string{"batch-exists.schema.json", "batch-delete.schema.json"} {
-		schema := readBridgeContract[payloadSchema](t, filepath.Join("payloads", name))
-		if schema.AdditionalProperties {
-			t.Fatalf("%s must forbid additional properties", name)
-		}
-		if got := sortedKeys(schema.Properties); strings.Join(got, ",") != "results" {
-			t.Fatalf("%s properties = %v, Go parser accepts only results", name, got)
-		}
-		if _, err := parseBridgeBoolMapPayload("batch", []byte(`{"results":{"`+strings.Repeat("b", 64)+`":true}}`)); err != nil {
-			t.Fatalf("Go parser rejects a schema-valid %s payload: %v", name, err)
-		}
 	}
 }

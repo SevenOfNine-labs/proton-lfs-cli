@@ -52,9 +52,8 @@ sdk_gitlinks="$(
   git -C "$ROOT/submodules/proton-drive-cli/submodules/sdk" ls-tree -r HEAD |
     awk '$2 == "commit" { print $4 }'
 )"
-# The pinned Proton SDK (js/v0.23.0) records no nested gitlinks; if a future
-# bump introduces some, list them but do not descend: only the root-owned
-# pins and the SDK gitlink above are release evidence.
+# Nested SDK gitlinks are listed, not verified: the release evidence is the
+# root-owned pins and the SDK gitlink above.
 if [ -n "$sdk_gitlinks" ]; then
   echo "NOTE: Proton SDK records nested gitlinks (not initialized or verified here):"
   while IFS= read -r sdk_gitlink; do

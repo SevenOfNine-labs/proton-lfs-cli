@@ -25,36 +25,19 @@ exit 9
 	if err != nil {
 		t.Fatalf("export-pass-env failed: %v\n%s", err, out)
 	}
-	for _, want := range []string{
-		"export PROTON_PASS_CLI_BIN=",
-		"unset PROTON_PASS_REF_ROOT",
-		"unset PROTON_PASS_USERNAME_REF",
-		"unset PROTON_PASS_PASSWORD_REF",
-		"unset PROTON_USERNAME",
-		"unset PROTON_PASSWORD",
-	} {
-		if !strings.Contains(out, want) {
-			t.Fatalf("expected %q in output:\n%s", want, out)
-		}
-	}
-	for _, forbidden := range []string{
-		"export PROTON_PASS_USERNAME_REF",
-		"export PROTON_PASS_PASSWORD_REF",
-		"pass://Personal",
-	} {
-		if strings.Contains(out, forbidden) {
-			t.Fatalf("export-pass-env must not emit %q:\n%s", forbidden, out)
-		}
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	if len(lines) != 1 || !strings.HasPrefix(lines[0], "export PROTON_PASS_CLI_BIN=") || !strings.Contains(lines[0], "fake-pass-cli.sh") {
+		t.Fatalf("export-pass-env must print only the PROTON_PASS_CLI_BIN export:\n%s", out)
 	}
 }
 
-func TestExportPassEnvRejectsLegacyAccountRefs(t *testing.T) {
-	out, err := runExportPassEnv(t, "--username-ref", "pass://Personal/Proton/username", "--skip-check")
+func TestExportPassEnvRejectsUnknownOption(t *testing.T) {
+	out, err := runExportPassEnv(t, "--no-such-option", "--skip-check")
 	if err == nil {
-		t.Fatalf("expected legacy username ref to fail:\n%s", out)
+		t.Fatalf("expected unknown option to fail:\n%s", out)
 	}
-	if !strings.Contains(out, "Account credential reference options were removed") {
-		t.Fatalf("expected removed account ref error, got:\n%s", out)
+	if !strings.Contains(out, "Unknown argument: --no-such-option") {
+		t.Fatalf("expected unknown argument error, got:\n%s", out)
 	}
 }
 

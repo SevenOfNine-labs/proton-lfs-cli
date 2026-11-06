@@ -27,7 +27,8 @@ End-to-end encrypted Git LFS backend for Proton Drive.
 - Node.js 22+ to run `proton-drive-cli` from `dist/index.js` and to build the
   vendored Proton SDK; Node.js 26 (`.node-version`) to build the standalone
   `proton-drive-cli` binary (`make build-sea`) and in CI
-- Yarn 4 (via Corepack) or npm
+- Yarn 4 (via Corepack) for proton-drive-cli's dependencies; npm for the
+  vendored Proton SDK build
 - git-lfs
 - pass-cli 2.7.0 when Proton Pass stores the browser-fork key password (the
   `git-credential` provider needs no extra tool)
@@ -88,15 +89,10 @@ make test-integration-sdk
 ```
 
 Two-factor authentication and CAPTCHA are completed in the browser during
-`proton-drive-cli login`. Browser-fork sessions unlock Drive with the stored
-key password, also for accounts in two-password mode. Configure a separate
-mailbox/data credential only if `proton-drive-cli doctor` or
-`bridge auth-state` reports `needs_data_password`:
-
-```bash
-git config lfs.customtransfer.proton.args \
-  "--backend sdk --data-credential-provider git-credential"
-```
+`proton-drive-cli login`. The browser fork delivers the key password for
+every account type, two-password accounts included; transfers unlock Drive
+with the stored key password. `proton-drive-cli doctor` checks the setup
+offline.
 
 If your Node binary is managed in shell startup (for example `nvm` in
 `~/.zshrc`), pass it explicitly:
@@ -115,19 +111,16 @@ make test-integration-sdk
 ## Credentials
 
 Account authorization uses browser sign-in. Proton Pass or `git-credential`
-only stores the browser-derived key password (and, for two-password
-accounts, the mailbox/data password):
+only stores the browser-derived key password, keyed by the session UID:
 
 ```bash
 pass-cli login
 eval "$(./scripts/export-pass-env.sh)"
 ```
 
-`export-pass-env.sh` checks that pass-cli is logged in (`pass-cli info`),
-exports `PROTON_PASS_CLI_BIN` and unsets the former account-credential
-reference variables (`PROTON_PASS_REF_ROOT`, `PROTON_PASS_USERNAME_REF`,
-`PROTON_PASS_PASSWORD_REF`, `PROTON_USERNAME`, `PROTON_PASSWORD`); it never
-exports a Proton username or password.
+`export-pass-env.sh` checks that pass-cli is installed and logged in
+(`pass-cli info`) and prints only `export PROTON_PASS_CLI_BIN=<binary>`;
+`--pass-cli <bin>` names another binary and `--skip-check` skips the check.
 
 ## Repository Layout
 
@@ -142,8 +135,8 @@ exports a Proton username or password.
   live canary gates.
 - `scripts/`: Build, packaging, install and canary scripts.
 - `tests/integration/`: black-box Git LFS integration tests.
-- `docs/`: architecture, operations, reference, testing, security and history
-  docs (start at `docs/README.md`).
+- `docs/`: architecture, operations, reference, testing and security docs
+  (start at `docs/README.md`).
 - `submodules/`: upstream references (`git-lfs` v3.8.1, `pass-cli` 2.7.0,
   `proton-drive-cli`).
 

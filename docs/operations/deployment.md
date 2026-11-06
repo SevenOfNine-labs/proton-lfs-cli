@@ -28,15 +28,15 @@ git submodule update --init submodules/git-lfs submodules/pass-cli submodules/pr
 git -C submodules/proton-drive-cli submodule update --init submodules/sdk
 make check-submodules
 make setup
-make build-all    # Builds Go adapter, Git LFS, and proton-drive-cli
+make build-all    # Go adapter, tray app, Git LFS, vendored Proton SDK and proton-drive-cli
 make test
 make test-integration
 ```
 
 `make check-submodules` verifies the root-owned submodules and the
 `proton-drive-cli` SDK gitlink without recursing into the Proton SDK (the
-pinned js/v0.23.0 records no nested gitlinks; any future ones are listed,
-not verified).
+pinned js/v0.23.0 records no nested gitlinks; the script lists nested
+gitlinks without verifying them).
 
 Build proton-drive-cli (the vendored Proton SDK is built once by
 `make build-sdk`; `make build-all` runs both):
@@ -50,19 +50,17 @@ SDK-backed path:
 
 ```bash
 pass-cli login
+proton-drive-cli login --key-password-provider pass-cli
 make test-integration-sdk
 ```
 
 Sign in once with `proton-drive-cli login --key-password-provider <provider>`
 before SDK transfers; two-factor authentication and CAPTCHA are completed in
-the browser. Browser-fork sessions use
-the stored UID-scoped key password for Drive unlocks. Configure a separate
-mailbox/data password credential provider only if offline doctor reports
-`needs_data_password`, and never use secret environment variables:
-
-```bash
-git config lfs.customtransfer.proton.args "--backend=sdk --data-credential-provider git-credential"
-```
+the browser. The browser fork delivers the key password for every account
+type, and proton-drive-cli stores it, keyed by the session UID, in the
+chosen provider; transfers unlock Drive with it. No password is ever passed
+through an environment variable. Check readiness offline with
+`proton-drive-cli doctor`.
 
 If `node` is not visible to non-interactive shells, pass an explicit binary path:
 
@@ -107,6 +105,17 @@ Extract `proton-lfs-cli-linux-amd64.tar.gz` or
 `git-lfs-proton-adapter` and `proton-drive-cli` on `PATH` (`make install`
 copies them to `~/.local/bin` on Linux).
 
+### After installing or updating
+
+After installing or updating, write the global Git LFS settings for the
+installed programs and sign in whenever `proton-lfs-tray status` does not
+report `logged in, key password in …`:
+
+```bash
+proton-lfs-tray register
+proton-drive-cli login        # or Connect to Proton in the tray
+```
+
 ## Git LFS Agent Wiring
 
 Repository-level configuration example:
@@ -114,7 +123,7 @@ Repository-level configuration example:
 ```bash
 git lfs install --local
 git config lfs.customtransfer.proton.path "$(pwd)/bin/git-lfs-proton-adapter"
-git config lfs.customtransfer.proton.args "--backend=local"
+git config lfs.customtransfer.proton.args "--backend=local --local-store-dir=$HOME/.lfs-store"
 git config lfs.standalonetransferagent proton
 ```
 

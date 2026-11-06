@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -23,16 +22,13 @@ const (
 	gitStandaloneAgent    = "proton"
 )
 
-// gitLFSConfig holds the two global git settings the tray reads.
+// gitLFSConfig holds the global git setting the tray reads.
 type gitLFSConfig struct {
 	StandaloneAgent string // lfs.standalonetransferagent
-	TransferArgs    string // lfs.customtransfer.proton.args
 }
 
-// gitConfigCache keeps the last gitLFSConfig together with a stamp of the
-// global config files (size and mtime). The poll loop runs every 5 s and
-// must not spawn git on every tick; the values are re-read only when a
-// file changes or after the tray itself writes the registration.
+// gitConfigCache keeps the last gitLFSConfig with a size and mtime stamp of
+// the global config files, so the poll loop spawns git only after a change.
 type gitConfigCache struct {
 	mu    sync.Mutex
 	stamp string
@@ -45,10 +41,9 @@ var (
 	queryGitLFSConfigFn = queryGitLFSConfig
 )
 
-// globalGitConfigFiles lists the files git reads for --global, per
-// git-config(1) FILES: $GIT_CONFIG_GLOBAL when set, otherwise
-// $XDG_CONFIG_HOME/git/config (default ~/.config/git/config) and
-// ~/.gitconfig, both of which may exist.
+// globalGitConfigFiles lists the files git reads for --global (git-config(1)
+// FILES): $GIT_CONFIG_GLOBAL when set, otherwise $XDG_CONFIG_HOME/git/config
+// (default ~/.config/git/config) and ~/.gitconfig.
 func globalGitConfigFiles() []string {
 	if p := strings.TrimSpace(os.Getenv("GIT_CONFIG_GLOBAL")); p != "" {
 		return []string{p}
@@ -101,29 +96,18 @@ func invalidateGitLFSConfig() {
 	gitLFSConfigCache.mu.Unlock()
 }
 
-// queryGitLFSConfig reads both keys with a single git invocation. git exits
-// with status 1 when no key matches, which is the unregistered state.
+// queryGitLFSConfig reads the registration with `git config --global --get`,
+// which exits with status 1 when the key is unset (git-config(1)).
 func queryGitLFSConfig() gitLFSConfig {
 	ctx, cancel := context.WithTimeout(context.Background(), gitCommandTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "git", "config", "--global", "--get-regexp",
-		`^lfs\.(standalonetransferagent|customtransfer\.proton\.args)$`)
+	cmd := exec.CommandContext(ctx, "git", "config", "--global", "--get", gitKeyStandaloneAgent)
 	cmd.WaitDelay = subprocessWaitDelay
 	out, err := cmd.Output()
 	if err != nil {
 		return gitLFSConfig{}
 	}
-	var cfg gitLFSConfig
-	for _, line := range strings.Split(string(out), "\n") {
-		key, value, _ := strings.Cut(line, " ")
-		switch key {
-		case gitKeyStandaloneAgent:
-			cfg.StandaloneAgent = strings.TrimSpace(value)
-		case gitKeyTransferArgs:
-			cfg.TransferArgs = strings.TrimSpace(value)
-		}
-	}
-	return cfg
+	return gitLFSConfig{StandaloneAgent: strings.TrimSpace(string(out))}
 }
 
 // writeGitLFSRegistration points git-lfs at the adapter in the global
@@ -151,26 +135,5 @@ func runGitConfigGlobal(key, value string) error {
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("git config --global %s: %w: %s", key, err, strings.TrimSpace(string(out)))
 	}
-	return nil
-}
-
-// formerCredentialProviderArg matches the --credential-provider option that
-// registrations written before 2026-11 put into lfs.customtransfer.proton.args;
-// the adapter no longer defines it and refuses to start with it.
-var formerCredentialProviderArg = regexp.MustCompile(`\s*--credential-provider(?:=|\s+)(?:'[^']*'|"[^"]*"|\S+)`)
-
-// migrateGitLFSRegistration removes --credential-provider from an existing
-// registration and keeps every other argument unchanged.
-func migrateGitLFSRegistration() error {
-	cfg := readGitLFSConfig()
-	if !formerCredentialProviderArg.MatchString(cfg.TransferArgs) {
-		return nil
-	}
-	args := strings.TrimSpace(formerCredentialProviderArg.ReplaceAllString(cfg.TransferArgs, ""))
-	if err := runGitConfigGlobal(gitKeyTransferArgs, args); err != nil {
-		return err
-	}
-	invalidateGitLFSConfig()
-	trayLog.Printf("git config: removed --credential-provider from %s", gitKeyTransferArgs)
 	return nil
 }

@@ -1,9 +1,8 @@
 name: Commits
 
-# Conventional Commits policy (CLAUDE.md): every PR title and every commit of
-# a PR (and of a push to main) must parse as <type>(<scope>): <subject> with
-# one of the project's types. Rules live in commitlint.config.mjs; the local
-# commit-msg hook (.pre-commit-config.yaml) enforces the same type list.
+# Conventional Commits 1.0.0: PR titles and the commits of PRs and pushes to
+# main parse as <type>(<scope>): <subject>; commitlint.config.mjs holds the
+# rules, and the commit-msg hook in .pre-commit-config.yaml checks the same types.
 on:
   pull_request:
     types: [opened, edited, synchronize, reopened]

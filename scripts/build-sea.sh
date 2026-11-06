@@ -1,17 +1,10 @@
 #!/usr/bin/env bash
-# build-sea.sh — Build proton-drive-cli as a Node.js Single Executable Application.
+# build-sea.sh — Build proton-drive-cli as a Node.js single executable
+# application (`node --build-sea`, https://nodejs.org/api/single-executable-applications.html)
+# from submodules/proton-drive-cli/sea-config.json and the running node binary.
 #
-# Uses the native `node --build-sea` (Node.js 25.5+; this project builds with
-# the Node.js 26 LTS line pinned in .node-version). The SEA configuration is
-# the tracked submodules/proton-drive-cli/sea-config.json; the only build-time
-# input is the running node binary, which --build-sea uses by default.
-#
-# Prerequisites:
-#   - Node.js matching .node-version
-#   - proton-drive-cli already compiled (make build-drive-cli)
-#
-# Output: bin/proton-drive-cli (proton-drive-cli.exe on Windows), or
-# $SEA_OUTPUT_DIR when set.
+# Prerequisites: Node.js matching .node-version; make build-drive-cli.
+# Output: bin/proton-drive-cli (.exe on Windows), or $SEA_OUTPUT_DIR when set.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"

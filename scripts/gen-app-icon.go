@@ -1,16 +1,9 @@
 //go:build ignore
 
-// gen-app-icon generates a macOS .icns app icon for Proton LFS.
-//
-// Design: Rounded-rectangle background in Proton purple (#6D4AFF) with a
-// subtle gradient, white paired vertical arrows (upload ↑ / download ↓)
-// representing file transfer. The design is original and does not use any
-// Proton trademarks or logos.
+// gen-app-icon writes cmd/tray/AppIcon.icns through macOS iconutil(1) and
+// cmd/tray/AppIcon_preview.png. The artwork uses no Proton trademark or logo.
 //
 // Usage: go run scripts/gen-app-icon.go
-//
-// Requires macOS `iconutil` to produce the final .icns file.
-// Also writes a preview PNG to cmd/tray/AppIcon_preview.png.
 package main
 
 import (
@@ -24,10 +17,9 @@ import (
 	"path/filepath"
 )
 
-// Proton-inspired palette (no trademarked logo elements).
 var (
 	colorTop    = color.NRGBA{R: 109, G: 74, B: 255, A: 255} // #6D4AFF
-	colorBottom = color.NRGBA{R: 80, G: 50, B: 200, A: 255}  // deeper violet
+	colorBottom = color.NRGBA{R: 80, G: 50, B: 200, A: 255}  // #5032C8
 	colorWhite  = color.NRGBA{R: 255, G: 255, B: 255, A: 255}
 )
 
@@ -61,13 +53,11 @@ func main() {
 		fmt.Printf("  %s (%dx%d)\n", spec.name, px, px)
 	}
 
-	// Write a 512px preview PNG for easy visual check
 	preview := renderIcon(512)
 	previewPath := filepath.Join("cmd", "tray", "AppIcon_preview.png")
 	writePNG(previewPath, preview)
 	fmt.Printf("  Preview: %s\n", previewPath)
 
-	// Run iconutil to produce .icns
 	icnsPath := filepath.Join("cmd", "tray", "AppIcon.icns")
 	cmd := exec.Command("iconutil", "-c", "icns", iconsetDir, "-o", icnsPath)
 	cmd.Stdout = os.Stdout
@@ -99,7 +89,6 @@ func renderIcon(sz int) *image.NRGBA {
 	s := float64(sz)
 	radius := s * 0.18
 
-	// 1. Draw rounded-rect background with vertical gradient.
 	for y := 0; y < sz; y++ {
 		t := float64(y) / s
 		bg := lerpColor(colorTop, colorBottom, t)
@@ -110,7 +99,6 @@ func renderIcon(sz int) *image.NRGBA {
 		}
 	}
 
-	// 2. Draw white transfer arrows.
 	drawTransferArrows(img, sz)
 
 	return img
@@ -119,20 +107,18 @@ func renderIcon(sz int) *image.NRGBA {
 func drawTransferArrows(img *image.NRGBA, sz int) {
 	s := float64(sz)
 
-	shaftW := s * 0.10  // shaft width
-	headW := s * 0.28   // arrowhead total width
-	headH := s * 0.16   // arrowhead height
-	gap := s * 0.18     // offset from center to each arrow center
-	topY := s * 0.22    // top extent
-	botY := s * 0.78    // bottom extent
-	overlap := s * 0.02 // shaft overlaps into arrowhead slightly
+	shaftW := s * 0.10
+	headW := s * 0.28
+	headH := s * 0.16
+	gap := s * 0.18 // from the center to each arrow's axis
+	topY := s * 0.22
+	botY := s * 0.78
+	overlap := s * 0.02
 
-	// Left arrow: pointing UP
 	lcx := s/2 - gap
 	fillRectSolid(img, lcx-shaftW/2, topY+headH-overlap, lcx+shaftW/2, botY, colorWhite)
 	fillTriangleUp(img, lcx, topY, headW, headH, colorWhite)
 
-	// Right arrow: pointing DOWN
 	rcx := s/2 + gap
 	fillRectSolid(img, rcx-shaftW/2, topY, rcx+shaftW/2, botY-headH+overlap, colorWhite)
 	fillTriangleDown(img, rcx, botY, headW, headH, colorWhite)
@@ -208,14 +194,12 @@ func insideRoundedRect(px, py, w, h, r float64) bool {
 	if px < 0 || px > w || py < 0 || py > h {
 		return false
 	}
-	// If not near a corner, definitely inside
 	if px >= r && px <= w-r {
 		return true
 	}
 	if py >= r && py <= h-r {
 		return true
 	}
-	// In a corner zone — find the nearest corner center
 	var cx, cy float64
 	if px < r {
 		cx = r

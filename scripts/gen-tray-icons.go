@@ -1,18 +1,9 @@
 //go:build ignore
 
-// gen-tray-icons generates 64x64 PNG tray icons for Proton LFS from the
-// monochrome cloud-lock source icon.
+// gen-tray-icons writes the 64x64 tray icons cmd/tray/icons/icon_{idle,ok,
+// error,syncing}.png: the dark shape of a source image, tinted per state.
 //
-// It reads a source PNG, extracts the dark shape (making light areas
-// transparent), and produces four state-tinted variants:
-//   - icon_idle.png   — grey (#888888)
-//   - icon_ok.png     — green (#4CAF50)
-//   - icon_error.png  — red (#F44336)
-//   - icon_syncing.png — blue (#2196F3)
-//
-// Usage: go run scripts/gen-tray-icons.go <source-icon.png>
-//
-// If no argument is given, reads from /tmp/tray-icon-extract/raw_256.png.
+// Usage: go run scripts/gen-tray-icons.go <source-image>
 package main
 
 import (
@@ -24,7 +15,7 @@ import (
 	"os"
 	"path/filepath"
 
-	// Import for JPEG/GIF decoding in case source is not PNG
+	// Registers the GIF and JPEG decoders with image.Decode (Go image package).
 	_ "image/gif"
 	_ "image/jpeg"
 )
@@ -37,19 +28,19 @@ type tintDef struct {
 }
 
 var tints = []tintDef{
-	{"icon_idle.png", color.NRGBA{R: 136, G: 136, B: 136, A: 255}},
-	{"icon_ok.png", color.NRGBA{R: 76, G: 175, B: 80, A: 255}},
-	{"icon_error.png", color.NRGBA{R: 244, G: 67, B: 54, A: 255}},
-	{"icon_syncing.png", color.NRGBA{R: 33, G: 150, B: 243, A: 255}},
+	{"icon_idle.png", color.NRGBA{R: 136, G: 136, B: 136, A: 255}},   // #888888
+	{"icon_ok.png", color.NRGBA{R: 76, G: 175, B: 80, A: 255}},       // #4CAF50
+	{"icon_error.png", color.NRGBA{R: 244, G: 67, B: 54, A: 255}},    // #F44336
+	{"icon_syncing.png", color.NRGBA{R: 33, G: 150, B: 243, A: 255}}, // #2196F3
 }
 
 func main() {
-	srcPath := "/tmp/tray-icon-extract/raw_1024.png"
-	if len(os.Args) > 1 {
-		srcPath = os.Args[1]
+	if len(os.Args) != 2 {
+		fmt.Fprintln(os.Stderr, "usage: go run scripts/gen-tray-icons.go <source-image>")
+		os.Exit(2)
 	}
 
-	src := loadImage(srcPath)
+	src := loadImage(os.Args[1])
 	mask := extractMask(src)
 
 	outDir := filepath.Join("cmd", "tray", "icons")
@@ -77,16 +68,13 @@ func loadImage(path string) image.Image {
 	return img
 }
 
-// extractMask converts the source image to a 64x64 alpha mask.
-// It crops the center 60% of the source (to exclude the macOS icon frame/
-// shadow), then thresholds: dark pixels become opaque, light pixels transparent.
-// This extracts just the dark circle + cloud-lock shape.
+// extractMask box-filters the central 60% of src (inside the macOS icon frame)
+// to an outSize alpha mask in which dark pixels are opaque.
 func extractMask(src image.Image) *image.Alpha {
 	bounds := src.Bounds()
 	sw := bounds.Dx()
 	sh := bounds.Dy()
 
-	// Crop to center 60% to exclude the rounded-rect frame/shadow
 	cropMargin := 0.20
 	cropX0 := bounds.Min.X + int(float64(sw)*cropMargin)
 	cropY0 := bounds.Min.Y + int(float64(sh)*cropMargin)
@@ -99,7 +87,6 @@ func extractMask(src image.Image) *image.Alpha {
 
 	for y := 0; y < outSize; y++ {
 		for x := 0; x < outSize; x++ {
-			// Sample from cropped region using area averaging
 			srcX0 := cropX0 + x*cw/outSize
 			srcY0 := cropY0 + y*ch/outSize
 			srcX1 := cropX0 + (x+1)*cw/outSize
@@ -117,9 +104,8 @@ func extractMask(src image.Image) *image.Alpha {
 					rf := float64(r) / 65535.0
 					gf := float64(g) / 65535.0
 					bf := float64(b) / 65535.0
+					// Luma weights of ITU-R BT.601.
 					lum := 0.299*rf + 0.587*gf + 0.114*bf
-
-					// Strict threshold: only truly dark pixels (the circle)
 					alpha := 1.0 - smoothstep(0.35, 0.55, lum)
 					totalAlpha += alpha
 					count++

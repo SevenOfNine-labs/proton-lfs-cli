@@ -29,6 +29,10 @@ SDK_JS_DIR := $(DRIVE_CLI_DIR)/submodules/sdk/client/js
 GO_CACHE_DIR := .cache/go-build
 GO_TEST_PKGS := ./cmd/... ./internal/...
 LIVE_CANARY_ACK_VALUE := I_UNDERSTAND_THIS_TOUCHES_A_REAL_PROTON_ACCOUNT
+# Key-password provider of the session under test; the Proton Pass export
+# (scripts/export-pass-env.sh) is needed only for pass-cli.
+KEY_PASSWORD_PROVIDER ?= $(or $(PROTON_KEY_PASSWORD_PROVIDER),pass-cli)
+PASS_ENV := $(if $(filter pass-cli,$(KEY_PASSWORD_PROVIDER)),eval "$$(./scripts/export-pass-env.sh)" &&,)
 
 .PHONY: help setup setup-env install-deps \
 	build build-adapter build-tray build-lfs build-sdk build-drive-cli build-sea build-all build-bundle \
@@ -37,7 +41,7 @@ LIVE_CANARY_ACK_VALUE := I_UNDERSTAND_THIS_TOUCHES_A_REAL_PROTON_ACCOUNT
 	test-integration-failure-modes test-integration-config-matrix test-integration-credentials test-integration-sdk \
 	test-e2e-mock test-e2e-real test-all \
 	live-canary-preflight live-drive-scope-canary browser-fork-canary pass-env check-submodules check-live-canary-ack check-live-canary-doctor-args check-browser-fork-canary-args check-sdk-prereqs \
-	fmt fmt-check lint lint-go \
+	fmt fmt-check lint lint-go lint-comments \
 	docs docs-lint \
 	clean status install-hooks
 
@@ -104,8 +108,6 @@ uninstall: ## Remove the installed bundle or binaries
 ifeq ($(shell uname -s),Darwin)
 
 install: build-bundle
-	@# Clean up old installation artifacts
-	@rm -rf /Applications/ProtonGitLFS.app 2>/dev/null || true
 	@mkdir -p "$(INSTALL_APP)/Contents/MacOS" "$(INSTALL_APP)/Contents/Helpers" "$(INSTALL_APP)/Contents/Resources"
 	@cp dist/proton-lfs-tray      "$(INSTALL_APP)/Contents/MacOS/proton-lfs-tray"
 	@cp dist/git-lfs-proton-adapter   "$(INSTALL_APP)/Contents/Helpers/git-lfs-proton-adapter"
@@ -185,9 +187,8 @@ build-sdk: ## Build the vendored Proton Drive SDK (client/js) consumed by proton
 		echo "Run: git -C $(DRIVE_CLI_DIR) submodule update --init submodules/sdk"; \
 		exit 1; \
 	fi
-	@# Upstream dropped its npm lockfile when it moved to Bun (js/v0.19+), so
-	@# 'npm ci' no longer works there; install without writing a lockfile to keep
-	@# the SDK checkout clean for check-submodules.
+	@# client/js ships no npm lockfile; --no-package-lock keeps the SDK checkout
+	@# clean for check-submodules.
 	cd $(SDK_JS_DIR) && npm install --no-package-lock --no-audit --no-fund && npm run build
 
 # File target so build-drive-cli builds the SDK exactly once when its dist is
@@ -251,7 +252,7 @@ test-integration-credentials: ## Run credential flow security tests
 
 test-integration-sdk: check-submodules check-sdk-prereqs ## Run sdk backend integration tests (requires proton-drive-cli and pass-cli)
 	@mkdir -p $(GO_CACHE_DIR)
-	@eval "$$(./scripts/export-pass-env.sh)" && \
+	@$(PASS_ENV) \
 		PROTON_LFS_RUN_SDK_INTEGRATION=1 \
 		GO="$(GO)" GOCACHE=$(CURDIR)/$(GO_CACHE_DIR) $(GO) test -tags integration ./tests/integration/... -run SDK -v
 
@@ -321,10 +322,10 @@ live-drive-scope-canary: check-live-canary-ack check-live-canary-doctor-args liv
 
 test-e2e-real: live-drive-scope-canary ## Real Proton Drive E2E (requires explicit live canary acknowledgement)
 	@mkdir -p $(GO_CACHE_DIR)
-	@eval "$$(./scripts/export-pass-env.sh)" && \
+	@$(PASS_ENV) \
 		GO="$(GO)" GOCACHE=$(CURDIR)/$(GO_CACHE_DIR) $(GO) test -tags integration ./tests/integration/... -run E2E -v
 
-pass-env: ## Print Proton Pass CLI provider env (no account credentials)
+pass-env: ## Print the PROTON_PASS_CLI_BIN export for the pass-cli key-password provider
 	@./scripts/export-pass-env.sh
 
 check-submodules: ## Verify pinned root and Proton SDK submodule checkouts
@@ -332,7 +333,10 @@ check-submodules: ## Verify pinned root and Proton SDK submodule checkouts
 
 check-sdk-prereqs: ## Verify prerequisites for sdk integration tests
 	@command -v git-lfs >/dev/null 2>&1 || (echo "git-lfs not found on PATH" && exit 1)
-	@command -v "$${PROTON_PASS_CLI_BIN:-pass-cli}" >/dev/null 2>&1 || (echo "pass-cli not found on PATH (or PROTON_PASS_CLI_BIN invalid)" && exit 1)
+	@if [ "$(KEY_PASSWORD_PROVIDER)" = "pass-cli" ]; then \
+		command -v "$${PROTON_PASS_CLI_BIN:-pass-cli}" >/dev/null 2>&1 || { echo "pass-cli not found on PATH (or PROTON_PASS_CLI_BIN invalid)"; exit 1; }; \
+		./scripts/export-pass-env.sh >/dev/null; \
+	fi
 	@DRIVE_CLI_BIN="$${PROTON_DRIVE_CLI_BIN:-$(DRIVE_CLI_DIR)/dist/index.js}"; \
 		if [ ! -f "$$DRIVE_CLI_BIN" ]; then \
 			echo "proton-drive-cli not built: $$DRIVE_CLI_BIN not found"; \
@@ -350,7 +354,6 @@ check-sdk-prereqs: ## Verify prerequisites for sdk integration tests
 			exit 1; \
 		fi; \
 		echo "Resolved node binary: $$NODE_BIN_RESOLVED"
-	@./scripts/export-pass-env.sh >/dev/null
 	@echo "SDK integration prerequisites OK"
 
 fmt: ## Format Go code
@@ -362,7 +365,10 @@ fmt-check: ## Fail if any Go file is not gofmt-formatted
 		echo "gofmt required for:"; echo "$$unformatted"; exit 1; \
 	fi
 
-lint: lint-go ## Run lint checks
+lint: lint-go lint-comments ## Run lint checks
+
+lint-comments: ## Enforce the comment policy (CLAUDE.md, "Code Comments and Legacy")
+	@bash scripts/check-comment-policy.sh
 
 lint-go: ## Run go vet and golangci-lint (golangci-lint is mandatory when CI=true)
 	$(GO) vet ./...
