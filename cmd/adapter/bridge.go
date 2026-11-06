@@ -12,16 +12,9 @@ import (
 	"strings"
 	"sync"
 	"time"
-)
 
-// BridgeResponse is the JSON envelope returned by proton-drive-cli bridge commands.
-type BridgeResponse struct {
-	OK      bool            `json:"ok"`
-	Payload json.RawMessage `json:"payload,omitempty"`
-	Error   string          `json:"error,omitempty"`
-	Code    int             `json:"code,omitempty"`
-	Details string          `json:"details,omitempty"`
-}
+	"github.com/SevenOfNine-labs/proton-lfs-cli/internal/bridgeproto"
+)
 
 // BridgeError is the failed response envelope of a bridge command
 // (schemas/bridge/v1/response-envelope.schema.json); Error() renders it as
@@ -57,26 +50,21 @@ type BridgeClientConfig struct {
 	ExtraEnv    []string // additional env vars (for testing)
 }
 
-// BridgeAuthStateResponse mirrors proton-drive-cli bridge auth-state payloads.
-// It is intentionally local-only on the drive-cli side: no credential lookup,
-// no token refresh, and no Proton network request.
+// BridgeAuthStateResponse is the `bridge auth-state` payload
+// (schemas/bridge/v1/auth-state-payload.schema.json): no token refresh and no
+// Proton Drive request; the key-password check runs the session's provider.
 type BridgeAuthStateResponse struct {
-	State                  string   `json:"state"`
-	HasSession             bool     `json:"hasSession"`
-	SessionValid           bool     `json:"sessionValid"`
-	SessionExpired         bool     `json:"sessionExpired"`
-	SessionUIDPresent      bool     `json:"sessionUidPresent"`
-	PasswordMode           int      `json:"passwordMode,omitempty"`
-	AuthMode               string   `json:"authMode,omitempty"`
-	KeyPasswordPersisted   bool     `json:"keyPasswordPersisted,omitempty"`
-	KeyPasswordAvailable   bool     `json:"keyPasswordAvailable,omitempty"`
-	KeyPasswordProvider    string   `json:"keyPasswordProvider,omitempty"`
-	KeyPasswordHost        string   `json:"keyPasswordHost,omitempty"`
-	DataCredentialProvider string   `json:"dataCredentialProvider,omitempty"`
-	DataCredentialHost     string   `json:"dataCredentialHost,omitempty"`
-	WillAttemptNetwork     bool     `json:"willAttemptNetwork"`
-	Errors                 []string `json:"errors"`
-	Actions                []string `json:"actions"`
+	State                string   `json:"state"`
+	HasSession           bool     `json:"hasSession"`
+	SessionValid         bool     `json:"sessionValid"`
+	SessionExpired       bool     `json:"sessionExpired"`
+	SessionUIDPresent    bool     `json:"sessionUidPresent"`
+	KeyPasswordAvailable bool     `json:"keyPasswordAvailable,omitempty"`
+	KeyPasswordProvider  string   `json:"keyPasswordProvider,omitempty"`
+	KeyPasswordHost      string   `json:"keyPasswordHost,omitempty"`
+	WillAttemptNetwork   bool     `json:"willAttemptNetwork"`
+	Errors               []string `json:"errors"`
+	Actions              []string `json:"actions"`
 }
 
 // BridgeClient communicates with proton-drive-cli via subprocess stdin/stdout.
@@ -105,9 +93,9 @@ func (bc *BridgeClient) TerminateActive() {
 	}
 }
 
-// transferMinBytesPerSecond is the throughput floor used to extend the base
-// timeout for uploads and downloads: an object may take
-// timeout + size/transferMinBytesPerSecond before the bridge is killed.
+// transferMinBytesPerSecond is the throughput floor for uploads and
+// downloads: an object may take timeout + size/transferMinBytesPerSecond
+// before the bridge is killed.
 const transferMinBytesPerSecond = 256 * 1024
 
 // maxBridgeCommandTimeout caps the size-derived budget; the object size comes
@@ -123,6 +111,19 @@ type BridgeTimeoutError struct {
 func (e *BridgeTimeoutError) Error() string {
 	return fmt.Sprintf("bridge %s timed out after %s", e.Command, e.Timeout)
 }
+
+// BridgeStartError reports a bridge subprocess that could not be started
+// (os/exec Cmd.Start): a missing, non-executable or unloadable program.
+type BridgeStartError struct {
+	Command string
+	Err     error
+}
+
+func (e *BridgeStartError) Error() string {
+	return fmt.Sprintf("bridge %s could not start: %v", e.Command, e.Err)
+}
+
+func (e *BridgeStartError) Unwrap() error { return e.Err }
 
 // NewBridgeClient creates a new bridge subprocess client.
 func NewBridgeClient(cfg BridgeClientConfig) *BridgeClient {
@@ -145,83 +146,10 @@ func NewBridgeClient(cfg BridgeClientConfig) *BridgeClient {
 	}
 }
 
-// envAllowlist lists the environment variables forwarded to the bridge
-// subprocess: entries ending in "_" are prefixes, all others exact names.
-// Only variables proton-drive-cli reads are forwarded; secret-shaped names
-// such as PROTON_PASSWORD or PROTON_DATA_PASSWORD never reach the bridge
-// (docs/security/threat-model.md).
-var envAllowlist = []string{
-	"PATH",
-	"HOME",
-	"USER",
-	"SHELL",
-	"LANG",
-	"LC_",
-	"TERM",
-	"NODE_ENV",
-	"NODE_OPTIONS",
-	"NODE_PATH",
-	"NODE_BIN",
-	"XDG_CONFIG_HOME",
-	"XDG_DATA_HOME",
-	"XDG_CACHE_HOME",
-	"XDG_RUNTIME_DIR",
-	"MOCK_BRIDGE_",
-	// proton-drive-cli configuration (src/constants.ts,
-	// src/auth/key-password-store.ts, src/credentials/pass-cli.ts).
-	"PROTON_DRIVE_CLI_APP_VERSION",
-	"PROTON_KEY_PASSWORD_PROVIDER",
-	"PROTON_KEY_PASSWORD_HOST",
-	"PROTON_DATA_CREDENTIAL_PROVIDER",
-	"PROTON_DATA_CREDENTIAL_HOST",
-	"PROTON_PASS_CLI_BIN",
-	"PROTON_AUTH_TRACE",
-	"PROTON_AUTH_TRACE_ID",
-	"TMPDIR",
-	"TMP",
-	"TEMP",
-	// Windows locates the user profile, git's global configuration and
-	// system DLLs through these; they carry no secrets.
-	"USERPROFILE",
-	"HOMEDRIVE",
-	"HOMEPATH",
-	"APPDATA",
-	"LOCALAPPDATA",
-	"SYSTEMROOT",
-	"WINDIR",
-	"COMSPEC",
-	"PATHEXT",
-}
-
-// filteredEnv returns environment variables that match the allowlist.
+// filteredEnv is the allowlisted process environment plus the configured
+// extra variables.
 func (bc *BridgeClient) filteredEnv() []string {
-	env := os.Environ()
-	filtered := make([]string, 0, len(env))
-	for _, e := range env {
-		key := e
-		if idx := strings.IndexByte(e, '='); idx >= 0 {
-			key = e[:idx]
-		}
-		if matchesAllowlist(key) {
-			filtered = append(filtered, e)
-		}
-	}
-	filtered = append(filtered, bc.extraEnv...)
-	return filtered
-}
-
-func matchesAllowlist(key string) bool {
-	for _, allowed := range envAllowlist {
-		if strings.HasSuffix(allowed, "_") {
-			// Prefix match
-			if strings.HasPrefix(key, allowed) {
-				return true
-			}
-		} else if key == allowed {
-			return true
-		}
-	}
-	return false
+	return append(bridgeproto.FilterEnv(os.Environ()), bc.extraEnv...)
 }
 
 // commandTimeout returns the wall-clock budget for one bridge command moving
@@ -241,10 +169,8 @@ func (bc *BridgeClient) commandTimeout(transferSize int64) time.Duration {
 	return total
 }
 
-// commandArgv returns the program and arguments for a bridge command. A
-// JavaScript entry point (.js/.cjs/.mjs) runs under node; anything else is
-// an executable such as the single-executable-application build and runs
-// directly.
+// commandArgv runs a JavaScript entry point (.js/.cjs/.mjs) under node and
+// any other file, such as the single executable application, directly.
 func (bc *BridgeClient) commandArgv(command string) (string, []string) {
 	switch strings.ToLower(filepath.Ext(bc.cliBin)) {
 	case ".js", ".cjs", ".mjs":
@@ -255,13 +181,13 @@ func (bc *BridgeClient) commandArgv(command string) (string, []string) {
 }
 
 // runBridgeCommand executes a proton-drive-cli bridge command as a subprocess.
-func (bc *BridgeClient) runBridgeCommand(command string, request map[string]any) (*BridgeResponse, error) {
+func (bc *BridgeClient) runBridgeCommand(command string, request map[string]any) (*bridgeproto.Response, error) {
 	return bc.runBridgeCommandSized(command, request, 0)
 }
 
 // runBridgeCommandSized executes a bridge command whose timeout is scaled by
 // the size of the object it transfers.
-func (bc *BridgeClient) runBridgeCommandSized(command string, request map[string]any, transferSize int64) (*BridgeResponse, error) {
+func (bc *BridgeClient) runBridgeCommandSized(command string, request map[string]any, transferSize int64) (*bridgeproto.Response, error) {
 	timeout := bc.commandTimeout(transferSize)
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
@@ -281,18 +207,18 @@ func (bc *BridgeClient) runBridgeCommandSized(command string, request map[string
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
-	err = cmd.Start()
-	if err == nil {
-		bc.mu.Lock()
-		bc.active = cmd
-		bc.mu.Unlock()
-		err = cmd.Wait()
-		bc.mu.Lock()
-		bc.active = nil
-		bc.mu.Unlock()
+	if err := cmd.Start(); err != nil {
+		return nil, &BridgeStartError{Command: command, Err: err}
 	}
+	bc.mu.Lock()
+	bc.active = cmd
+	bc.mu.Unlock()
+	err = cmd.Wait()
+	bc.mu.Lock()
+	bc.active = nil
+	bc.mu.Unlock()
 
-	resp, parseErr := parseBridgeOutput(stdout.Bytes(), stderr.Bytes())
+	resp, parseErr := bridgeproto.ParseOutput(stdout.Bytes())
 	if parseErr != nil {
 		if ctx.Err() == context.DeadlineExceeded {
 			return nil, &BridgeTimeoutError{Command: command, Timeout: timeout}
@@ -324,179 +250,30 @@ func (bc *BridgeClient) runBridgeCommandSized(command string, request map[string
 	return resp, nil
 }
 
-// sanitizeStderr strips sensitive data (tokens, paths, session info) from
-// subprocess stderr before surfacing it in error messages.
+// sanitizeStderr redacts subprocess stderr and bounds it to 256 runes before
+// it reaches an error message; redaction runs first so that the cut cannot
+// split a secret out of its pattern.
 func sanitizeStderr(raw string) string {
-	s := strings.TrimSpace(raw)
-	if s == "" {
-		return ""
-	}
-	// Cap length to avoid leaking large debug output
-	const maxLen = 256
-	if len(s) > maxLen {
-		s = s[:maxLen] + "..."
-	}
-	// Redact anything that looks like a token, session ID, or bearer header
-	for _, pattern := range []string{"Bearer ", "token=", "session=", "AccessToken", "RefreshToken", "UID:"} {
-		if idx := strings.Index(s, pattern); idx >= 0 {
-			// Truncate from the sensitive prefix onward
-			s = s[:idx] + "[redacted]"
-			break
-		}
-	}
-	return s
+	return bridgeproto.Truncate(bridgeproto.RedactText(bridgeproto.Truncate(strings.TrimSpace(raw), 64*1024)), 256)
 }
 
-func isJSONNull(raw json.RawMessage) bool {
-	return bytes.Equal(bytes.TrimSpace(raw), []byte("null"))
-}
-
-// parseBridgeEnvelope validates and decodes the strict bridge response envelope.
-func parseBridgeEnvelope(raw []byte) (*BridgeResponse, error) {
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &fields); err != nil {
-		return nil, err
-	}
-	if fields == nil {
-		return nil, fmt.Errorf("bridge response must be a JSON object")
-	}
-
-	for key := range fields {
-		switch key {
-		case "ok", "payload", "error", "code", "details":
-		default:
-			return nil, fmt.Errorf("bridge response contains unknown field %q", key)
-		}
-	}
-
-	rawOK, ok := fields["ok"]
-	if !ok {
-		return nil, fmt.Errorf("bridge response missing required ok field")
-	}
-	if isJSONNull(rawOK) {
-		return nil, fmt.Errorf("bridge response ok field must be boolean")
-	}
-
-	var resp BridgeResponse
-	if err := json.Unmarshal(rawOK, &resp.OK); err != nil {
-		return nil, fmt.Errorf("bridge response ok field must be boolean: %w", err)
-	}
-
-	if rawPayload, ok := fields["payload"]; ok && !isJSONNull(rawPayload) {
-		resp.Payload = append(json.RawMessage(nil), rawPayload...)
-	}
-	if rawError, ok := fields["error"]; ok {
-		if isJSONNull(rawError) {
-			return nil, fmt.Errorf("bridge response error field must be string")
-		}
-		if err := json.Unmarshal(rawError, &resp.Error); err != nil {
-			return nil, fmt.Errorf("bridge response error field must be string: %w", err)
-		}
-	}
-	if rawCode, ok := fields["code"]; ok {
-		if isJSONNull(rawCode) {
-			return nil, fmt.Errorf("bridge response code field must be integer")
-		}
-		if err := json.Unmarshal(rawCode, &resp.Code); err != nil {
-			return nil, fmt.Errorf("bridge response code field must be integer: %w", err)
-		}
-	}
-	if rawDetails, ok := fields["details"]; ok {
-		if isJSONNull(rawDetails) {
-			return nil, fmt.Errorf("bridge response details field must be string")
-		}
-		if err := json.Unmarshal(rawDetails, &resp.Details); err != nil {
-			return nil, fmt.Errorf("bridge response details field must be string: %w", err)
-		}
-	}
-
-	if resp.OK {
-		if strings.TrimSpace(resp.Error) != "" {
-			return nil, fmt.Errorf("successful bridge response must not include an error message")
-		}
-		if resp.Code != 0 {
-			return nil, fmt.Errorf("successful bridge response must not include an error code")
-		}
-		if resp.Details != "" {
-			return nil, fmt.Errorf("successful bridge response must not include error details")
-		}
-		return &resp, nil
-	}
-
-	if strings.TrimSpace(resp.Error) == "" {
-		return nil, fmt.Errorf("failed bridge response missing error message")
-	}
-	if resp.Code <= 0 {
-		return nil, fmt.Errorf("failed bridge response missing positive error code")
-	}
-	if len(resp.Payload) > 0 {
-		return nil, fmt.Errorf("failed bridge response must not include payload")
-	}
-
-	return &resp, nil
-}
-
-// parseBridgeOutput extracts the JSON envelope from stdout. The bridge
-// contract allows only the envelope on stdout; the backwards line scan keeps
-// the adapter working when a dependency of the CLI prints to stdout (Node
-// runtime warnings), and still rejects output whose last object is not a
-// valid envelope.
-func parseBridgeOutput(stdout, _ []byte) (*BridgeResponse, error) {
-	trimmed := bytes.TrimSpace(stdout)
-	if len(trimmed) == 0 {
-		return nil, fmt.Errorf("empty stdout from bridge subprocess")
-	}
-
-	// Try the entire stdout first (fast path)
-	if resp, err := parseBridgeEnvelope(trimmed); err == nil {
-		return resp, nil
-	} else if json.Valid(trimmed) {
-		return nil, fmt.Errorf("invalid bridge response envelope: %w", err)
-	}
-
-	// Scan lines from end looking for a strict JSON response envelope.
-	lines := bytes.Split(trimmed, []byte("\n"))
-	for i := len(lines) - 1; i >= 0; i-- {
-		line := bytes.TrimSpace(lines[i])
-		if len(line) == 0 || line[0] != '{' {
-			continue
-		}
-		resp, err := parseBridgeEnvelope(line)
-		if err == nil {
-			return resp, nil
-		}
-		if json.Valid(line) {
-			return nil, fmt.Errorf("invalid bridge response envelope: %w", err)
-		}
-	}
-
-	return nil, fmt.Errorf("no valid JSON envelope found in bridge output")
-}
-
-// buildCredentials creates the local unlock portion of a bridge request.
-// Account authentication is browser-fork-only, so the root adapter never sends
-// login credential selectors or login permission flags.
-func buildCredentials(creds OperationCredentials, storageBase, appVersion string) map[string]any {
+// baseRequest returns the request fields common to every bridge command
+// (schemas/bridge/v1/request-field-rules.json).
+func (bc *BridgeClient) baseRequest() map[string]any {
 	m := map[string]any{}
-	if creds.DataCredentialProvider != "" {
-		m["dataCredentialProvider"] = creds.DataCredentialProvider
-		if creds.DataCredentialHost != "" {
-			m["dataCredentialHost"] = creds.DataCredentialHost
-		}
+	if bc.storageBase != "" {
+		m["storageBase"] = bc.storageBase
 	}
-	if storageBase != "" {
-		m["storageBase"] = storageBase
-	}
-	if appVersion != "" {
-		m["appVersion"] = appVersion
+	if bc.appVersion != "" {
+		m["appVersion"] = bc.appVersion
 	}
 	return m
 }
 
-// AuthState runs `bridge auth-state` to inspect local auth readiness without
-// credential resolution or Proton network calls.
-func (bc *BridgeClient) AuthState(creds OperationCredentials) (*BridgeAuthStateResponse, error) {
-	req := buildCredentials(creds, bc.storageBase, bc.appVersion)
+// AuthState runs `bridge auth-state`, which checks the saved session and its
+// key-password entry without refreshing tokens or calling the Proton Drive API.
+func (bc *BridgeClient) AuthState() (*BridgeAuthStateResponse, error) {
+	req := bc.baseRequest()
 	resp, err := bc.runBridgeCommand("auth-state", req)
 	if err != nil {
 		return nil, err
@@ -518,16 +295,16 @@ func (bc *BridgeClient) AuthState(creds OperationCredentials) (*BridgeAuthStateR
 }
 
 // InitLFSStorage runs `bridge init` to ensure the LFS storage folder exists.
-func (bc *BridgeClient) InitLFSStorage(creds OperationCredentials) error {
-	req := buildCredentials(creds, bc.storageBase, bc.appVersion)
+func (bc *BridgeClient) InitLFSStorage() error {
+	req := bc.baseRequest()
 	_, err := bc.runBridgeCommand("init", req)
 	return err
 }
 
 // Upload runs `bridge upload` to encrypt and store a file in Proton Drive.
 // size is the object size announced by git-lfs and extends the timeout.
-func (bc *BridgeClient) Upload(creds OperationCredentials, oid, filePath string, size int64) error {
-	req := buildCredentials(creds, bc.storageBase, bc.appVersion)
+func (bc *BridgeClient) Upload(oid, filePath string, size int64) error {
+	req := bc.baseRequest()
 	req["oid"] = oid
 	req["path"] = filePath
 	_, err := bc.runBridgeCommandSized("upload", req, size)
@@ -536,8 +313,8 @@ func (bc *BridgeClient) Upload(creds OperationCredentials, oid, filePath string,
 
 // Download runs `bridge download` to decrypt and retrieve a file from Proton
 // Drive. size is the object size announced by git-lfs and extends the timeout.
-func (bc *BridgeClient) Download(creds OperationCredentials, oid, outputPath string, size int64) error {
-	req := buildCredentials(creds, bc.storageBase, bc.appVersion)
+func (bc *BridgeClient) Download(oid, outputPath string, size int64) error {
+	req := bc.baseRequest()
 	req["oid"] = oid
 	req["outputPath"] = outputPath
 	_, err := bc.runBridgeCommandSized("download", req, size)
@@ -545,8 +322,8 @@ func (bc *BridgeClient) Download(creds OperationCredentials, oid, outputPath str
 }
 
 // Exists runs `bridge exists` to check if an OID is already stored.
-func (bc *BridgeClient) Exists(creds OperationCredentials, oid string) (bool, error) {
-	req := buildCredentials(creds, bc.storageBase, bc.appVersion)
+func (bc *BridgeClient) Exists(oid string) (bool, error) {
+	req := bc.baseRequest()
 	req["oid"] = oid
 	resp, err := bc.runBridgeCommand("exists", req)
 	if err != nil {
@@ -561,63 +338,6 @@ func (bc *BridgeClient) Exists(creds OperationCredentials, oid string) (bool, er
 		return false, nil
 	}
 	return parseBridgeExistsPayload(resp.Payload)
-}
-
-// batchExists runs `bridge batch-exists` for multiple OIDs.
-// It is an internal maintenance/helper surface, not part of the Git LFS custom
-// transfer loop, which remains single-object per protocol message.
-func (bc *BridgeClient) batchExists(creds OperationCredentials, oids []string) (map[string]bool, error) {
-	req := buildCredentials(creds, bc.storageBase, bc.appVersion)
-	req["oids"] = oids
-	resp, err := bc.runBridgeCommand("batch-exists", req)
-	if err != nil {
-		return nil, err
-	}
-	return parseBridgeBoolMapPayload("batch-exists", resp.Payload)
-}
-
-// batchDelete runs `bridge batch-delete` for multiple OIDs.
-// It is an internal maintenance/helper surface, not part of the Git LFS custom
-// transfer loop, which remains single-object per protocol message.
-func (bc *BridgeClient) batchDelete(creds OperationCredentials, oids []string) (map[string]bool, error) {
-	req := buildCredentials(creds, bc.storageBase, bc.appVersion)
-	req["oids"] = oids
-	resp, err := bc.runBridgeCommand("batch-delete", req)
-	if err != nil {
-		return nil, err
-	}
-	return parseBridgeBoolMapPayload("batch-delete", resp.Payload)
-}
-
-func parseBridgeBoolMapPayload(command string, payload json.RawMessage) (map[string]bool, error) {
-	var result map[string]bool
-	if len(bytes.TrimSpace(payload)) == 0 {
-		return nil, fmt.Errorf("%s response missing payload", command)
-	}
-
-	if err := json.Unmarshal(payload, &result); err == nil {
-		if result == nil {
-			return map[string]bool{}, nil
-		}
-		if err := validateBridgeBoolMapKeys(command, result); err != nil {
-			return nil, err
-		}
-		return result, nil
-	}
-
-	var wrapped struct {
-		Results map[string]bool `json:"results"`
-	}
-	if err := json.Unmarshal(payload, &wrapped); err != nil {
-		return nil, fmt.Errorf("failed to parse %s response: %w", command, err)
-	}
-	if wrapped.Results == nil {
-		return nil, fmt.Errorf("%s response missing results", command)
-	}
-	if err := validateBridgeBoolMapKeys(command, wrapped.Results); err != nil {
-		return nil, err
-	}
-	return wrapped.Results, nil
 }
 
 func parseBridgeExistsPayload(payload json.RawMessage) (bool, error) {
@@ -658,15 +378,6 @@ func parseBridgeExistsPayload(payload json.RawMessage) (bool, error) {
 		}
 	}
 	return exists, nil
-}
-
-func validateBridgeBoolMapKeys(command string, results map[string]bool) error {
-	for oid := range results {
-		if !oidPattern.MatchString(strings.ToLower(oid)) {
-			return fmt.Errorf("%s response contains invalid oid key %q", command, oid)
-		}
-	}
-	return nil
 }
 
 // resolveNodeBinary returns the path to the Node.js binary.

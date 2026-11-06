@@ -21,7 +21,6 @@ func main() {
 	requireLiveCanary := flag.Bool("require-live-canary", false, "require canAttemptLiveCanary=true")
 	requireTransfer := flag.Bool("require-transfer", false, "require canAttemptTransfer=true")
 	requireState := flag.String("require-state", "", "require an exact authState.state")
-	requireAuthMode := flag.String("require-auth-mode", "", "require an exact authState.authMode")
 	quiet := flag.Bool("quiet", false, "suppress success output")
 	flag.Parse()
 
@@ -41,7 +40,6 @@ func main() {
 		RequireLiveCanary: *requireLiveCanary,
 		RequireTransfer:   *requireTransfer,
 		RequireState:      *requireState,
-		RequireAuthMode:   *requireAuthMode,
 	})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)

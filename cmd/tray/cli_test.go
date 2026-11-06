@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/SevenOfNine-labs/proton-lfs-cli/internal/bridgeproto"
 	"github.com/SevenOfNine-labs/proton-lfs-cli/internal/config"
 )
 
@@ -40,10 +41,6 @@ func setupFakeHome(t *testing.T, opts fakeHomeOpts) string {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
-	// Clear ambient configuration so tests never read the developer's
-	// environment or write the real status file.
-	t.Setenv(config.EnvDataCredentialProvider, "")
-	t.Setenv(config.EnvDataCredentialHost, "")
 	t.Setenv(config.EnvStatusFile, "")
 	t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(home, ".gitconfig"))
 	invalidateGitLFSConfig()
@@ -55,7 +52,7 @@ func setupFakeHome(t *testing.T, opts fakeHomeOpts) string {
 			t.Fatal(err)
 		}
 		if err := os.WriteFile(filepath.Join(dir, "session.json"),
-			[]byte(`{"accessToken":"test"}`), 0o600); err != nil {
+			[]byte(`{"uid":"test","accessToken":"test","refreshToken":"test","keyPasswordProvider":"pass-cli","keyPasswordHost":"proton-drive-key.proton-lfs-cli.local"}`), 0o600); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -98,11 +95,13 @@ func TestCliStatusConnectedOK(t *testing.T) {
 	statusJSON, _ := json.Marshal(config.StatusReport{
 		State: config.StateOK, LastOp: "upload", Timestamp: ts,
 	})
-	setupFakeHome(t, fakeHomeOpts{
-		sessionExists: true,
-		configJSON:    `{"keyPasswordProvider":"pass-cli"}`,
-		statusJSON:    string(statusJSON),
+	home := setupFakeHome(t, fakeHomeOpts{
+		configJSON: `{"keyPasswordProvider":"pass-cli"}`,
+		statusJSON: string(statusJSON),
 	})
+	session := validStatusTestSession(time.Now())
+	session.KeyPasswordProvider = "git-credential"
+	writeSessionForStatusTest(t, home, session)
 	setupGitConfig(t, "[lfs]\n\tstandalonetransferagent = proton\n")
 
 	var buf bytes.Buffer
@@ -113,9 +112,9 @@ func TestCliStatusConnectedOK(t *testing.T) {
 		t.Fatalf("expected exit 0, got %d", code)
 	}
 	for _, want := range []string{
-		"Session:  logged in",
+		"Session:  logged in, key password in git-credential (proton-drive-key.proton-lfs-cli.local)",
 		"LFS:      enabled",
-		"Provider: pass-cli",
+		"Provider: pass-cli (next login)",
 		"upload just now (ok)",
 	} {
 		if !strings.Contains(out, want) {
@@ -255,7 +254,7 @@ func TestCliConfigHelpAndInvalid(t *testing.T) {
 	}
 }
 
-func TestCliRegisterSuccessDoesNotWriteAccountCredentialProvider(t *testing.T) {
+func TestCliRegisterWritesTransferArgs(t *testing.T) {
 	saveFuncVars(t)
 	setupFakeHome(t, fakeHomeOpts{configJSON: `{"keyPasswordProvider":"git-credential"}`})
 	gitCfg := setupGitConfig(t, "")
@@ -289,15 +288,11 @@ func TestCliRegisterSuccessDoesNotWriteAccountCredentialProvider(t *testing.T) {
 	for _, want := range []string{
 		"standalonetransferagent = proton",
 		"path = /tmp/test-adapter",
-		"--backend sdk",
-		"--drive-cli-bin /tmp/test-drive-cli",
+		"args = --backend sdk --drive-cli-bin /tmp/test-drive-cli\n",
 	} {
 		if !strings.Contains(cfgStr, want) {
 			t.Errorf("git config missing %q:\n%s", want, cfgStr)
 		}
-	}
-	if strings.Contains(cfgStr, "--credential-provider") {
-		t.Fatalf("git config must not include account credential provider:\n%s", cfgStr)
 	}
 }
 
@@ -340,7 +335,7 @@ func TestCliRegisterNoAdapter(t *testing.T) {
 	}
 }
 
-func TestCliLoginUsesBrowserForkKeyPasswordProviderOnly(t *testing.T) {
+func TestCliLoginPassesKeyPasswordProvider(t *testing.T) {
 	for _, provider := range []string{"git-credential", "pass-cli"} {
 		t.Run(provider, func(t *testing.T) {
 			saveFuncVars(t)
@@ -424,7 +419,7 @@ func TestCliLoginCreatesSession(t *testing.T) {
 			return err
 		}
 		return os.WriteFile(filepath.Join(dir, "session.json"),
-			[]byte(`{"accessToken":"test","refreshToken":"test","sessionId":"test"}`), 0o600)
+			[]byte(`{"uid":"test","accessToken":"test","refreshToken":"test","keyPasswordProvider":"pass-cli","keyPasswordHost":"proton-drive-key.proton-lfs-cli.local"}`), 0o600)
 	}
 
 	var buf bytes.Buffer
@@ -507,14 +502,10 @@ func TestCliScopeDiagnosticsLocalRedactsSessionAndDoesNotProbeLive(t *testing.T)
 	})
 	sessionPath := filepath.Join(home, ".proton-drive-cli", "session.json")
 	if err := os.WriteFile(sessionPath, []byte(`{
-		"sessionId":"raw-session-id",
 		"uid":"raw-uid",
 		"accessToken":"raw-access-token",
 		"refreshToken":"raw-refresh-token",
 		"scopes":["drive","full","self"],
-		"passwordMode":2,
-		"authMode":"browser-fork",
-		"keyPasswordPersisted":true,
 		"tokenExpiresAt":1893456000000
 	}`), 0o600); err != nil {
 		t.Fatal(err)
@@ -522,7 +513,7 @@ func TestCliScopeDiagnosticsLocalRedactsSessionAndDoesNotProbeLive(t *testing.T)
 	findDriveCLI = func() string { return "/tmp/proton-drive-cli" }
 
 	var commands []string
-	runScopeBridge = func(_ string, command string, request map[string]any) (scopeBridgeEnvelope, error) {
+	runScopeBridge = func(_ string, command string, request map[string]any) (bridgeproto.Response, error) {
 		commands = append(commands, command)
 		if command != "auth-state" {
 			t.Fatalf("unexpected command: %s", command)
@@ -530,8 +521,8 @@ func TestCliScopeDiagnosticsLocalRedactsSessionAndDoesNotProbeLive(t *testing.T)
 		if _, ok := request["folder"]; ok {
 			t.Fatalf("local diagnostics must not send list folder request: %#v", request)
 		}
-		payload := json.RawMessage(`{"state":"ready","hasSession":true,"sessionValid":true,"willAttemptNetwork":false,"authMode":"browser-fork","passwordMode":2}`)
-		return scopeBridgeEnvelope{OK: true, Payload: payload}, nil
+		payload := json.RawMessage(`{"state":"ready","hasSession":true,"sessionValid":true,"keyPasswordAvailable":true,"keyPasswordProvider":"pass-cli","willAttemptNetwork":false}`)
+		return bridgeproto.Response{OK: true, Payload: payload}, nil
 	}
 
 	var buf bytes.Buffer
@@ -543,12 +534,12 @@ func TestCliScopeDiagnosticsLocalRedactsSessionAndDoesNotProbeLive(t *testing.T)
 		t.Fatalf("commands = %#v", commands)
 	}
 	out := buf.String()
-	for _, secret := range []string{"raw-access-token", "raw-refresh-token", "raw-session-id", "raw-uid"} {
+	for _, secret := range []string{"raw-access-token", "raw-refresh-token", "raw-uid"} {
 		if strings.Contains(out, secret) {
 			t.Fatalf("diagnostics leaked %q:\n%s", secret, out)
 		}
 	}
-	for _, want := range []string{"\"drive\"", "\"authMode\": \"browser-fork\"", "\"rawTokenValuesIncluded\": false"} {
+	for _, want := range []string{"\"drive\"", "\"keyPasswordAvailable\": true", "\"keyPasswordProvider\": \"pass-cli\"", "\"rawTokenValuesIncluded\": false"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("diagnostics missing %q:\n%s", want, out)
 		}
@@ -561,12 +552,12 @@ func TestCliScopeDiagnosticsLiveRequiresAcknowledgementBeforeList(t *testing.T) 
 	findDriveCLI = func() string { return "/tmp/proton-drive-cli" }
 
 	var commands []string
-	runScopeBridge = func(_ string, command string, _ map[string]any) (scopeBridgeEnvelope, error) {
+	runScopeBridge = func(_ string, command string, _ map[string]any) (bridgeproto.Response, error) {
 		commands = append(commands, command)
 		if command == "list" {
 			t.Fatal("live list must not run without acknowledgement")
 		}
-		return scopeBridgeEnvelope{
+		return bridgeproto.Response{
 			OK:      true,
 			Payload: json.RawMessage(`{"state":"ready","willAttemptNetwork":false}`),
 		}, nil
@@ -592,12 +583,12 @@ func TestCliScopeDiagnosticsLiveSkipsProbeWhenAuthStateNotReady(t *testing.T) {
 	findDriveCLI = func() string { return "/tmp/proton-drive-cli" }
 
 	var commands []string
-	runScopeBridge = func(_ string, command string, _ map[string]any) (scopeBridgeEnvelope, error) {
+	runScopeBridge = func(_ string, command string, _ map[string]any) (bridgeproto.Response, error) {
 		commands = append(commands, command)
 		if command == "list" {
 			t.Fatal("live list must not run when local auth-state is not ready")
 		}
-		return scopeBridgeEnvelope{
+		return bridgeproto.Response{
 			OK:      true,
 			Payload: json.RawMessage(`{"state":"session_expired","willAttemptNetwork":false}`),
 		}, nil
@@ -619,32 +610,34 @@ func TestCliScopeDiagnosticsLiveSkipsProbeWhenAuthStateNotReady(t *testing.T) {
 func TestCliScopeDiagnosticsLiveInsufficientScopeHardStopRedacts(t *testing.T) {
 	saveFuncVars(t)
 	setupFakeHome(t, fakeHomeOpts{
-		configJSON: `{"keyPasswordProvider":"pass-cli","dataCredentialProvider":"pass-cli","dataCredentialHost":"proton-data.test"}`,
+		configJSON: `{"keyPasswordProvider":"pass-cli"}`,
 	})
 	t.Setenv("PROTON_LFS_LIVE_CANARY", scopeLiveAckValue)
+	t.Setenv(config.EnvStorageBase, "")
+	t.Setenv(config.EnvAppVersion, "")
 	findDriveCLI = func() string { return "/tmp/proton-drive-cli" }
 
 	var commands []string
 	var listRequest map[string]any
-	runScopeBridge = func(_ string, command string, request map[string]any) (scopeBridgeEnvelope, error) {
+	runScopeBridge = func(_ string, command string, request map[string]any) (bridgeproto.Response, error) {
 		commands = append(commands, command)
 		switch command {
 		case "auth-state":
-			return scopeBridgeEnvelope{
+			return bridgeproto.Response{
 				OK:      true,
 				Payload: json.RawMessage(`{"state":"ready","willAttemptNetwork":false}`),
 			}, nil
 		case "list":
 			listRequest = cloneMap(request)
-			return scopeBridgeEnvelope{
+			return bridgeproto.Response{
 				OK:      false,
 				Code:    403,
 				Error:   "API Error (9101): Access token does not have sufficient scope Bearer raw-bearer-token",
-				Details: json.RawMessage(`"{\"errorCode\":\"INSUFFICIENT_SCOPE\",\"protonCode\":9101,\"accessToken\":\"raw-token-in-details\"}"`),
+				Details: `{"errorCode":"INSUFFICIENT_SCOPE","protonCode":9101,"accessToken":"raw-token-in-details"}`,
 			}, nil
 		default:
 			t.Fatalf("unexpected command: %s", command)
-			return scopeBridgeEnvelope{}, nil
+			return bridgeproto.Response{}, nil
 		}
 	}
 
@@ -656,10 +649,9 @@ func TestCliScopeDiagnosticsLiveInsufficientScopeHardStopRedacts(t *testing.T) {
 	if !reflect.DeepEqual(commands, []string{"auth-state", "list"}) {
 		t.Fatalf("commands = %#v", commands)
 	}
-	if listRequest["folder"] != "/" ||
-		listRequest["dataCredentialProvider"] != "pass-cli" ||
-		listRequest["dataCredentialHost"] != "proton-data.test" {
-		t.Fatalf("unexpected list request: %#v", listRequest)
+	wantRequest := map[string]any{"folder": "/", "storageBase": config.DefaultStorageBase}
+	if !reflect.DeepEqual(listRequest, wantRequest) {
+		t.Fatalf("list request = %#v, want %#v", listRequest, wantRequest)
 	}
 	out := buf.String()
 	for _, want := range []string{"INSUFFICIENT_SCOPE", "9101", "insufficient_scope"} {
@@ -687,5 +679,20 @@ func TestUsageContainsSubcommands(t *testing.T) {
 		if !strings.Contains(usage, word) {
 			t.Errorf("usage string missing %q", word)
 		}
+	}
+}
+
+func TestCliStatusReportsInvalidSessionFile(t *testing.T) {
+	saveFuncVars(t)
+	home := setupFakeHome(t, fakeHomeOpts{})
+	writeSessionForStatusTest(t, home, sessionMetadata{AccessToken: "test"})
+	setupGitConfig(t, "")
+
+	var buf bytes.Buffer
+	if code := cliStatus(&buf); code != 0 {
+		t.Fatalf("expected exit 0, got %d", code)
+	}
+	if !strings.Contains(buf.String(), "Session:  invalid session file; run proton-drive-cli login") {
+		t.Errorf("status must not report an invalid session file as logged in:\n%s", buf.String())
 	}
 }

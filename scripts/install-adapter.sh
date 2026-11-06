@@ -9,29 +9,20 @@ set -euo pipefail
 # Environment variables:
 #   INSTALL_DIR      target directory (default: /usr/local/bin)
 #   VERSION          release tag to install (default: latest)
-#   VERIFY_CHECKSUM  auto     verify against SHA256SUMS.txt when the release
-#                             publishes a checksum for the asset; warn when
-#                             it does not (default)
-#                    required fail unless a published checksum matches
-#                    skip     do not verify
-#
-# release-bundle.yml publishes one SHA256SUMS.txt covering every release
-# asset, including these standalone adapter binaries
-# (git-lfs-proton-adapter-<os>-<arch>[.exe]). "auto" keeps older releases
-# without a checksum entry installable, with a warning.
+#   VERIFY_CHECKSUM  required (default): the asset must match its entry in the
+#                    release's SHA256SUMS.txt (release-bundle.yml); skip: no check
 
 REPO="SevenOfNine-labs/proton-lfs-cli"
 BINARY_NAME="git-lfs-proton-adapter"
 CHECKSUM_FILE="SHA256SUMS.txt"
 INSTALL_DIR="${INSTALL_DIR:-/usr/local/bin}"
-VERIFY_CHECKSUM="${VERIFY_CHECKSUM:-auto}"
+VERIFY_CHECKSUM="${VERIFY_CHECKSUM:-required}"
 
 case "$VERIFY_CHECKSUM" in
-  auto|required|skip) ;;
-  *) echo "VERIFY_CHECKSUM must be auto, required or skip (got: ${VERIFY_CHECKSUM})" >&2; exit 1 ;;
+  required|skip) ;;
+  *) echo "VERIFY_CHECKSUM must be required or skip (got: ${VERIFY_CHECKSUM})" >&2; exit 1 ;;
 esac
 
-# --- Detect OS ---
 detect_os() {
   local os
   os="$(uname -s | tr '[:upper:]' '[:lower:]')"
@@ -43,7 +34,6 @@ detect_os() {
   esac
 }
 
-# --- Detect architecture ---
 detect_arch() {
   local arch
   arch="$(uname -m)"
@@ -54,7 +44,6 @@ detect_arch() {
   esac
 }
 
-# --- Resolve version ---
 # GitHub redirects releases/latest to releases/tag/<tag>; the tag is the last
 # path segment of the final URL, so no API JSON needs parsing.
 resolve_version() {
@@ -76,7 +65,7 @@ resolve_version() {
   echo "$tag"
 }
 
-# --- SHA-256 of a file (coreutils sha256sum, or shasum on macOS) ---
+# SHA-256 of a file: coreutils sha256sum(1), or shasum(1) on macOS.
 sha256_of() {
   if command -v sha256sum >/dev/null 2>&1; then
     sha256sum "$1" | awk '{print $1}'
@@ -88,15 +77,10 @@ sha256_of() {
 }
 
 checksum_unavailable() {
-  local reason="$1"
-  if [ "$VERIFY_CHECKSUM" = "required" ]; then
-    echo "Checksum verification required but ${reason}" >&2
-    exit 1
-  fi
-  echo "Warning: ${reason}; installing without checksum verification" >&2
+  echo "Checksum verification failed: $1 (VERIFY_CHECKSUM=skip installs unverified)" >&2
+  exit 1
 }
 
-# --- Verify the downloaded asset against the release's checksum file ---
 verify_checksum() {
   local asset_file="$1" asset_name="$2" version="$3"
   local sums expected actual
@@ -109,14 +93,12 @@ verify_checksum() {
   if ! curl -fsSL -o "$sums" \
       "https://github.com/${REPO}/releases/download/${version}/${CHECKSUM_FILE}"; then
     checksum_unavailable "release ${version} publishes no ${CHECKSUM_FILE}"
-    return 0
   fi
 
-  # sha256sum format: "<hex>  <name>" where a leading '*' marks binary mode.
+  # sha256sum(1) check format: "<hex>  <name>", a leading '*' marks binary mode.
   expected="$(awk -v name="$asset_name" '{ f = $2; sub(/^\*/, "", f); if (f == name) { print $1; exit } }' "$sums")"
   if [ -z "$expected" ]; then
     checksum_unavailable "${CHECKSUM_FILE} of release ${version} has no entry for ${asset_name}"
-    return 0
   fi
 
   if ! actual="$(sha256_of "$asset_file")"; then

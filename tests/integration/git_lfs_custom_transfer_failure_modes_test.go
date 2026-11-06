@@ -152,10 +152,9 @@ exit 42
 	}
 }
 
-// TestGitLFSCustomTransferFailsWhenAdapterExitsWithoutResponse covers an
-// adapter that reads the transfer request and exits 0 without answering.
-// git-lfs has no activity timeout for custom adapters; it fails when the
-// adapter closes stdout.
+// TestGitLFSCustomTransferFailsWhenAdapterExitsWithoutResponse: an adapter
+// that exits 0 without answering the transfer request fails the transfer
+// once its stdout closes.
 func TestGitLFSCustomTransferFailsWhenAdapterExitsWithoutResponse(t *testing.T) {
 	s := setupRepositoryForUpload(t)
 

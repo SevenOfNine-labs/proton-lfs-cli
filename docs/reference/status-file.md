@@ -25,13 +25,12 @@ the tray reads it every 5 seconds. Source of truth:
 | --- | --- | --- | --- |
 | `state` | string | always | One of the states below |
 | `lastOid` | string | when known | OID of the object the report is about |
-| `lastOp` | string | when known | `init`, `upload`, `download`, `terminate` (adapter) or `login` (tray) |
+| `lastOp` | string | when known | `upload` or `download` (adapter; on a failure the operation of the session) or `login` (tray) |
 | `error` | string | on failure | Human-readable message, also sent to git-lfs |
 | `errorCode` | string | on failure | Machine-readable code from the vocabulary below |
 | `errorDetail` | string | on failure | Recovery guidance shown in the tray tooltip |
 | `retryable` | bool | when true | A retry may succeed without user action |
 | `temporary` | bool | when true | The failure is expected to be transient |
-| `retryCount` | int | when non-zero | Declared in the structure; no writer sets it, so it is always omitted |
 | `timestamp` | RFC 3339 | always | Set to the write time when the writer leaves it zero |
 
 Example after a successful upload:
@@ -40,28 +39,37 @@ Example after a successful upload:
 {"state":"ok","lastOid":"3f8e…","lastOp":"upload","timestamp":"2026-11-06T10:21:33.412Z"}
 ```
 
-Example after a refused transfer:
+Example after a transfer whose bridge command reported an expired session:
 
 ```json
-{"state":"auth_required","lastOid":"3f8e…","error":"no ready Proton Drive session; run proton-drive-cli login before Git LFS transfer","errorCode":"auth_required","errorDetail":"Run: proton-drive-cli login to re-authenticate","timestamp":"2026-11-06T10:21:33.412Z"}
+{"state":"auth_required","lastOid":"3f8e…","lastOp":"upload","error":"session is invalid or expired","errorCode":"auth_required","errorDetail":"Run: proton-drive-cli login to re-authenticate","timestamp":"2026-11-06T10:21:33.412Z"}
 ```
+
+Only transfer results are written: `init` and `terminate` leave the file as
+it is, so the result of the last transfer survives the end of its session.
+A refused `init` (the `bridge auth-state` gate, an unconfigured backend) is
+answered with a protocol error to git-lfs; the tray derives sign-in
+readiness from the session file itself
+([Tray Reference](tray.md#readiness-rules)).
 
 ## States
 
 | `state` | Written by | When | Tray icon |
 | --- | --- | --- | --- |
-| `idle` | adapter | `init` succeeded (`lastOp: init`) or `terminate` was received (`lastOp: terminate`) | green while signed in and ready, otherwise the readiness icon |
-| `ok` | adapter | An upload or download completed (`lastOid`, `lastOp` set) | green |
-| `transferring` | nobody at present | Reserved for a transfer in progress; the tray renders it (blue icon, "Uploading…"/"Downloading…" tooltip) but the current adapter writes `ok` or a failure state only when a transfer ends | blue |
+| `ok` | adapter | An upload or download completed (`lastOid`, `lastOp` set) | the readiness icon (green while signed in and ready) |
+| `transferring` | no component | Declared in `internal/config/status.go` for a transfer in progress and rendered by the tray (blue icon, "Uploading…"/"Downloading…" tooltip); the adapter writes `ok` or a failure state when a transfer ends and never writes `transferring` | blue |
 | `error` | adapter | A transfer failed for a reason that is not one of the three states below | red |
 | `rate_limited` | adapter, tray | Proton rate-limited the request (`errorCode: rate_limited`), or the tray's Connect was rate-limited (`lastOp: login`, `errorCode: RATE_LIMITED`); the tray refuses another login for one hour after the timestamp | red |
-| `auth_required` | adapter | The saved session or local unlock material is not usable (`auth_required`, `two_factor_required`, `data_password_required`, `key_password_required`, `key_unlock_failed`) | red |
+| `auth_required` | adapter | A transfer failed because the session or the stored key password is not usable (`auth_required`, `key_password_required`) | red |
 | `captcha` | adapter | Proton requires CAPTCHA verification (`captcha_required`) | red |
 
 The tray has four icons (idle, ok, error, syncing). `rate_limited`,
 `auth_required` and `captcha` share the error icon and are told apart by the
-tooltip. While no session is signed in, or local readiness is blocked, the
-tray shows its readiness state instead of the transfer state.
+tooltip. While no session is signed in, local readiness is blocked, or the
+file is missing or reports `ok`, the tray shows its readiness instead of the
+transfer state. An `auth_required` or `captcha` report, or a `rate_limited`
+report of a login, older than a login the tray saw while running (a new
+session `uid`) is also replaced by the readiness.
 
 ## errorCode vocabulary
 
@@ -72,17 +80,14 @@ message are used only when the failure carries none.
 | --- | --- | --- | --- |
 | `captcha_required` | bridge `CAPTCHA_REQUIRED`, status 407, or "CAPTCHA" in the message | `captcha` | Run: proton-drive-cli login to complete CAPTCHA verification |
 | `rate_limited` | bridge `RATE_LIMITED`, status 429, or "rate limit" in the message | `rate_limited` | Wait before retrying operations. The Proton API has rate-limited requests. |
-| `two_factor_required` | bridge `TWO_FACTOR_REQUIRED` or "two-factor", "2fa", "fido2" in the message | `auth_required` | Complete two-factor authentication in the browser during proton-drive-cli login |
-| `data_password_required` | auth-state `needs_data_password`, bridge `DATA_PASSWORD_REQUIRED`, or "data password" in the message | `auth_required` | Configure a mailbox/data password provider (--data-credential-provider); do not retry account login |
-| `key_password_required` | auth-state `needs_key_password`, bridge `KEY_PASSWORD_REQUIRED`, or "key password" in the message | `auth_required` | Run: proton-drive-cli login with the configured key-password provider |
-| `key_unlock_failed` | "failed to decrypt" or "decrypt any keys" in the message | `auth_required` | The stored mailbox/data password did not unlock the Proton keys; store the correct password |
-| `auth_required` | auth-state `needs_login`, `session_expired`, `session_invalid`; bridge `AUTH_FAILED`, `SESSION_EXPIRED`, `INVALID_CREDENTIALS`; status 401 or 403 | `auth_required` | Run: proton-drive-cli login to re-authenticate |
-| `insufficient_scope` | bridge `INSUFFICIENT_SCOPE`, Proton code 9101 | `error` | Proton rejected the app/session scope; run proton-lfs-cli scope-diagnostics and do not retry login |
-| `permission_denied` | bridge `PERMISSION_DENIED`, envelope status 403 without a code | `error` | Proton Drive denied access to this object |
-| `not_found` | bridge `NOT_FOUND`, `FILE_NOT_FOUND`, `PATH_NOT_FOUND`; status 404 | `error` | The requested object was not found in Proton Drive |
-| `network_failure` | bridge `NETWORK_ERROR`, `TIMEOUT`, `CONNECTION_REFUSED` | `error` | Proton Drive is unreachable; the operation may be retried |
-| `server_error` | bridge `API_ERROR`, `UPLOAD_FAILED`, `DOWNLOAD_FAILED`, `UNKNOWN_ERROR`, `QUOTA_EXCEEDED`, `DISK_FULL`, `ENCRYPTION_FAILED`, `DECRYPTION_FAILED`; any 5xx | `error` | Proton Drive reported a server error; the operation may be retried |
-| `invalid_request` | bridge `FILE_TOO_LARGE`, `INVALID_FILE`, `INVALID_PATH`, `NOT_A_FOLDER`, `VALIDATION_ERROR`, `OPERATION_CANCELLED`; auth-state `configuration_error`; other 4xx | `error` | Client error - check request parameters |
+| `key_password_required` | bridge `KEY_PASSWORD_REQUIRED` (key password missing or not unlocking the account keys), or "key password" in a transport message | `auth_required` | Run: proton-drive-cli login with the configured key-password provider |
+| `auth_required` | bridge `AUTH_FAILED`, `SESSION_EXPIRED`; envelope status 401 with an unmapped code; "invalid or expired session" or "unauthorized" in a transport message; without a backend code, status 401 or 403 or "Authentication" in the message | `auth_required` | Run: proton-drive-cli login to re-authenticate |
+| `insufficient_scope` | bridge `INSUFFICIENT_SCOPE`, or "sufficient scope" in a transport message | `error` | Proton rejected the app/session scope; run proton-lfs-cli scope-diagnostics and do not retry login |
+| `permission_denied` | bridge `PERMISSION_DENIED`, envelope status 403 with an unmapped code | `error` | Proton Drive denied access to this object |
+| `not_found` | bridge `NOT_FOUND`, `FILE_NOT_FOUND`, `PATH_NOT_FOUND`; without a backend code, status 404 | `error` | The requested object was not found in Proton Drive; without a backend code: The requested resource was not found |
+| `network_failure` | bridge `NETWORK_ERROR`, `TIMEOUT`, `CONNECTION_REFUSED`; a bridge command killed at `--bridge-timeout` | `error` | Proton Drive is unreachable; the operation may be retried |
+| `server_error` | bridge `API_ERROR`, `UPLOAD_FAILED`, `DOWNLOAD_FAILED`, `UNKNOWN_ERROR`, `QUOTA_EXCEEDED`, `DISK_FULL`, `ENCRYPTION_FAILED`, `DECRYPTION_FAILED`; without a backend code, any 5xx | `error` | Proton Drive reported a server error; the operation may be retried; without a backend code: Internal server error - the operation may be retried (500) or Server error - the operation may be retried (other 5xx) |
+| `invalid_request` | bridge `FILE_TOO_LARGE`, `INVALID_FILE`, `INVALID_PATH`, `NOT_A_FOLDER`, `VALIDATION_ERROR`, `OPERATION_CANCELLED`; other 4xx from a backend (local store size mismatch, envelope with an unmapped code) | `error` | Client error - check request parameters |
 | `conflict` | adapter-side size or hash mismatch (status 409, no backend code) | `error` | Resource conflict (e.g., hash or size mismatch) |
 | `client_error` | other 4xx without a backend code | `error` | Client error - check request parameters |
 | `unknown_error` | no code and no recognisable status | `error` | empty |
@@ -102,7 +107,7 @@ message are used only when the failure carries none.
 
 ## How the tray renders it
 
-- Tooltip: `Proton LFS — Last <lastOp> <relative time>` for `ok`;
+- Tooltip: the readiness tooltip for `ok`;
   `Proton LFS — <errorCode>: <errorDetail>` for `error`; dedicated texts for
   `rate_limited`, `auth_required`, `captcha` and `transferring`;
   `(retryable, temporary)` is appended when those flags are set.
@@ -110,4 +115,4 @@ message are used only when the failure carries none.
   fields, for example `upload 3m ago (ok)` or
   `download just now (object not found in drive backend; code=not_found)`.
 - A missing or unreadable file is shown as `Transfer: no data`; the adapter
-  recreates it on the next `init`.
+  recreates it with the next transfer result.

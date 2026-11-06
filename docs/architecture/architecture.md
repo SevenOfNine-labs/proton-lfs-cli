@@ -41,7 +41,7 @@ graph TB
         Status[~/.proton-lfs/status.json]
         Prefs[~/.proton-lfs/config.json]
         Session[~/.proton-drive-cli/session.json]
-        Providers[pass-cli or git credential helper<br/>key password, data password]
+        Providers[pass-cli or git credential helper<br/>browser-fork key password]
     end
 
     Git -->|stdin/stdout JSON lines| Main
@@ -66,11 +66,12 @@ graph TB
 Design rules that the code enforces:
 
 - Account login happens only in `proton-drive-cli login` (browser session
-  fork). Transfer commands never carry account credentials; the adapter's
-  bridge requests contain at most `dataCredentialProvider`,
-  `dataCredentialHost`, `storageBase`, `appVersion` and the object fields.
-- The adapter fails closed: `init` runs the offline `bridge auth-state` and
-  refuses every state other than `ready`.
+  fork), which delivers the key password for every account type. Transfer
+  commands never carry credentials; the adapter's bridge requests contain
+  only `storageBase`, `appVersion` and the object fields.
+- The adapter fails closed: `init` runs `bridge auth-state` and refuses every
+  state other than `ready` and `session_expired`; `bridge init` refreshes an
+  expired access token before use.
 - git-lfs provides the concurrency: it starts one adapter process per
   transfer slot (`lfs.concurrenttransfers`), and each adapter process handles
   one object at a time with one bridge subprocess per command. There is no
@@ -94,8 +95,7 @@ sequenceDiagram
     Bridge-->>Adapter: {"ok":true,"payload":{"state":"ready",...}}
     Adapter->>Bridge: init {"storageBase":"LFS"}
     Bridge->>Proton: ensure /LFS exists
-    Bridge-->>Adapter: {"ok":true,"payload":{"initialized":true,...}}
-    Adapter->>Status: state idle, lastOp init
+    Bridge-->>Adapter: {"ok":true,"payload":{"storageBase":"LFS","path":"/LFS","initialized":true}}
     Adapter-->>Git: {}
 
     Git->>Adapter: {"event":"upload","oid":"...","size":N,"path":"..."}
@@ -104,13 +104,12 @@ sequenceDiagram
     Bridge-->>Adapter: {"ok":true,"payload":{"exists":false}}
     Adapter->>Bridge: upload {"oid":"...","path":"..."}
     Bridge->>Proton: encrypt and upload to /LFS/ab/cd/<oid>
-    Bridge-->>Adapter: {"ok":true,"payload":{"uploaded":true,...}}
+    Bridge-->>Adapter: {"ok":true,"payload":{"oid":"...","uploaded":true,"deduplicated":false,...}}
     Adapter-->>Git: {"event":"progress",...}
     Adapter->>Status: state ok, lastOid, lastOp upload
     Adapter-->>Git: {"event":"complete","oid":"..."}
 
     Git->>Adapter: {"event":"terminate"}
-    Adapter->>Status: state idle, lastOp terminate
 ```
 
 Downloads mirror this: the adapter creates a temporary file, sends it as
@@ -164,10 +163,10 @@ login.
 └── tray.lock            # single-instance lock
 
 ~/.proton-drive-cli/     # 0700
-├── session.json         # tokens and browser-fork metadata (0600)
+├── session.json         # uid, tokens, scopes, key-password provider and host, expiry (0600)
 ├── session.lock         # proper-lockfile directory guarding refresh-token rotation
-├── crypto-cache.json    # cached key salts, user and addresses (1 h)
-└── rate-limit-cooldown.json
+├── crypto-cache.json    # cached user and address records of the session UID (0600, 1 h)
+└── rate-limit-cooldown.json  # wait-until timestamp after a Proton rate limit (0600)
 ```
 
 Objects in Proton Drive live at `/<storageBase>/<oid[0:2]>/<oid[2:4]>/<oid>`
@@ -179,11 +178,12 @@ in the system temp directory; files matching `git-lfs-proton-*` older than
 
 ## Status reporting
 
-The adapter writes `~/.proton-lfs/status.json` on `init`, `terminate`, every
-completed transfer and every failure; the tray polls it every 5 seconds. The
-seven states are `idle`, `ok`, `transferring`, `error`, `rate_limited`,
-`auth_required` and `captcha`; the tray maps them onto four icons (idle, ok,
-error, syncing), the three auth-related states sharing the error icon. Field
+The adapter writes `~/.proton-lfs/status.json` on every completed or failed
+transfer, never on `init` or `terminate`; the tray polls it every 5 seconds.
+The six states are `ok`, `transferring` (declared and rendered, never
+written by the adapter), `error`, `rate_limited`, `auth_required` and
+`captcha`; the tray maps them onto four icons (idle, ok, error, syncing),
+`rate_limited`, `auth_required` and `captcha` sharing the error icon. Field
 and code vocabularies: [Status File Reference](../reference/status-file.md).
 
 ## Error classification

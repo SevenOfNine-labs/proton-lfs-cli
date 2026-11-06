@@ -1,8 +1,6 @@
 package main
 
 import (
-	"io"
-	"log"
 	"os"
 	"path/filepath"
 	"testing"
@@ -38,20 +36,16 @@ func TestReadGitLFSConfigQueriesGitOnlyWhenFileChanges(t *testing.T) {
 		t.Fatalf("git queried %d times for an unchanged config file, want 1", *queries)
 	}
 
-	updated := "[lfs]\n\tstandalonetransferagent = proton\n[lfs \"customtransfer.proton\"]\n\targs = --backend sdk --data-credential-provider pass-cli\n"
-	if err := os.WriteFile(gitCfg, []byte(updated), 0o644); err != nil {
+	// The size change alone updates the stamp when mtime resolution is coarse.
+	if err := os.WriteFile(gitCfg, []byte("[lfs]\n\tstandalonetransferagent = basic\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	// mtime resolution may be coarse; the size change alone updates the stamp.
 	second := readGitLFSConfig()
 	if *queries != 2 {
 		t.Fatalf("git queried %d times after the file changed, want 2", *queries)
 	}
-	if second.TransferArgs != "--backend sdk --data-credential-provider pass-cli" {
-		t.Fatalf("TransferArgs = %q", second.TransferArgs)
-	}
-	if got := parseFlagValue(second.TransferArgs, "--data-credential-provider"); got != "pass-cli" {
-		t.Fatalf("data provider from git args = %q", got)
+	if second.StandaloneAgent != "basic" {
+		t.Fatalf("StandaloneAgent = %q, want basic", second.StandaloneAgent)
 	}
 }
 
@@ -60,7 +54,7 @@ func TestReadGitLFSConfigUnregistered(t *testing.T) {
 	setupGitConfig(t, "")
 	invalidateGitLFSConfig()
 
-	if cfg := readGitLFSConfig(); cfg.StandaloneAgent != "" || cfg.TransferArgs != "" {
+	if cfg := readGitLFSConfig(); cfg.StandaloneAgent != "" {
 		t.Fatalf("expected empty config, got %#v", cfg)
 	}
 	if isLFSEnabled() {
@@ -80,7 +74,7 @@ func TestWriteGitLFSRegistrationInvalidatesCache(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg := readGitLFSConfig()
-	if cfg.StandaloneAgent != "proton" || cfg.TransferArgs != "--backend sdk" {
+	if cfg.StandaloneAgent != "proton" {
 		t.Fatalf("registration not visible after write: %#v", cfg)
 	}
 }
@@ -123,29 +117,5 @@ func TestGitConfigStampTracksSizeAndModTime(t *testing.T) {
 	}
 	if touched := gitConfigStamp([]string{path}); touched == created {
 		t.Fatal("stamp must change when mtime changes")
-	}
-}
-
-func TestMigrateGitLFSRegistrationRemovesCredentialProvider(t *testing.T) {
-	setupFakeHome(t, fakeHomeOpts{})
-	original := trayLog
-	trayLog = log.New(io.Discard, "", 0)
-	t.Cleanup(func() { trayLog = original })
-	registered := "--backend sdk --credential-provider git-credential --drive-cli-bin '/opt/Proton LFS/proton-drive-cli'"
-	if err := writeGitLFSRegistration("/opt/adapter", registered); err != nil {
-		t.Fatal(err)
-	}
-
-	if err := migrateGitLFSRegistration(); err != nil {
-		t.Fatal(err)
-	}
-
-	got := readGitLFSConfig().TransferArgs
-	want := "--backend sdk --drive-cli-bin '/opt/Proton LFS/proton-drive-cli'"
-	if got != want {
-		t.Fatalf("migrated args = %q, want %q", got, want)
-	}
-	if err := migrateGitLFSRegistration(); err != nil {
-		t.Fatalf("second migration must be a no-op: %v", err)
 	}
 }

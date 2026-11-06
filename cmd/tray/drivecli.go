@@ -7,9 +7,7 @@ import (
 )
 
 // driveCLICommandTimeout bounds the proton-drive-cli invocations the tray
-// starts on its own (session refresh, logout). Each is one HTTPS round trip
-// to the Proton API; a process that never returns must not leave the tray's
-// refresh state "in progress" or block the CLI indefinitely.
+// starts on its own (session refresh, logout), each one Proton API round trip.
 const driveCLICommandTimeout = 2 * time.Minute
 
 // driveCLITimeout is the effective timeout; tests shorten it.

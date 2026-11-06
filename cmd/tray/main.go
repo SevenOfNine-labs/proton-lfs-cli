@@ -32,7 +32,7 @@ func main() {
 			return
 		case "login":
 			if hasHelpFlag(os.Args[2:]) {
-				fmt.Println("Usage: proton-lfs-cli login\n\nAuthenticate with Proton using the configured credential provider.")
+				fmt.Println("Usage: proton-lfs-cli login\n\nSign in to Proton in the browser and store the key password with the configured key-password provider.")
 				return
 			}
 			augmentPath()
@@ -53,7 +53,7 @@ func main() {
 			os.Exit(cliRegister(os.Stdout))
 		case "status":
 			if hasHelpFlag(os.Args[2:]) {
-				fmt.Println("Usage: proton-lfs-cli status\n\nShow session, LFS registration, credential provider, and transfer status.")
+				fmt.Println("Usage: proton-lfs-cli status\n\nShow session, LFS registration, key-password provider, and transfer status.")
 				return
 			}
 			augmentPath()
@@ -94,17 +94,14 @@ Usage:
   proton-lfs-cli status            Show session, LFS, and transfer status
   proton-lfs-cli scope-diagnostics [--live]
                                    Print redacted Drive auth/scope evidence
-  proton-lfs-cli config [provider] Show or set credential provider
+  proton-lfs-cli config [provider] Show or set the key-password provider
   proton-lfs-cli --version         Print version and exit
   proton-lfs-cli --help            Show this help
 
-Credential providers: git-credential, pass-cli
+Key-password providers: git-credential, pass-cli
 `
 
 func onReady() {
-	if err := migrateGitLFSRegistration(); err != nil {
-		trayLog.Printf("git config migration failed: %v", err)
-	}
 	setupMenu()
 	startStatusWatcher()
 }
@@ -119,13 +116,9 @@ func onExit() {
 // prompt), and the tray must not hang before its icon appears.
 const loginShellPathTimeout = 5 * time.Second
 
-// augmentPath adopts the PATH of the user's login shell on macOS and Linux.
-// Apps started from Finder, Spotlight or a LaunchAgent inherit launchd's
-// minimal PATH (/usr/bin:/bin:/usr/sbin:/sbin), and XDG autostart entries
-// inherit the display manager's environment, which does not run the login
-// files of shells such as zsh; both lack Homebrew, nvm and ~/.local/bin
-// where pass-cli and node are installed. Windows programs inherit the
-// user's PATH from the registry.
+// augmentPath adopts the PATH of the user's login shell on macOS and Linux:
+// launchd and XDG autostart start the tray without the login shell's PATH,
+// which holds pass-cli and node. Windows programs inherit the user's PATH.
 func augmentPath() {
 	if runtime.GOOS == "windows" {
 		return
@@ -142,11 +135,9 @@ func augmentPath() {
 	}
 }
 
-// loginShellPath runs shell as a login shell and returns the PATH it exports.
-// An empty shell falls back to zsh, the macOS default login shell since
-// 10.15. Only the last output line is used: login startup files may print
-// banners before the shell evaluates the command, and printf '%s' writes the
-// PATH without a trailing newline so it is always that last line.
+// loginShellPath runs shell (default zsh, the macOS login shell) as a login
+// shell and returns the PATH it exports, taken from the last output line
+// because startup files may print banners first.
 func loginShellPath(ctx context.Context, shell string) (string, error) {
 	shell = strings.TrimSpace(shell)
 	if shell == "" {
@@ -166,10 +157,8 @@ func loginShellPath(ctx context.Context, shell string) (string, error) {
 // a running tray instance.
 const trayLockFileName = "tray.lock"
 
-// instanceLock is held for the lifetime of the tray process. The lock is an
-// OS advisory lock (flock(2) on Unix, LockFileEx on Windows) that the kernel
-// releases when the process exits, so a crashed instance never leaves a stale
-// lock behind.
+// instanceLock is held for the lifetime of the tray process: an advisory
+// lock (flock(2) on Unix, LockFileEx on Windows) the kernel releases on exit.
 var instanceLock *flock.Flock
 
 // acquireInstanceLock takes the single-instance lock. It returns false when

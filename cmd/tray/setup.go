@@ -78,11 +78,9 @@ func driveCLICandidates(exeDir string) []string {
 	return candidates
 }
 
-// discoverPassCLIBinary finds pass-cli in PATH using exec.LookPath.
-// Returns the absolute path if found, empty string otherwise.
-// A macOS .app bundle starts with launchd's minimal PATH, and pass-cli is
-// usually installed in ~/.local/bin or by Homebrew, so those locations are
-// checked directly after PATH.
+// discoverPassCLIBinary returns the absolute path of pass-cli from PATH or,
+// for launchd's minimal PATH, from ~/.local/bin and the Homebrew prefixes;
+// it returns "" when none exists.
 func discoverPassCLIBinary() string {
 	path, err := exec.LookPath("pass-cli")
 	if err == nil {
@@ -120,46 +118,13 @@ const launchAgentLabel = "com.proton.lfs-tray"
 // scripts/package-bundle.sh ships a file of the same name in the bundle.
 const autostartDesktopFileName = "proton-lfs.desktop"
 
-// formerLaunchAgentLabel is the label releases before 2026-11 used for the
-// autostart agent; its plist is removed whenever autostart is changed.
-const formerLaunchAgentLabel = "com.proton.git-lfs-tray"
-
 // launchAgentPath returns the path to the macOS LaunchAgent plist.
 func launchAgentPath() string {
-	return launchAgentPathFor(launchAgentLabel)
-}
-
-func launchAgentPathFor(label string) string {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return ""
 	}
-	return filepath.Join(home, "Library", "LaunchAgents", label+".plist")
-}
-
-// launchAgentInstalled reports whether the current or the former autostart
-// agent plist exists.
-func launchAgentInstalled() bool {
-	for _, label := range []string{launchAgentLabel, formerLaunchAgentLabel} {
-		if p := launchAgentPathFor(label); p != "" {
-			if _, err := os.Stat(p); err == nil {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-// removeFormerLaunchAgent deletes the plist written under the former label.
-func removeFormerLaunchAgent() error {
-	p := launchAgentPathFor(formerLaunchAgentLabel)
-	if p == "" {
-		return nil
-	}
-	if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
-		return err
-	}
-	return nil
+	return filepath.Join(home, "Library", "LaunchAgents", launchAgentLabel+".plist")
 }
 
 // linuxAutostartPath returns the XDG autostart entry path:
@@ -178,7 +143,12 @@ func linuxAutostartPath() (string, error) {
 func isAutoStartEnabled() bool {
 	switch runtime.GOOS {
 	case "darwin":
-		return launchAgentInstalled()
+		p := launchAgentPath()
+		if p == "" {
+			return false
+		}
+		_, err := os.Stat(p)
+		return err == nil
 	case "linux":
 		p, err := linuxAutostartPath()
 		if err != nil {
@@ -251,9 +221,6 @@ func setAutoStartDarwin(enable bool) error {
 	if p == "" {
 		return fmt.Errorf("cannot determine LaunchAgent path")
 	}
-	if err := removeFormerLaunchAgent(); err != nil {
-		return err
-	}
 	if !enable {
 		if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
 			return err
@@ -292,12 +259,9 @@ func desktopEntry(program string) string {
 // of them must be quoted.
 const desktopExecReserved = " \t\n\"'\\><~|&;$*?#()`"
 
-// desktopExecValue renders argv as an Exec value. Per the specification an
-// argument with reserved characters is enclosed in double quotes with the
-// characters ", `, $ and \ escaped by a backslash; a literal % is written
-// as %% because % introduces field codes. The result then passes through
-// the general string escaping of the file format (desktopStringValue),
-// which the specification applies before the Exec quoting rule.
+// desktopExecValue renders argv as an Exec value: Desktop Entry
+// Specification 1.5 ("The Exec key") argument quoting and %% for a literal %,
+// then the string escaping of the file format (desktopStringValue).
 func desktopExecValue(argv []string) string {
 	quoted := make([]string, 0, len(argv))
 	for _, arg := range argv {

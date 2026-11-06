@@ -17,7 +17,7 @@ System Tray App (cmd/tray/)
 Go Adapter (cmd/adapter/) → proton-drive-cli (subprocess, stdin/stdout JSON) → Proton API
                                     ↓
                         pass-cli or git-credential
-                    (credentials resolved internally)
+              (browser-fork key password, stored and read by proton-drive-cli)
 ```
 
 Shared configuration lives in `internal/config/` and is used by both the adapter and tray app.
@@ -31,18 +31,21 @@ The project has five main components:
    - `config_constants.go`: Thin wrapper delegating to `internal/config`
 
 2. **System Tray App** (`cmd/tray/`): Cross-platform menu bar application
-   - `main.go`: Entry point, `--version` flag, PATH augmentation for macOS
-   - `menu.go`: Menu structure, key-password provider toggle, LFS registration, native notifications
-   - `connect.go`: "Connect to Proton" browser-fork login flow
+   - `main.go`: Entry point, subcommand dispatch, `--version`, single-instance lock, login-shell PATH adoption (macOS and Linux)
+   - `menu.go`: Menu structure, key-password provider toggle, LFS registration, Open Logs, Run Doctor, native notifications
+   - `connect.go`: "Connect to Proton" browser-fork login flow and login rate-limit guard
    - `cli.go`: CLI subcommand handlers (login, logout, status, config, register)
-   - `status.go`: Polls status.json every 5s, updates icon/tooltip/checkmarks
-   - `setup.go`: Binary discovery, autostart (macOS LaunchAgent / Linux .desktop)
+   - `scope_diagnostics.go`: `scope-diagnostics [--live]` redacted auth/scope report
+   - `status.go`: Polls status.json every 5s, derives readiness from session.json, schedules `session refresh --json`, updates icon/tooltip/checkmarks
+   - `setup.go`: Binary discovery, autostart (macOS LaunchAgent `com.proton.lfs-tray` / Linux .desktop)
    - `icons/`: Embedded 64x64 PNG icons (idle/ok/error/syncing)
 
 3. **Shared Config** (`internal/config/`): Constants and helpers shared by adapter + tray
    - `config.go`: Env var names, defaults, `EnvTrim`/`EnvOrDefault`/`EnvBoolOrDefault`
    - `status.go`: `StatusReport` struct, atomic `WriteStatus`/`ReadStatus`
-   - `prefs.go`: `Preferences` struct, `LoadPrefs`/`SavePrefs`
+   - `prefs.go`: `Preferences` struct (`keyPasswordProvider`), `LoadPrefs`/`SavePrefs`
+   - `fsutil.go`: `WriteFileAtomic` (temporary file, fsync, rename)
+   - `internal/bridgeproto/`: bridge contract shared by adapter and tray: response envelope parser, environment allowlist, redaction
 
 4. **Preflight** (`internal/preflight/`): Parses `proton-drive-cli doctor --json` against the bridge auth-state schema; used by `scripts/check_doctor_readiness.go` and the real E2E test before any live canary
 
@@ -81,7 +84,7 @@ make test-e2e-real      # Real Proton Drive E2E (guarded: exact PROTON_LFS_LIVE_
 ### Linting and Formatting
 ```bash
 make fmt                # Format Go code
-make lint               # Run Go vet + golangci-lint
+make lint               # Run go vet, golangci-lint and the comment policy check
 ```
 
 ### Credential Management
@@ -101,25 +104,39 @@ The adapter supports two backends controlled by `PROTON_LFS_BACKEND`:
    - Used for protocol integration tests
 
 2. **sdk**: Proton Drive integration via proton-drive-cli subprocess
-   - Go adapter spawns `node proton-drive-cli bridge <command>` directly
+   - Go adapter spawns `proton-drive-cli bridge <command>` directly (under `node` for a `.js` entry point)
    - Requires an existing browser-fork Proton Drive session
    - Configurable via `--drive-cli-bin` flag or `PROTON_DRIVE_CLI_BIN` env var
 
 ## Browser-Fork Auth
 
 Account login is browser-fork-only and happens in `proton-drive-cli login`
-before Git LFS transfers. The Go adapter never sends account username/password
-fields, `credentialProvider`, or `allowLogin` to bridge transfer commands.
-The key-password provider preference is `keyPasswordProvider` in
-`~/.proton-lfs/config.json`; `--credential-provider` and
-`PROTON_CREDENTIAL_PROVIDER` do not exist.
+before Git LFS transfers; two-factor authentication and CAPTCHA are
+completed in the browser. The fork delivers the key password for every
+account type; there is no separate mailbox/data password. proton-drive-cli
+stores the key password, keyed by the session UID, in the chosen provider
+and records the provider and host in `~/.proton-drive-cli/session.json`;
+bridge commands, `doctor` and `logout` use the recorded values. The Go
+adapter never sends account username/password fields, credential selectors,
+`credentialProvider`, or `allowLogin`: bridge requests carry only
+`appVersion`, `storageBase` and the command fields. The tray's key-password
+provider preference is `keyPasswordProvider` in `~/.proton-lfs/config.json`,
+passed to `login` as `--key-password-provider`.
+
+Key-password entry lifecycle: `proton-drive-cli logout` removes it (and
+revokes the session); a login that yields a new UID removes the previous
+UID's entry; a refresh token the API rejects with a Proton error body and
+HTTP 4xx other than 408 and 429, when no other process rotated it, signs
+the session out (session.json,
+crypto cache and the entry deleted, `auth-state` then reports
+`needs_login`).
 
 ### pass-cli (default)
 
 `proton-drive-cli` can store the browser-fork key password in Proton Pass.
 
 ```bash
-PROTON_KEY_PASSWORD_PROVIDER=pass-cli
+PROTON_KEY_PASSWORD_PROVIDER=pass-cli  # Read by proton-drive-cli login and the Makefile's live targets
 PROTON_PASS_CLI_BIN=pass-cli           # Binary path (respected by proton-drive-cli)
 ```
 
@@ -154,10 +171,10 @@ The `proton-drive-cli` submodule (`submodules/proton-drive-cli/`) provides:
 
 ## Important Configuration Files
 
-- `.env` / `.env.example`: Environment configuration (credentials, backend modes)
+- `.env` / `.env.example`: Environment configuration (backend, paths, timeouts, provider defaults; never credentials)
 - `Makefile`: Build orchestration, test runners, prerequisite checks
 - `submodules/proton-drive-cli/package.json` and `yarn.lock`: the JavaScript dependencies (the root has no JS project)
-- `go.mod`: Go 1.25 module (deps: `fyne.io/systray`)
+- `go.mod`: Go 1.25 module (deps: `fyne.io/systray`, `github.com/gofrs/flock`)
 - `docs/reference/adapter.md`: every adapter flag and environment variable
 
 ## JavaScript Package Management
@@ -175,27 +192,28 @@ cd submodules/proton-drive-cli && yarn build && yarn test
 ## Testing Strategy
 
 1. **Unit tests**: Go (`*_test.go`) with `TestHelperProcess` pattern for subprocess mocking
-   - `cmd/adapter/`: Protocol, backend, bridge, credential tests
+   - `cmd/adapter/`: Protocol, backend, bridge and bridge contract tests (request fields, auth states, error codes against `submodules/proton-drive-cli/schemas/bridge/v1/`)
+   - `cmd/tray/`: CLI, readiness, refresh, registration, scope-diagnostics, autostart tests
    - `internal/config/`: Status round-trip, prefs round-trip, env helper tests
+   - `internal/preflight/`: doctor readiness parser tests
 2. **Integration tests**: `tests/integration/` with `-tags integration`
    - Black-box Git LFS protocol validation
    - Timeout and concurrency stress tests
    - SDK backend roundtrip tests (direct subprocess)
    - Credential security tests
-3. **Mock mode**: `ADAPTER_ALLOW_MOCK_TRANSFERS=true` for protocol-only testing
-4. **Pre-commit hooks**: `gofmt`, `go vet`, `golangci-lint`, `go test` (adapter + config)
+3. **Mock mode**: `ADAPTER_ALLOW_MOCK_TRANSFERS=true` for protocol-only testing (off by default; mock transfers fail closed)
+4. **Pre-commit hooks**: `gofmt`, `go vet`, `golangci-lint`, `go test ./cmd/... ./internal/...`, comment policy, doc links, Conventional Commits
 
 ## Security Notes
 
 - Never commit credentials to `.env` (use `.env.example` patterns)
 - Account login is browser-fork-only and must happen outside Git LFS transfer commands
-- Transfer bridge requests never contain account username/password fields, `credentialProvider`, or `allowLogin`
-- Optional mailbox/data-password selectors are passed via stdin to subprocesses (never command-line args)
-- Environment allowlist filters subprocess env (only PATH, HOME, NODE_*, MOCK_BRIDGE_*, etc.)
+- Transfer bridge requests never contain account username/password fields, credential selectors, `credentialProvider`, or `allowLogin`; they travel via stdin (never command-line args)
+- Environment allowlist (`internal/bridgeproto/env.go`) filters subprocess env (named variables such as PATH, HOME, NODE_BIN, MOCK_BRIDGE_* and the credential-tool settings; `PROTON_KEY_PASSWORD_*` is not forwarded)
 - OID validation: `/^[a-f0-9]{64}$/i` before subprocess spawn
 - Path traversal prevention: reject paths containing `..`
 - One bridge subprocess per command, bounded by `--bridge-timeout` (default 5 min, plus 1 s per 256 KiB for transfers) and killed with its process group on expiry; concurrency comes from git-lfs starting one adapter process per transfer slot
-- Session tokens stored in `~/.proton-drive-cli/session.json` (should be 0600)
+- Session tokens stored in `~/.proton-drive-cli/session.json` (0600, directory 0700); no password is written to disk
 - See `docs/security/threat-model.md` for full threat model
 
 ## Status File Protocol
@@ -206,7 +224,7 @@ The adapter writes status to `~/.proton-lfs/status.json` (override with `PROTON_
 { "state": "ok", "lastOid": "abc123...", "lastOp": "upload", "timestamp": "..." }
 ```
 
-States: `idle`, `ok`, `transferring`, `error`, `rate_limited`, `auth_required`, `captcha`. The tray has four icons (idle grey, ok green, error red, syncing blue); `rate_limited`, `auth_required` and `captcha` share the error icon and differ by tooltip.
+Fields: `state`, `lastOid`, `lastOp`, `error`, `errorCode`, `errorDetail`, `retryable`, `temporary`, `timestamp` (`internal/config/status.go`). States: `ok`, `transferring`, `error`, `rate_limited`, `auth_required`, `captcha`; the adapter writes only transfer results (never `transferring`, nothing on `init` or `terminate`). The tray has four icons (idle grey, ok green, error red, syncing blue); `rate_limited`, `auth_required` and `captcha` share the error icon and differ by tooltip. Reference: `docs/reference/status-file.md`.
 
 ## Release Pipeline
 
@@ -221,8 +239,46 @@ States: `idle`, `ok`, `transferring`, `error`, `rate_limited`, `auth_required`, 
 
 ## Known Issues
 
-1. `Mock transfers are fail-closed by default` (require explicit opt-in)
-2. CAPTCHA may require manual intervention for new Proton accounts
+1. CAPTCHA may require manual intervention for new Proton accounts (completed in the browser during `proton-drive-cli login`)
+2. The sdk backend reports progress once per object after the bridge command returns; interrupted transfers are not resumed
+
+## Code Comments and Legacy (MANDATORY)
+
+Comments carry only what the code cannot say: the normative source behind a
+decision. Every comment is one of:
+
+- a reference to a standard or specification, with the section where useful
+  (RFC 9580 OpenPGP, RFC 9110 HTTP, RFC 2119 keywords, POSIX `rename(2)`,
+  Git LFS custom transfer specification, Desktop Entry Specification 1.5,
+  XDG Base Directory, JSON Schema 2020-12, NIST SP 800-38D AES-GCM, ...);
+- a reference to a scientific publication or a named algorithm (SRP-6a,
+  Argon2, ...);
+- a reference to external documentation of an API or tool the code relies
+  on, naming the file, function or URL (Proton Drive SDK and account module
+  sources, Node.js, Go standard library, man pages);
+- a one- or two-line statement of an invariant or contract that a reader
+  cannot infer from the code (for example "rename(2) replaces the target
+  atomically"), or the API contract in a doc comment of an exported symbol.
+
+Forbidden in comments, documentation and commit-facing text alike:
+
+- history and legacy notes: what the code did before, earlier versions,
+  former names, "previously", "no longer", "used to", "kept for
+  compatibility", "since version X", migration stories;
+- excuses, hedges and placeholders: "for now", "workaround", "hack",
+  "temporary fix", "TODO", "FIXME", "XXX", "unfortunately", "hopefully";
+- narration of what the next lines do, change logs, author notes, and
+  references to issues or pull requests in place of the specification;
+- comments longer than three lines outside doc comments of exported APIs.
+
+No legacy code: code, options, configuration keys, file formats, schema
+fields and documentation that exist only to serve an earlier version are
+deleted, not kept behind a comment or a migration. History lives in Git and
+in the generated changelog.
+
+`scripts/check-comment-policy.sh` enforces the forbidden vocabulary on every
+commit (pre-commit) and in CI; reviews treat any other violation of this
+section as a defect.
 
 ## Changeset Tracking (MANDATORY)
 

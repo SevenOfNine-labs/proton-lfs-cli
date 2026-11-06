@@ -38,7 +38,7 @@ jobs:
             goos: darwin
             goarch: arm64
             target: darwin-arm64
-          # darwin-amd64 omitted: free Intel macOS runners retired by GitHub
+          # darwin-amd64: GitHub offers no free Intel macOS runner.
           - os: ubuntu-latest
             goos: linux
             goarch: amd64
@@ -79,7 +79,7 @@ jobs:
       - name: Enable Corepack + Yarn 4
         shell: bash
         run: |
-          # Remove pre-installed yarn 1.x on Windows so corepack shim takes priority
+          # The Windows runner's global yarn 1.x would shadow the Corepack shim.
           npm uninstall -g yarn 2>/dev/null || true
           corepack enable
           corepack prepare yarn@4.1.1 --activate

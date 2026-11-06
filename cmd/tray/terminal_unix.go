@@ -15,10 +15,9 @@ type terminalEmulator struct {
 	args func(script string) []string
 }
 
-// linuxTerminalEmulators is tried in order. x-terminal-emulator is the
-// Debian alternatives entry and, like xterm, takes the program after -e
-// (Debian Policy 11.8.3 requires -e). gnome-terminal removed -e in 3.24 and
-// takes the program after --.
+// linuxTerminalEmulators is tried in order. x-terminal-emulator (Debian
+// Policy 11.8.3) and xterm take the program after -e; gnome-terminal(1)
+// takes it after --.
 var linuxTerminalEmulators = []terminalEmulator{
 	{name: "x-terminal-emulator", args: func(s string) []string { return []string{"-e", "bash", "-c", s} }},
 	{name: "gnome-terminal", args: func(s string) []string { return []string{"--", "bash", "-c", s} }},
@@ -48,12 +47,9 @@ func terminalCommandLinux(script string) *exec.Cmd {
 	return nil
 }
 
-// terminalCommandDarwin writes the script to a self-deleting temporary file
-// and asks Terminal.app to run it, so the command text is not echoed into
-// the window. The file path reaches the AppleScript as an argv item
-// (`on run argv`), never by interpolation into the script source. The
-// returned cleanup removes the file; it is needed only when the command
-// never starts, since the script removes itself when it runs.
+// terminalCommandDarwin writes script to a self-deleting file that
+// Terminal.app runs; the path reaches AppleScript as an argv item (`on run
+// argv`). The returned cleanup removes the file if the command never starts.
 func terminalCommandDarwin(script string) (*exec.Cmd, func()) {
 	f, err := os.CreateTemp("", "proton-lfs-*.sh")
 	if err != nil {

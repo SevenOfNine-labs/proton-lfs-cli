@@ -17,43 +17,33 @@ const (
 	BackendSDK   = "sdk"
 )
 
-// Credential provider kinds, used for the browser-fork key password and for
-// the optional mailbox/data password.
+// Credential provider kinds that store the browser-fork key password.
 const (
 	CredentialProviderPassCLI       = "pass-cli"
 	CredentialProviderGitCredential = "git-credential"
 )
-
-// ProtonCredentialHost is the host used for git credential fill/approve and
-// Proton Pass URL matching. Must match PROTON_CREDENTIAL_HOST in proton-drive-cli.
-const ProtonCredentialHost = "proton.me"
 
 // Default values
 const (
 	DefaultDriveCLIBin         = "submodules/proton-drive-cli/dist/index.js"
 	DefaultStorageBase         = "LFS"
 	DefaultKeyPasswordProvider = CredentialProviderPassCLI
-	DefaultDataCredentialHost  = "proton-data.proton-lfs-cli.local"
-	// DefaultDriveCLIAppVersion mirrors proton-drive-cli's built-in
-	// x-pm-appversion identity (external-drive-protonlfscli@<package.json
-	// version>). Bump it together with the submodule's package version;
-	// TestDefaultDriveCLIAppVersionMatchesSubmodule enforces the sync.
+	// DefaultDriveCLIAppVersion equals proton-drive-cli's x-pm-appversion
+	// identity, external-drive-protonlfscli@<package.json version>.
 	DefaultDriveCLIAppVersion = "external-drive-protonlfscli@0.1.2"
 )
 
 // Environment variable names
 const (
-	EnvDriveCLIBin            = "PROTON_DRIVE_CLI_BIN"
-	EnvNodeBin                = "NODE_BIN"
-	EnvStorageBase            = "LFS_STORAGE_BASE"
-	EnvAppVersion             = "PROTON_APP_VERSION"
-	EnvBackend                = "PROTON_LFS_BACKEND"
-	EnvAllowMockTransfers     = "ADAPTER_ALLOW_MOCK_TRANSFERS"
-	EnvLocalStoreDir          = "PROTON_LFS_LOCAL_STORE_DIR"
-	EnvDataCredentialProvider = "PROTON_DATA_CREDENTIAL_PROVIDER"
-	EnvDataCredentialHost     = "PROTON_DATA_CREDENTIAL_HOST"
-	EnvStatusFile             = "PROTON_LFS_STATUS_FILE"
-	EnvBridgeTimeout          = "PROTON_LFS_BRIDGE_TIMEOUT"
+	EnvDriveCLIBin        = "PROTON_DRIVE_CLI_BIN"
+	EnvNodeBin            = "NODE_BIN"
+	EnvStorageBase        = "LFS_STORAGE_BASE"
+	EnvAppVersion         = "PROTON_APP_VERSION"
+	EnvBackend            = "PROTON_LFS_BACKEND"
+	EnvAllowMockTransfers = "ADAPTER_ALLOW_MOCK_TRANSFERS"
+	EnvLocalStoreDir      = "PROTON_LFS_LOCAL_STORE_DIR"
+	EnvStatusFile         = "PROTON_LFS_STATUS_FILE"
+	EnvBridgeTimeout      = "PROTON_LFS_BRIDGE_TIMEOUT"
 )
 
 // AppDir is the base directory for Proton LFS runtime files.

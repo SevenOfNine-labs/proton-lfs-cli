@@ -62,16 +62,14 @@ type Adapter struct {
 	// logger carries per-message diagnostics and is silent unless --debug
 	// is set; errLog always reaches stderr, which git-lfs records under
 	// GIT_TRACE (tq/custom.go traceWriter).
-	logger                 *log.Logger
-	errLog                 *log.Logger
-	session                *Session
-	currentOperation       Direction
-	allowMockTransfers     bool
-	localStoreDir          string
-	backendKind            string
-	backend                TransferBackend
-	dataCredentialProvider string
-	dataCredentialHost     string
+	logger             *log.Logger
+	errLog             *log.Logger
+	session            *Session
+	currentOperation   Direction
+	allowMockTransfers bool
+	localStoreDir      string
+	backendKind        string
+	backend            TransferBackend
 }
 
 // Message received from Git LFS
@@ -140,7 +138,7 @@ func (a *Adapter) Run(r io.Reader, w io.Writer) error {
 		err := decoder.Decode(&msg)
 		if err != nil {
 			if err == io.EOF {
-				return nil // Clean shutdown
+				return nil
 			}
 			// custom-transfers.md, "Error handling": a protocol error is
 			// reported on stdout and the process exits non-zero.
@@ -184,7 +182,6 @@ func (a *Adapter) handleInit(msg *InboundMessage, enc *json.Encoder) error {
 
 	a.currentOperation = msg.Operation
 
-	// Initialize session with Proton LFS bridge
 	a.session = &Session{
 		Initialized: true,
 		CreatedAt:   time.Now(),
@@ -203,8 +200,6 @@ func (a *Adapter) handleInit(msg *InboundMessage, enc *json.Encoder) error {
 		return a.sendProtocolError(enc, code, message)
 	}
 
-	_ = config.WriteStatus(config.StatusReport{State: config.StateIdle, LastOp: "init"})
-	// Send empty response to indicate success
 	return enc.Encode(OutboundMessage{})
 }
 
@@ -309,11 +304,11 @@ func (a *Adapter) handleDownload(msg *InboundMessage, enc *json.Encoder) error {
 	})
 }
 
-// handleTerminate closes the transfer session
+// handleTerminate closes the transfer session. The status file keeps the
+// last transfer result: git-lfs sends terminate after every session.
 func (a *Adapter) handleTerminate(_ *InboundMessage, _ *json.Encoder) error {
 	a.logger.Println("Terminating adapter")
 	a.session = nil
-	_ = config.WriteStatus(config.StatusReport{State: config.StateIdle, LastOp: "terminate"})
 	return nil
 }
 
@@ -352,10 +347,9 @@ func validateFilePath(p string) error {
 	return nil
 }
 
-// classifyError derives the status-file state, machine-readable error code
-// and recovery guidance for a failed transfer. A structured backend error
-// code is authoritative; the HTTP-style status and message heuristics are
-// used only for errors that carry none.
+// classifyError derives the status-file state, error code and recovery
+// guidance of a failed transfer; a structured backend error code takes
+// precedence over the HTTP-style status and the message.
 func classifyError(code int, backendErrorCode ErrorCode, message string) (state string, errorCode string, errorDetail string) {
 	if backendErrorCode != "" && backendErrorCode != ErrCodeUnknown {
 		state, errorDetail = statusForErrorCode(backendErrorCode)
@@ -372,14 +366,8 @@ func statusForErrorCode(errorCode ErrorCode) (state string, errorDetail string) 
 		return config.StateCaptcha, "Run: proton-drive-cli login to complete CAPTCHA verification"
 	case ErrCodeRateLimited:
 		return config.StateRateLimited, "Wait before retrying operations. The Proton API has rate-limited requests."
-	case ErrCodeTwoFactorRequired:
-		return config.StateAuthRequired, "Complete two-factor authentication in the browser during proton-drive-cli login"
-	case ErrCodeDataPasswordRequired:
-		return config.StateAuthRequired, "Configure a mailbox/data password provider (--data-credential-provider); do not retry account login"
 	case ErrCodeKeyPasswordRequired:
 		return config.StateAuthRequired, "Run: proton-drive-cli login with the configured key-password provider"
-	case ErrCodeKeyUnlockFailed:
-		return config.StateAuthRequired, "The stored mailbox/data password did not unlock the Proton keys; store the correct password"
 	case ErrCodeAuthRequired:
 		return config.StateAuthRequired, "Run: proton-drive-cli login to re-authenticate"
 	case ErrCodeInsufficientScope:
@@ -402,12 +390,10 @@ func statusForErrorCode(errorCode ErrorCode) (state string, errorDetail string) 
 // classifyErrorByStatus classifies errors that carry no structured code from
 // their HTTP-style status and message.
 func classifyErrorByStatus(code int, message string) (state string, errorCode string, errorDetail string) {
-	state = config.StateError // default
+	state = config.StateError
 	errorCode = "unknown_error"
 	errorDetail = ""
-	lowerMessage := strings.ToLower(message)
 
-	// Check for CAPTCHA (code 407)
 	if code == 407 || strings.Contains(message, "CAPTCHA") {
 		state = config.StateCaptcha
 		errorCode = "captcha_required"
@@ -415,7 +401,6 @@ func classifyErrorByStatus(code int, message string) (state string, errorCode st
 		return
 	}
 
-	// Check for rate-limiting (code 429)
 	if code == 429 || strings.Contains(message, "Rate limit") || strings.Contains(message, "rate limit") {
 		state = config.StateRateLimited
 		errorCode = "rate_limited"
@@ -423,26 +408,6 @@ func classifyErrorByStatus(code int, message string) (state string, errorCode st
 		return
 	}
 
-	if strings.Contains(lowerMessage, "two-factor") ||
-		strings.Contains(lowerMessage, "2fa") ||
-		strings.Contains(lowerMessage, "fido2") {
-		state = config.StateAuthRequired
-		errorCode = "two_factor_required"
-		errorDetail = "Complete two-factor authentication in the browser during proton-drive-cli login"
-		return
-	}
-
-	if strings.Contains(lowerMessage, "mailbox/data password") ||
-		strings.Contains(lowerMessage, "data password") ||
-		strings.Contains(lowerMessage, "key decryption") ||
-		strings.Contains(lowerMessage, "unlock proton keys") {
-		state = config.StateAuthRequired
-		errorCode = "data_password_required"
-		errorDetail = "Provide the Proton mailbox/data password; do not retry account login"
-		return
-	}
-
-	// Check for auth errors (codes 401, 403)
 	if code == 401 || code == 403 || strings.Contains(message, "Authentication") {
 		state = config.StateAuthRequired
 		errorCode = "auth_required"
@@ -450,7 +415,6 @@ func classifyErrorByStatus(code int, message string) (state string, errorCode st
 		return
 	}
 
-	// Generic errors
 	switch code {
 	case 404:
 		errorCode = "not_found"
@@ -494,6 +458,7 @@ func (a *Adapter) sendTransferErrorWithMetadata(enc *json.Encoder, oid string, c
 	_ = config.WriteStatus(config.StatusReport{
 		State:       state,
 		LastOID:     oid,
+		LastOp:      string(a.currentOperation),
 		Error:       message,
 		ErrorCode:   errorCode,
 		ErrorDetail: errorDetail,
@@ -530,10 +495,8 @@ func (a *Adapter) sendProgress(enc *json.Encoder, oid string, size int64) error 
 	})
 }
 
-// sendFinalProgress reports a transfer that produced no streaming progress as
-// one progress event covering the whole object, which satisfies the
-// custom-transfers.md requirement that a transfer reports bytes before
-// completing without flooding git-lfs with synthetic chunk events.
+// sendFinalProgress reports a transfer without streaming progress as one
+// progress event for the whole object (custom-transfers.md, "Progress").
 func (a *Adapter) sendFinalProgress(enc *json.Encoder, oid string, totalSize int64) error {
 	if totalSize < 0 {
 		totalSize = 0
@@ -755,7 +718,7 @@ func copyWithProgress(dst io.Writer, src io.Reader, progress ProgressFunc) (int6
 	return n, err
 }
 
-// createTempFile creates a temporary file for downloads
+// createTempFile creates a temporary file for mock downloads.
 func (a *Adapter) createTempFile() (*os.File, error) {
 	return os.CreateTemp("", "git-lfs-proton-*")
 }
@@ -792,8 +755,7 @@ func cleanupStaleTempFiles(maxAge time.Duration) int {
 	return removed
 }
 
-// printUsage writes the adapter's help text to w. It is assigned to flag.Usage
-// so that --help produces a comprehensive reference instead of a bare flag list.
+// printUsage writes the adapter's help text to w; main installs it as flag.Usage.
 func printUsage(w io.Writer) {
 	_, _ = fmt.Fprint(w, `NAME
     git-lfs-proton-adapter - Git LFS custom transfer agent for Proton Drive
@@ -837,24 +799,19 @@ BACKENDS
             Objects stored at: /LFS/<oid[0:2]>/<oid[2:4]>/<oid>
             Upload deduplication via existence check before transfer.
 
-	AUTH AND LOCAL UNLOCK (sdk backend only)
-	    Account login is browser-fork-only and must be completed before Git LFS
-	    transfers. Transfer commands first run offline bridge auth-state and
-	    refuse every non-ready state.
-
-	    mailbox/data password
-	            Optional separate provider for two-password Proton accounts.
-	            Configure --data-credential-provider and store the mailbox
-	            password in a distinct secure credential entry. It is never
-	            passed as a command-line argument.
+AUTHENTICATION (sdk backend only)
+    Run proton-drive-cli login (browser fork) before Git LFS transfers. Each
+    transfer session first runs the bridge auth-state command and refuses
+    every state other than ready and session_expired; bridge init refreshes
+    an expired access token.
 
 SECURITY
     - SHA-256 verification on upload and download
     - OID validation: /^[a-f0-9]{64}$/i
     - Path traversal prevention (.. segments, null bytes rejected)
-	    - No account username/password is accepted by transfer commands
-	    - Local data-password selectors passed via stdin JSON (not visible in ps)
-	    - Subprocess environment filtered via allowlist
+    - No account username or password is accepted by transfer commands
+    - Bridge requests passed as stdin JSON, never as command-line arguments
+    - Subprocess environment filtered via allowlist
     - Bridge command timeout: --bridge-timeout (default 5m) plus one second
       per 256 KiB of object size for uploads and downloads
 
@@ -866,8 +823,6 @@ FLAGS
 ENVIRONMENT VARIABLES
     PROTON_LFS_BACKEND             Backend: local or sdk (default: local)
     PROTON_LFS_LOCAL_STORE_DIR     Local store directory
-    PROTON_DATA_CREDENTIAL_PROVIDER Optional mailbox/data password provider
-    PROTON_DATA_CREDENTIAL_HOST    Host/key for data password entry
     PROTON_DRIVE_CLI_BIN           proton-drive-cli entry point (dist/index.js
                                    run with node, or the standalone executable)
     PROTON_LFS_BRIDGE_TIMEOUT      Base bridge command timeout (Go duration,
@@ -887,10 +842,6 @@ EXAMPLES
     git config lfs.customtransfer.proton.path  ./bin/git-lfs-proton-adapter
     git config lfs.customtransfer.proton.args  "--backend sdk"
     git config lfs.standalonetransferagent     proton
-
-	    # Two-password Proton account with separate mailbox password entry
-	    git config lfs.customtransfer.proton.args \
-	      "--backend sdk --data-credential-provider git-credential"
 `)
 }
 
@@ -905,8 +856,6 @@ func main() {
 	allowMockTransfers := flag.Bool("allow-mock-transfers", envBoolOrDefault(EnvAllowMockTransfers, false), "Allow mock upload/download behavior (simulation only)")
 	localStoreDir := flag.String("local-store-dir", envTrim(EnvLocalStoreDir), "Local object store directory used for standalone transfers")
 	bridgeTimeout := flag.Duration("bridge-timeout", defaultBridgeTimeout, "Base timeout for one proton-drive-cli bridge command; transfers add time proportional to the object size")
-	dataCredentialProvider := flag.String("data-credential-provider", envTrim(EnvDataCredentialProvider), "Optional mailbox/data password credential provider: pass-cli or git-credential")
-	dataCredentialHost := flag.String("data-credential-host", envOrDefault(EnvDataCredentialHost, DefaultDataCredentialHost), "Credential host/key for mailbox/data password provider")
 	debug := flag.Bool("debug", false, "Enable debug logging")
 	showVersion := flag.Bool("version", false, "Print version information")
 	flag.Usage = func() { printUsage(os.Stderr) }
@@ -937,8 +886,6 @@ func main() {
 	if adapter.backendKind == "" {
 		adapter.backendKind = BackendLocal
 	}
-	adapter.dataCredentialProvider = strings.ToLower(strings.TrimSpace(*dataCredentialProvider))
-	adapter.dataCredentialHost = strings.TrimSpace(*dataCredentialHost)
 
 	switch adapter.backendKind {
 	case BackendLocal:
@@ -951,10 +898,7 @@ func main() {
 			AppVersion:  envTrim(EnvAppVersion),
 		}
 		bridge := NewBridgeClient(bridgeCfg)
-		adapter.backend = NewDriveCLIBackend(bridge, DriveCLIBackendOptions{
-			DataCredentialProvider: adapter.dataCredentialProvider,
-			DataCredentialHost:     adapter.dataCredentialHost,
-		})
+		adapter.backend = NewDriveCLIBackend(bridge)
 	default:
 		fmt.Fprintf(os.Stderr, "invalid backend %q (supported: local, sdk)\n", adapter.backendKind)
 		os.Exit(2)
@@ -964,14 +908,12 @@ func main() {
 		adapter.logger.SetOutput(io.Discard)
 	}
 
-	// Remove stale temp files from previous adapter runs
 	if removed := cleanupStaleTempFiles(10 * time.Minute); removed > 0 {
 		adapter.logger.Printf("Cleaned up %d stale temp files", removed)
 	}
 
 	terminateBridgeOnSignal(adapter)
 
-	// Read from stdin, write to stdout
 	if err := adapter.Run(os.Stdin, os.Stdout); err != nil && err != io.EOF {
 		adapter.errLog.Fatalf("Adapter error: %v", err)
 	}

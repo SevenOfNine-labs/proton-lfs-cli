@@ -16,8 +16,8 @@ import (
 	"testing"
 )
 
-// TestCredentialPassCLIReadiness verifies optional pass-cli provider readiness
-// without resolving Proton account username/password references.
+// TestCredentialPassCLIReadiness checks that the configured pass-cli answers
+// `pass-cli info`; it skips when pass-cli is absent or logged out.
 func TestCredentialPassCLIReadiness(t *testing.T) {
 	passCLIBin := sdkPassCLIPath()
 	if _, err := exec.LookPath(passCLIBin); err != nil {
@@ -48,7 +48,6 @@ func TestCredentialSessionFilePermissions(t *testing.T) {
 	}
 
 	mode := info.Mode().Perm()
-	// Session file should be owner read-write only (0600)
 	if mode&0o077 != 0 {
 		t.Errorf("session file has overly permissive permissions: %04o (expected 0600)", mode)
 	}
@@ -73,9 +72,8 @@ type bridgeInvocation struct {
 }
 
 // writeRecordingBridge writes a proton-drive-cli stand-in that records its
-// command and environment to recordDir and answers every bridge command
-// with a ready/ok envelope. MOCK_BRIDGE_RECORD_DIR passes the adapter's
-// environment allowlist (MOCK_BRIDGE_ prefix).
+// command and environment to recordDir and answers every command with ok.
+// MOCK_BRIDGE_RECORD_DIR passes the adapter's MOCK_BRIDGE_ allowlist prefix.
 func writeRecordingBridge(t *testing.T) (script, recordDir string) {
 	t.Helper()
 	if _, err := exec.LookPath("node"); err != nil {
@@ -98,7 +96,7 @@ if (dir) {
   fs.writeFileSync(path.join(dir, name), JSON.stringify({ command, env: process.env, request }));
 }
 const responses = {
-  'auth-state': { ok: true, payload: { state: 'ready', hasSession: true, sessionValid: true, passwordMode: 2, authMode: 'browser-fork', keyPasswordPersisted: true, keyPasswordAvailable: true, willAttemptNetwork: false, errors: [], actions: [] } },
+  'auth-state': { ok: true, payload: { state: 'ready', hasSession: true, sessionValid: true, sessionExpired: false, sessionUidPresent: true, keyPasswordAvailable: true, willAttemptNetwork: false, errors: [], actions: [] } },
   init: { ok: true, payload: { initialized: true, storageBase: 'LFS' } },
   exists: { ok: true, payload: { exists: false } },
   upload: { ok: true, payload: { uploaded: true } },
@@ -269,11 +267,9 @@ func TestCredentialAdapterRejectsMaliciousOIDBeforeSpawning(t *testing.T) {
 	}
 }
 
-// TestCredentialAdapterNormalizesOIDCaseBeforeBridge: Git LFS object IDs are
-// the lowercase hex SHA-256 of the content (git-lfs pointer format). The
-// adapter accepts hex case-insensitively and must hand the bridge the
-// lowercase form, so an uppercase spelling cannot map to a second storage
-// path for the same object.
+// TestCredentialAdapterNormalizesOIDCaseBeforeBridge: an OID is the lowercase
+// hex SHA-256 of the content (Git LFS specification, git-lfs docs/spec.md);
+// the bridge receives the lowercase form of any accepted spelling.
 func TestCredentialAdapterNormalizesOIDCaseBeforeBridge(t *testing.T) {
 	root := repoRoot(t)
 	adapterPath := adapterBinaryForCredentialTests(t, root)
@@ -308,10 +304,9 @@ func TestCredentialAdapterNormalizesOIDCaseBeforeBridge(t *testing.T) {
 	}
 }
 
-// TestCredentialAdapterDoesNotForwardSecretsToBridge gives the adapter
-// secret-shaped environment variables and proves, through a bridge that
-// records its environment, that none of them reach the subprocess and that
-// none appear in the adapter's own output.
+// TestCredentialAdapterDoesNotForwardSecretsToBridge: secret-shaped
+// environment variables reach neither the bridge environment, its request,
+// nor the adapter's output.
 func TestCredentialAdapterDoesNotForwardSecretsToBridge(t *testing.T) {
 	root := repoRoot(t)
 	adapterPath := adapterBinaryForCredentialTests(t, root)
@@ -324,13 +319,12 @@ func TestCredentialAdapterDoesNotForwardSecretsToBridge(t *testing.T) {
 	oid := hex.EncodeToString(sum[:])
 
 	secrets := map[string]string{
-		"PROTON_PASSWORD":         "account-password-LEAK-1",
-		"PROTON_DATA_PASSWORD":    "mailbox-password-LEAK-2",
-		"PROTON_MAILBOX_PASSWORD": "mailbox-password-LEAK-3",
-		"PROTON_USERNAME":         "user-LEAK-4@proton.test",
-		"PROTON_KEY_PASSWORD":     "key-password-LEAK-5",
-		"PROTON_PASS_TOKEN":       "pass-token-LEAK-6",
-		"AWS_SECRET_ACCESS_KEY":   "aws-LEAK-7",
+		"PROTON_LFS_TEST_SECRET": "test-secret-LEAK-1",
+		"PROTON_KEY_PASSWORD":    "key-password-LEAK-2",
+		"PROTON_PASS_TOKEN":      "pass-token-LEAK-3",
+		"NODE_AUTH_TOKEN":        "node-auth-token-LEAK-4",
+		"GITHUB_TOKEN":           "github-token-LEAK-5",
+		"AWS_SECRET_ACCESS_KEY":  "aws-LEAK-6",
 	}
 	bridge, recordDir := writeRecordingBridge(t)
 	upload, _ := json.Marshal(map[string]any{"event": "upload", "oid": oid, "size": len(content), "path": source})

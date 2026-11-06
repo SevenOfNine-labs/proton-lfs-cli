@@ -30,6 +30,13 @@ repos:
         language: system
         pass_filenames: false
 
+      - id: comment-policy
+        name: comment policy (CLAUDE.md, Code Comments and Legacy)
+        entry: ./scripts/check-comment-policy.sh
+        language: system
+        pass_filenames: false
+        always_run: true
+
       - id: check-doc-links
         name: check doc links
         entry: ./scripts/check-doc-links.sh

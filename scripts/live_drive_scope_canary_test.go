@@ -47,27 +47,6 @@ func TestLiveDriveScopeCanaryStopsOnInsufficientScope(t *testing.T) {
 	assertNoLiveScopeTransferCommands(t, commands)
 }
 
-func TestLiveDriveScopeCanaryCarriesDataCredentialArgs(t *testing.T) {
-	env := newLiveDriveScopeScriptEnv(t, `{"ok":true,"payload":{"files":[]}}`, 0)
-	env.vars = replaceEnv(env.vars, "LIVE_CANARY_DOCTOR_ARGS", "--key-password-provider pass-cli --data-credential-provider pass-cli --data-credential-host proton-data.test --require-data-password")
-
-	out, err := runLiveDriveScopeScript(t, env)
-	if err != nil {
-		t.Fatalf("live Drive scope canary failed: %v\n%s", err, out)
-	}
-
-	got := readFakeDriveStdin(t, env.stdinPath)
-	for _, want := range []string{
-		`"folder":"/"`,
-		`"dataCredentialProvider":"pass-cli"`,
-		`"dataCredentialHost":"proton-data.test"`,
-	} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("scope request missing %s:\n%s", want, got)
-		}
-	}
-}
-
 func TestLiveDriveScopeCanaryRejectsMissingAckBeforeDriveCall(t *testing.T) {
 	env := newLiveDriveScopeScriptEnv(t, `{"ok":true,"payload":{"files":[]}}`, 0)
 	env.vars = replaceEnv(env.vars, "PROTON_LFS_LIVE_CANARY", "")
@@ -81,22 +60,6 @@ func TestLiveDriveScopeCanaryRejectsMissingAckBeforeDriveCall(t *testing.T) {
 	}
 	if commands := readFakeDriveCommands(t, env.logPath); len(commands) != 0 {
 		t.Fatalf("drive CLI was called before acknowledgement passed: %v", commands)
-	}
-}
-
-func TestLiveDriveScopeCanaryRejectsMissingDoctorArgsBeforeDriveCall(t *testing.T) {
-	env := newLiveDriveScopeScriptEnv(t, `{"ok":true,"payload":{"files":[]}}`, 0)
-	env.vars = replaceEnv(env.vars, "LIVE_CANARY_DOCTOR_ARGS", "")
-
-	out, err := runLiveDriveScopeScript(t, env)
-	if err == nil {
-		t.Fatalf("expected missing doctor args to fail:\n%s", out)
-	}
-	if !strings.Contains(out, "LIVE_CANARY_DOCTOR_ARGS") {
-		t.Fatalf("expected doctor args error, got:\n%s", out)
-	}
-	if commands := readFakeDriveCommands(t, env.logPath); len(commands) != 0 {
-		t.Fatalf("drive CLI was called before doctor args passed: %v", commands)
 	}
 }
 
@@ -126,7 +89,6 @@ func newLiveDriveScopeScriptEnv(t *testing.T, bridgeJSON string, exitCode int) l
 		stdinPath: stdinPath,
 		vars: []string{
 			"PROTON_LFS_LIVE_CANARY=" + browserForkCanaryAck,
-			"LIVE_CANARY_DOCTOR_ARGS=--key-password-provider pass-cli",
 			"NODE_BIN=" + fakeNodePath,
 			"DRIVE_CLI_BIN=" + filepath.Join(tempDir, "fake-drive-cli.js"),
 			"LIVE_SCOPE_FAKE_LOG=" + logPath,

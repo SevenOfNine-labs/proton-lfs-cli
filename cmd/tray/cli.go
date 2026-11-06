@@ -11,7 +11,6 @@ import (
 	"github.com/SevenOfNine-labs/proton-lfs-cli/internal/config"
 )
 
-// Function vars for testability — tests swap these to inject mocks.
 var (
 	findDriveCLI = discoverDriveCLIBinary
 	findAdapter  = discoverAdapterBinary
@@ -25,9 +24,8 @@ func cliDriveLogin(driveCLI string, args ...string) error {
 	var stderr bytes.Buffer
 	cmd := exec.Command(driveCLI, cmdArgs...)
 	cmd.Stderr = &stderr
-	// proton-drive-cli resolves pass-cli through PROTON_PASS_CLI_BIN; a macOS
-	// .app bundle starts with launchd's minimal PATH, so the absolute path
-	// discovered here is passed explicitly.
+	// proton-drive-cli resolves pass-cli through PROTON_PASS_CLI_BIN, which
+	// carries the absolute path because launchd's PATH lacks it.
 	provider := extractKeyPasswordProviderFromArgs(args)
 	if provider == config.CredentialProviderPassCLI {
 		if passCLI := discoverPassCLIBinary(); passCLI != "" {
@@ -56,9 +54,12 @@ func extractKeyPasswordProviderFromArgs(args []string) string {
 
 // cliStatus prints session, LFS, provider, and transfer status.
 func cliStatus(w io.Writer) int {
-	if isSessionActive() {
-		_, _ = fmt.Fprintln(w, "Session:  logged in")
-	} else {
+	switch meta, ok := readSessionMetadata(); {
+	case ok && validSessionShape(meta):
+		_, _ = fmt.Fprintf(w, "Session:  logged in, key password in %s (%s)\n", meta.KeyPasswordProvider, meta.KeyPasswordHost)
+	case isSessionActive():
+		_, _ = fmt.Fprintln(w, "Session:  invalid session file; run proton-drive-cli login")
+	default:
 		_, _ = fmt.Fprintln(w, "Session:  not connected")
 	}
 
@@ -69,7 +70,7 @@ func cliStatus(w io.Writer) int {
 	}
 
 	prefs := config.LoadPrefs()
-	_, _ = fmt.Fprintf(w, "Provider: %s\n", prefs.KeyPasswordProvider)
+	_, _ = fmt.Fprintf(w, "Provider: %s (next login)\n", prefs.KeyPasswordProvider)
 
 	report, err := config.ReadStatus()
 	if err != nil {
@@ -126,7 +127,6 @@ func cliConfig(w io.Writer, args []string) int {
 			config.CredentialProviderGitCredential, config.CredentialProviderPassCLI)
 		return 0
 	case config.CredentialProviderGitCredential, config.CredentialProviderPassCLI:
-		// valid
 	default:
 		_, _ = fmt.Fprintf(w, "unknown provider: %s\n", provider)
 		_, _ = fmt.Fprintf(w, "valid providers: %s, %s\n",
@@ -155,7 +155,7 @@ func cliRegister(w io.Writer) int {
 
 	prefs := config.LoadPrefs()
 	driveCLIPath := findDriveCLI()
-	if err := writeGitLFSRegistration(adapterPath, buildProtonTransferArgsFromPrefs(prefs, driveCLIPath)); err != nil {
+	if err := writeGitLFSRegistration(adapterPath, buildProtonTransferArgs(driveCLIPath)); err != nil {
 		_, _ = fmt.Fprintf(w, "error: git config failed: %v\n", err)
 		return 1
 	}

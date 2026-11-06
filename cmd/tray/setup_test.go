@@ -378,28 +378,3 @@ func TestIsAutoStartEnabled(t *testing.T) {
 		t.Fatal("expected true after creating autostart file")
 	}
 }
-
-func TestSetAutoStartDarwinRemovesFormerLabel(t *testing.T) {
-	home := setupFakeHome(t, fakeHomeOpts{})
-	agents := filepath.Join(home, "Library", "LaunchAgents")
-	if err := os.MkdirAll(agents, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	former := filepath.Join(agents, formerLaunchAgentLabel+".plist")
-	if err := os.WriteFile(former, []byte("<plist/>"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if !launchAgentInstalled() {
-		t.Fatal("a plist under the former label must count as installed")
-	}
-
-	if err := setAutoStartDarwin(false); err != nil {
-		t.Fatalf("disable: %v", err)
-	}
-	if _, err := os.Stat(former); !os.IsNotExist(err) {
-		t.Fatalf("former plist still present: %v", err)
-	}
-	if launchAgentInstalled() {
-		t.Fatal("no agent plist should remain after disabling")
-	}
-}

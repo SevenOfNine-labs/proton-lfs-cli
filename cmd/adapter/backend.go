@@ -36,20 +36,17 @@ type ProgressTransferBackend interface {
 type ErrorCode string
 
 const (
-	ErrCodeNetworkFailure       ErrorCode = "network_failure"
-	ErrCodeAuthRequired         ErrorCode = "auth_required"
-	ErrCodeRateLimited          ErrorCode = "rate_limited"
-	ErrCodeCaptchaRequired      ErrorCode = "captcha_required"
-	ErrCodeTwoFactorRequired    ErrorCode = "two_factor_required"
-	ErrCodeDataPasswordRequired ErrorCode = "data_password_required"
-	ErrCodeKeyPasswordRequired  ErrorCode = "key_password_required"
-	ErrCodeKeyUnlockFailed      ErrorCode = "key_unlock_failed"
-	ErrCodeInsufficientScope    ErrorCode = "insufficient_scope"
-	ErrCodeNotFound             ErrorCode = "not_found"
-	ErrCodePermissionDenied     ErrorCode = "permission_denied"
-	ErrCodeServerError          ErrorCode = "server_error"
-	ErrCodeInvalidRequest       ErrorCode = "invalid_request"
-	ErrCodeUnknown              ErrorCode = "unknown"
+	ErrCodeNetworkFailure      ErrorCode = "network_failure"
+	ErrCodeAuthRequired        ErrorCode = "auth_required"
+	ErrCodeRateLimited         ErrorCode = "rate_limited"
+	ErrCodeCaptchaRequired     ErrorCode = "captcha_required"
+	ErrCodeKeyPasswordRequired ErrorCode = "key_password_required"
+	ErrCodeInsufficientScope   ErrorCode = "insufficient_scope"
+	ErrCodeNotFound            ErrorCode = "not_found"
+	ErrCodePermissionDenied    ErrorCode = "permission_denied"
+	ErrCodeServerError         ErrorCode = "server_error"
+	ErrCodeInvalidRequest      ErrorCode = "invalid_request"
+	ErrCodeUnknown             ErrorCode = "unknown"
 )
 
 // BackendError maps backend-specific failures to protocol-safe transfer errors.
@@ -119,10 +116,9 @@ func classifyErrorCode(httpCode int) ErrorCode {
 	}
 }
 
-// isRetryable reports whether a transfer can succeed on retry without user
-// action: only transport failures and upstream server errors qualify (RFC
-// 9110 §15.6: 500, 502, 503, 504). Quota exhaustion (507) and local
-// cryptographic failures carry server_error status codes but need the user.
+// isRetryable admits only transport failures and upstream server errors
+// (RFC 9110 §15.6: 500, 502, 503, 504); 507 and local crypto failures need
+// the user.
 func isRetryable(errorCode ErrorCode, code int) bool {
 	switch errorCode {
 	case ErrCodeNetworkFailure, ErrCodeServerError:
@@ -141,13 +137,6 @@ func backendErrorDetails(err error) (int, string) {
 		return backendErr.Code, backendErr.Message
 	}
 	return 500, "transfer backend error"
-}
-
-// OperationCredentials holds per-request local unlock selectors sent alongside
-// bridge commands. Account authentication is never represented here.
-type OperationCredentials struct {
-	DataCredentialProvider string
-	DataCredentialHost     string
 }
 
 type LocalStoreBackend struct {
@@ -263,45 +252,23 @@ func (b *LocalStoreBackend) objectPath(oid string) string {
 	return filepath.Join(b.storeDir, oid[:2], oid[2:4], oid)
 }
 
-// DriveCLIBackend communicates directly with proton-drive-cli via subprocess.
-// Account authentication is browser-fork-only and must happen before Git LFS
-// transfers. The Go adapter only passes local data-password selectors.
+// DriveCLIBackend transfers objects through proton-drive-cli bridge
+// subprocesses. It requires a saved browser-fork session
+// (`proton-drive-cli login`); transfers never log in.
 type DriveCLIBackend struct {
-	bridge                 *BridgeClient
-	dataCredentialProvider string
-	dataCredentialHost     string
-	authenticated          bool
-}
-
-type DriveCLIBackendOptions struct {
-	DataCredentialProvider string
-	DataCredentialHost     string
+	bridge        *BridgeClient
+	authenticated bool
 }
 
 // NewDriveCLIBackend creates a backend that delegates to proton-drive-cli.
+func NewDriveCLIBackend(bridge *BridgeClient) *DriveCLIBackend {
+	return &DriveCLIBackend{bridge: bridge}
+}
+
 // TerminateBridge kills a running bridge subprocess (see BridgeClient.TerminateActive).
 func (b *DriveCLIBackend) TerminateBridge() {
 	if b.bridge != nil {
 		b.bridge.TerminateActive()
-	}
-}
-
-func NewDriveCLIBackend(bridge *BridgeClient, opts ...DriveCLIBackendOptions) *DriveCLIBackend {
-	var options DriveCLIBackendOptions
-	if len(opts) > 0 {
-		options = opts[0]
-	}
-	return &DriveCLIBackend{
-		bridge:                 bridge,
-		dataCredentialProvider: options.DataCredentialProvider,
-		dataCredentialHost:     options.DataCredentialHost,
-	}
-}
-
-func (b *DriveCLIBackend) operationCredentials() OperationCredentials {
-	return OperationCredentials{
-		DataCredentialProvider: b.dataCredentialProvider,
-		DataCredentialHost:     b.dataCredentialHost,
 	}
 }
 
@@ -313,9 +280,7 @@ func (b *DriveCLIBackend) Initialize(session *Session) error {
 		return newBackendError(500, "drive-cli backend bridge is not configured", nil)
 	}
 
-	creds := b.operationCredentials()
-
-	authState, err := b.bridge.AuthState(creds)
+	authState, err := b.bridge.AuthState()
 	if err != nil {
 		return mapBridgeError(err, "failed to inspect proton drive auth state")
 	}
@@ -323,7 +288,7 @@ func (b *DriveCLIBackend) Initialize(session *Session) error {
 		return err
 	}
 
-	if err := b.bridge.InitLFSStorage(creds); err != nil {
+	if err := b.bridge.InitLFSStorage(); err != nil {
 		return mapBridgeError(err, "failed to initialize lfs storage")
 	}
 
@@ -346,20 +311,16 @@ func mapAuthStateForTransfer(state *BridgeAuthStateResponse) error {
 	}
 
 	switch strings.TrimSpace(state.State) {
-	case "ready":
+	case "ready", "session_expired":
+		// `bridge init` refreshes an expired access token before it uses the
+		// session (proton-drive-cli src/sdk/client.ts loadUsableSession).
 		return nil
-	case "needs_data_password":
-		return newBackendErrorWithCode(401, withCause("mailbox/data password required for this Proton account"), nil, ErrCodeDataPasswordRequired)
 	case "needs_key_password":
 		return newBackendErrorWithCode(401, withCause("stored browser-fork key password required for this Proton session"), nil, ErrCodeKeyPasswordRequired)
 	case "needs_login":
 		return newBackendError(401, withCause("no ready Proton Drive session; run proton-drive-cli login before Git LFS transfer"), nil)
-	case "session_expired":
-		return newBackendError(401, withCause("Proton Drive session is expired; refresh or login before Git LFS transfer"), nil)
 	case "session_invalid":
 		return newBackendError(401, withCause("Proton Drive session is invalid; run proton-drive-cli login before Git LFS transfer"), nil)
-	case "configuration_error":
-		return newBackendError(400, withCause("Proton Drive auth configuration error"), nil)
 	default:
 		return newBackendError(502, withCause("unrecognized Proton Drive auth state"), nil)
 	}
@@ -376,8 +337,7 @@ func (b *DriveCLIBackend) Upload(session *Session, oid, sourcePath string, expec
 		return 0, newBackendError(500, "drive-cli backend bridge is not configured", nil)
 	}
 
-	// Dedup: skip upload if OID already exists in remote storage
-	exists, err := b.bridge.Exists(b.operationCredentials(), oid)
+	exists, err := b.bridge.Exists(oid)
 	if err != nil {
 		return 0, mapBridgeError(err, "drive-cli existence check failed")
 	}
@@ -392,7 +352,7 @@ func (b *DriveCLIBackend) Upload(session *Session, oid, sourcePath string, expec
 		return info.Size(), nil
 	}
 
-	if err := b.bridge.Upload(b.operationCredentials(), oid, sourcePath, expectedSize); err != nil {
+	if err := b.bridge.Upload(oid, sourcePath, expectedSize); err != nil {
 		return 0, mapBridgeError(err, "drive-cli upload failed")
 	}
 
@@ -430,7 +390,7 @@ func (b *DriveCLIBackend) Download(session *Session, oid string, expectedSize in
 		return "", 0, newBackendError(500, "failed to create temporary download file", err)
 	}
 
-	if err := b.bridge.Download(b.operationCredentials(), oid, tmpPath, expectedSize); err != nil {
+	if err := b.bridge.Download(oid, tmpPath, expectedSize); err != nil {
 		_ = os.Remove(tmpPath)
 		return "", 0, mapBridgeError(err, "drive-cli download failed")
 	}
@@ -453,10 +413,8 @@ func (b *DriveCLIBackend) Download(session *Session, oid string, expectedSize in
 	return tmpPath, info.Size(), nil
 }
 
-// mapBridgeError converts bridge subprocess errors into BackendErrors.
-// Envelope errors (*BridgeError) are mapped from their structured error code;
-// transport failures (spawn, timeout, malformed output) are classified from
-// their message.
+// mapBridgeError maps an envelope error (*BridgeError) by its errorCode and a
+// transport failure (spawn, timeout, malformed output) by its message.
 func mapBridgeError(err error, fallbackMessage string) error {
 	if err == nil {
 		return nil
@@ -473,24 +431,18 @@ func mapBridgeError(err error, fallbackMessage string) error {
 			timeoutErr.Error()), err, ErrCodeNetworkFailure)
 	}
 
+	var startErr *BridgeStartError
+	if errors.As(err, &startErr) {
+		return newBackendErrorWithCode(400, "proton-drive-cli could not be started; check --drive-cli-bin, PROTON_DRIVE_CLI_BIN and NODE_BIN", err, ErrCodeInvalidRequest)
+	}
+
 	// Transport failures carry free text (spawn errors, sanitized stderr);
 	// only words are matched, never bare status digits that an OID can contain.
 	msg := strings.ToLower(strings.TrimSpace(err.Error()))
 
 	switch {
-	case strings.Contains(msg, "two-factor"),
-		strings.Contains(msg, "2fa"),
-		strings.Contains(msg, "fido2"):
-		return newBackendErrorWithCode(401, "two-factor authentication required", err, ErrCodeTwoFactorRequired)
 	case strings.Contains(msg, "key password"):
 		return newBackendErrorWithCode(401, "stored browser-fork key password required for this Proton session", err, ErrCodeKeyPasswordRequired)
-	case strings.Contains(msg, "mailbox/data password"),
-		strings.Contains(msg, "data password"),
-		strings.Contains(msg, "key decryption"):
-		return newBackendErrorWithCode(401, "mailbox/data password required for this Proton account", err, ErrCodeDataPasswordRequired)
-	case strings.Contains(msg, "failed to decrypt"),
-		strings.Contains(msg, "decrypt any keys"):
-		return newBackendErrorWithCode(401, "mailbox/data password could not unlock Proton keys", err, ErrCodeKeyUnlockFailed)
 	case strings.Contains(msg, "invalid or expired session"),
 		strings.Contains(msg, "unauthorized"):
 		return newBackendError(401, "session is invalid or expired", err)
@@ -513,12 +465,10 @@ func mapBridgeError(err error, fallbackMessage string) error {
 	}
 }
 
+// bridgeErrorDetails is the part of schemas/bridge/v1/error-details.schema.json
+// the adapter maps; errorCode is always present.
 type bridgeErrorDetails struct {
-	ErrorCode      string `json:"errorCode"`
-	TwoFactorType  string `json:"twoFactorType"`
-	TOTPAllowed    bool   `json:"totpAllowed"`
-	FIDO2Available bool   `json:"fido2Available"`
-	ProtonCode     int    `json:"protonCode"`
+	ErrorCode string `json:"errorCode"`
 }
 
 func bridgeStatusOrDefault(bridgeErr *BridgeError, fallback int) int {
@@ -537,26 +487,13 @@ func mapStructuredBridgeError(bridgeErr *BridgeError, fallbackMessage string, or
 	if msg == "" {
 		msg = fallbackMessage
 	}
-	lowerMsg := strings.ToLower(msg)
 
 	var details bridgeErrorDetails
 	if bridgeErr.Details != "" {
 		_ = json.Unmarshal([]byte(bridgeErr.Details), &details)
 	}
 	errorCode := strings.ToUpper(strings.TrimSpace(details.ErrorCode))
-	// UNKNOWN_ERROR and DECRYPTION_FAILED are the bridge's generic codes for
-	// errors it could not classify (for example "Failed to decrypt any keys"
-	// from a wrong mailbox password); the message identifies those cases.
-	if errorCode == "UNKNOWN_ERROR" || errorCode == "DECRYPTION_FAILED" {
-		if ok, mapped := mapBridgeErrorMessage(lowerMsg, details, original); ok {
-			return mapped
-		}
-	}
-	if errorCode != "" {
-		if ok, mapped := mapBridgeErrorCode(errorCode, bridgeErr, details, msg, fallbackMessage, original); ok {
-			return mapped
-		}
-	} else if ok, mapped := mapBridgeErrorMessage(lowerMsg, details, original); ok {
+	if ok, mapped := mapBridgeErrorCode(errorCode, bridgeErr, msg, fallbackMessage, original); ok {
 		return mapped
 	}
 
@@ -587,20 +524,12 @@ func mapStructuredBridgeError(bridgeErr *BridgeError, fallbackMessage string, or
 // mapBridgeErrorCode maps a structured bridge error code (the keys of
 // schemas/bridge/v1/error-code-map.json) to a BackendError. The HTTP status
 // reported by the bridge is preserved when present.
-func mapBridgeErrorCode(errorCode string, bridgeErr *BridgeError, details bridgeErrorDetails, msg, fallbackMessage string, original error) (bool, error) {
+func mapBridgeErrorCode(errorCode string, bridgeErr *BridgeError, msg, fallbackMessage string, original error) (bool, error) {
 	switch errorCode {
-	case "AUTH_FAILED", "INVALID_CREDENTIALS", "SESSION_EXPIRED":
+	case "AUTH_FAILED", "SESSION_EXPIRED":
 		return true, newBackendErrorWithCode(bridgeStatusOrDefault(bridgeErr, 401), "session is invalid or expired", original, ErrCodeAuthRequired)
-	case "TWO_FACTOR_REQUIRED":
-		message := "two-factor authentication required"
-		if details.TwoFactorType == "fido2" {
-			message = "FIDO2 two-factor authentication required"
-		}
-		return true, newBackendErrorWithCode(bridgeStatusOrDefault(bridgeErr, 401), message, original, ErrCodeTwoFactorRequired)
 	case "KEY_PASSWORD_REQUIRED":
 		return true, newBackendErrorWithCode(bridgeStatusOrDefault(bridgeErr, 401), "stored browser-fork key password required for this Proton session", original, ErrCodeKeyPasswordRequired)
-	case "DATA_PASSWORD_REQUIRED":
-		return true, newBackendErrorWithCode(bridgeStatusOrDefault(bridgeErr, 401), "mailbox/data password required for this Proton account", original, ErrCodeDataPasswordRequired)
 	case "CAPTCHA_REQUIRED":
 		return true, newBackendErrorWithCode(bridgeStatusOrDefault(bridgeErr, 407), "captcha verification required — run: proton-drive-cli login", original, ErrCodeCaptchaRequired)
 	case "RATE_LIMITED":
@@ -628,25 +557,6 @@ func mapBridgeErrorCode(errorCode string, bridgeErr *BridgeError, details bridge
 		return true, err
 	case "API_ERROR", "UPLOAD_FAILED", "DOWNLOAD_FAILED", "UNKNOWN_ERROR":
 		return true, newBackendErrorWithCode(bridgeStatusOrDefault(bridgeErr, 502), fallbackMessage, original, ErrCodeServerError)
-	default:
-		return false, nil
-	}
-}
-
-// mapBridgeErrorMessage classifies envelope errors that carry no structured
-// error code from their message and Proton code.
-func mapBridgeErrorMessage(lowerMsg string, details bridgeErrorDetails, original error) (bool, error) {
-	switch {
-	case strings.Contains(lowerMsg, "two-factor"), strings.Contains(lowerMsg, "2fa"), strings.Contains(lowerMsg, "fido2"):
-		return true, newBackendErrorWithCode(401, "two-factor authentication required", original, ErrCodeTwoFactorRequired)
-	case strings.Contains(lowerMsg, "key password"):
-		return true, newBackendErrorWithCode(401, "stored browser-fork key password required for this Proton session", original, ErrCodeKeyPasswordRequired)
-	case strings.Contains(lowerMsg, "mailbox/data password"), strings.Contains(lowerMsg, "data password"), strings.Contains(lowerMsg, "key decryption"):
-		return true, newBackendErrorWithCode(401, "mailbox/data password required for this Proton account", original, ErrCodeDataPasswordRequired)
-	case strings.Contains(lowerMsg, "failed to decrypt"), strings.Contains(lowerMsg, "decrypt any keys"):
-		return true, newBackendErrorWithCode(401, "mailbox/data password could not unlock Proton keys", original, ErrCodeKeyUnlockFailed)
-	case details.ProtonCode == 9101, strings.Contains(lowerMsg, "sufficient scope"):
-		return true, newBackendErrorWithCode(403, "Proton rejected this app/session authorization scope", original, ErrCodeInsufficientScope)
 	default:
 		return false, nil
 	}

@@ -6,9 +6,9 @@ One artifact family, one tag pattern, one workflow:
 | --- | --- | --- |
 | `v*` (e.g. `v0.2.0`) | `.github/workflows/release-bundle.yml` | GitHub Release with platform bundles, standalone adapter binaries, `SHA256SUMS.txt` and a git-cliff changelog |
 
-`proton-drive-cli` is not published to npm. It ships inside the bundles as a
-Node.js single executable (SEA) and is otherwise consumed from git (the
-submodule pin). The former `drive-cli-v*` tags and `npm-publish.yml` are gone.
+`proton-drive-cli` is not published to npm and has no release workflow of
+its own. It ships inside the bundles as a Node.js single executable (SEA) and is
+otherwise consumed from git (the submodule pin).
 
 ## What a release contains
 
@@ -70,7 +70,9 @@ gh release download v0.2.0 --pattern SHA256SUMS.txt
 ```
 
 Users install the standalone adapter via the install script, which verifies
-the download against `SHA256SUMS.txt` (`VERIFY_CHECKSUM=auto|required|skip`):
+the download against the release's `SHA256SUMS.txt`: `VERIFY_CHECKSUM=required`
+(the default) fails when the file or the asset's entry is missing or the hash
+differs, `VERIFY_CHECKSUM=skip` installs without a check:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/SevenOfNine-labs/proton-lfs-cli/main/scripts/install-adapter.sh | bash

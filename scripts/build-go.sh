@@ -32,7 +32,6 @@ case "$TARGET" in
   adapter)
     PKG="./cmd/adapter"
     OUT="${OUT:-bin/git-lfs-proton-adapter${EXT}}"
-    # Pure Go everywhere.
     export CGO_ENABLED=0
     EXTRA_LDFLAGS=""
     ;;
@@ -62,8 +61,8 @@ esac
 VERSION="${VERSION:-$(git describe --tags --always --dirty 2>/dev/null || echo dev)}"
 GIT_COMMIT="$(git rev-parse --short HEAD 2>/dev/null || echo dev)"
 
-# Reproducible BuildTime: SOURCE_DATE_EPOCH, else the commit date, never the
-# wall clock at build time.
+# BuildTime from SOURCE_DATE_EPOCH (reproducible-builds.org/specs/source-date-epoch),
+# else the commit date.
 SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH:-$(git log -1 --format=%ct 2>/dev/null || echo 0)}"
 export SOURCE_DATE_EPOCH
 if BUILD_TIME="$(date -u -d "@${SOURCE_DATE_EPOCH}" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)"; then

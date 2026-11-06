@@ -62,23 +62,28 @@ The structured code is derived from the HTTP-style code (`classifyErrorCode`).
 ### Raised by the sdk backend from a bridge auth state
 
 `init` runs `bridge auth-state`; the payload's `errors[]` are appended to the
-message as `: <error>; <error>`.
+message as `: <error>; <error>`. A state other than `ready` and
+`session_expired` refuses `init` with a protocol error carrying the code and message below; the `errorCode`
+column is the backend's classification, and the status file is not written
+for a refused `init`. The states and their conditions are listed in
+[Subprocess Integration](../architecture/subprocess-integration.md#auth-state-payload).
 
 | Auth state | Code | `errorCode` | Message |
 | --- | --- | --- | --- |
 | `ready` | none | none | transfers continue |
+| `session_expired` | none | none | transfers continue; `bridge init` refreshes the access token before use |
 | `needs_login` | 401 | `auth_required` | `no ready Proton Drive session; run proton-drive-cli login before Git LFS transfer` |
-| `session_expired` | 401 | `auth_required` | `Proton Drive session is expired; refresh or login before Git LFS transfer` |
 | `session_invalid` | 401 | `auth_required` | `Proton Drive session is invalid; run proton-drive-cli login before Git LFS transfer` |
 | `needs_key_password` | 401 | `key_password_required` | `stored browser-fork key password required for this Proton session` |
-| `needs_data_password` | 401 | `data_password_required` | `mailbox/data password required for this Proton account` |
-| `configuration_error` | 400 | `invalid_request` | `Proton Drive auth configuration error` |
 | any other value | 502 | `server_error` | `unrecognized Proton Drive auth state` |
-| payload missing | 502 | `server_error` | `proton drive auth state is unavailable` |
-| `willAttemptNetwork: true` | 502 | `server_error` | `failed to inspect proton drive auth state: bridge auth-state must be offline-only` |
+| payload missing, without `state`, not parsable, or with `willAttemptNetwork: true` | 502 | `server_error` | `failed to inspect proton drive auth state` |
 
-A transfer that arrives before a successful `init` fails with 401
-`drive-cli backend is not authenticated` (`auth_required`).
+A failed `bridge auth-state` envelope or transport failure is classified like
+any other bridge error (tables below) with the fallback message
+`failed to inspect proton drive auth state`.
+
+A transfer that arrives before a successful `init` fails with 400
+`session not initialized` (the adapter's own check above).
 
 ### Raised by the sdk backend from a bridge error envelope
 
@@ -89,10 +94,8 @@ bridge emits.
 
 | Bridge `errorCode` | Code | `errorCode` | Message sent to git-lfs |
 | --- | --- | --- | --- |
-| `AUTH_FAILED`, `INVALID_CREDENTIALS`, `SESSION_EXPIRED` | 401 | `auth_required` | `session is invalid or expired` |
-| `TWO_FACTOR_REQUIRED` | 401 | `two_factor_required` | `two-factor authentication required` (`FIDO2 two-factor authentication required` when `details.twoFactorType` is `fido2`) |
+| `AUTH_FAILED`, `SESSION_EXPIRED` | 401 | `auth_required` | `session is invalid or expired` |
 | `KEY_PASSWORD_REQUIRED` | 401 | `key_password_required` | `stored browser-fork key password required for this Proton session` |
-| `DATA_PASSWORD_REQUIRED` | 401 | `data_password_required` | `mailbox/data password required for this Proton account` |
 | `CAPTCHA_REQUIRED` | 407 | `captcha_required` | `captcha verification required — run: proton-drive-cli login` |
 | `RATE_LIMITED` | 429 | `rate_limited` | `rate limited by proton api — wait and retry` |
 | `INSUFFICIENT_SCOPE` | 403 | `insufficient_scope` | `Proton rejected this app/session authorization scope` |
@@ -105,17 +108,31 @@ bridge emits.
 | `OPERATION_CANCELLED` | 499 | `invalid_request` | the bridge message |
 | `QUOTA_EXCEEDED`, `DISK_FULL` | 507 | `server_error` | the bridge message |
 | `ENCRYPTION_FAILED`, `DECRYPTION_FAILED` | 500 | `server_error` | the bridge message; `retryable` and `temporary` are forced to false |
-| `API_ERROR`, `UPLOAD_FAILED`, `DOWNLOAD_FAILED` | 502 | `server_error` | the fallback message of the operation (`drive-cli upload failed`, `drive-cli download failed`, `drive-cli existence check failed`, `failed to initialize lfs storage`) |
+| `API_ERROR`, `UPLOAD_FAILED`, `DOWNLOAD_FAILED` | 502 | `server_error` | the fallback message of the operation (`drive-cli upload failed`, `drive-cli download failed`, `drive-cli existence check failed`, `failed to initialize lfs storage`, `failed to inspect proton drive auth state`) |
 | `UNKNOWN_ERROR` | 500 | `server_error` | the fallback message of the operation |
+
+These are the 27 codes of proton-drive-cli's
+`schemas/bridge/v1/error-code-map.json`. An `errorCode` outside that map is
+classified by the envelope `code` as described below; the envelope message
+never decides the classification.
 
 For `exists`, a 404 envelope means "absent" and is not an error; any other
 failure of the pre-upload existence check fails the upload.
 
-An envelope whose `details` carry no `errorCode` is classified from its
-message (two-factor, key password, data password, key unlock, scope) and
-otherwise from its `code`: 401 `auth_required`, 403 `permission_denied`, 404
-`not_found`, 407 `captcha_required`, 429 `rate_limited`, 503 and other 5xx
-`server_error`, other 4xx `invalid_request` with the bridge message.
+`details.errorCode` is always present (`error-details.schema.json`); for a
+code outside the map the envelope `code` decides:
+
+| Envelope `code` | `errorCode` | Message sent to git-lfs |
+| --- | --- | --- |
+| 401 | `auth_required` | `session is invalid or expired` |
+| 403 | `permission_denied` | `permission denied by drive backend` |
+| 404 | `not_found` | `object not found in drive backend` |
+| 407 | `captcha_required` | `captcha verification required — run: proton-drive-cli login` |
+| 429 | `rate_limited` | `rate limited by proton api — wait and retry` |
+| 503 | `server_error` | `drive service is unavailable` |
+| other 5xx | `server_error` | the fallback message of the operation |
+| other 4xx | `invalid_request` | the bridge message |
+| below 400 | `server_error` (code 502) | the fallback message of the operation |
 
 ### Raised by the sdk backend without an envelope
 
@@ -131,41 +148,39 @@ backend classifies it by keywords.
 | `bridge <command>: no valid JSON envelope found in bridge output` | none | 502 | `server_error` | fallback message of the operation |
 | `bridge <command>: invalid bridge response envelope: …` | none | 502 | `server_error` | fallback message of the operation |
 
-Keyword rules, in order: two-factor/2fa/fido2 (401 `two_factor_required`);
-key password (401 `key_password_required`); mailbox/data password, key
-decryption (401 `data_password_required`); failed to decrypt, decrypt any
-keys (401 `key_unlock_failed`); invalid or expired session, unauthorized
-(401 `auth_required`); sufficient scope (403 `insufficient_scope`); not
-found (404 `not_found`); captcha (407 `captcha_required`); rate limit (429
+A bridge executable that cannot be started (any `Cmd.Start` failure of
+`os/exec`: missing, not executable, not loadable) is a `BridgeStartError`,
+mapped to 400 `invalid_request` with `proton-drive-cli could not be started;
+check --drive-cli-bin, PROTON_DRIVE_CLI_BIN and NODE_BIN`, before any keyword
+rule.
+
+Keyword rules, in order, on the lower-cased message: key password (401
+`key_password_required`); invalid or expired session, unauthorized (401
+`auth_required`); sufficient scope (403 `insufficient_scope`); not found
+(404 `not_found`); captcha (407 `captcha_required`); rate limit (429
 `rate_limited`); timeout, timed out, connection refused, no such host, dial
 tcp (503 `server_error`, `drive service is unavailable`); otherwise 502 with
 the operation's fallback message. Only words are matched: digits in free
 text can belong to an OID and are never read as a status or Proton code.
 
-For envelopes whose `details.errorCode` is the generic `UNKNOWN_ERROR` or
-`DECRYPTION_FAILED`, the same keyword rules (the authentication ones and
-Proton code 9101) are tried before the code table, so a wrong mailbox/data
-password ("Failed to decrypt any keys") is reported as 401
-`key_unlock_failed`, not as a retryable server error.
-
-stderr fragments are truncated to 256 characters and cut at the first
-`Bearer` (followed by a space), `token=`, `session=`, `AccessToken`,
-`RefreshToken` or `UID:`.
+stderr fragments are redacted by `bridgeproto.RedactText` (bearer tokens,
+secret-named fields in JSON, query and log forms, URL userinfo) and then cut
+to 256 runes.
 
 ## Status-file classification
 
 The `state`, `errorCode` and `errorDetail` written for a failure follow this
 order:
 
-1. A structured backend code other than `unknown` decides: `captcha_required`
-   gives `captcha`; `rate_limited` gives `rate_limited`;
-   `two_factor_required`, `data_password_required`, `key_password_required`,
-   `key_unlock_failed` and `auth_required` give `auth_required`; every other
+1. A structured backend code other than `unknown` decides
+   (`statusForErrorCode`): `captcha_required` gives `captcha`;
+   `rate_limited` gives `rate_limited`; `key_password_required` and
+   `auth_required` give `auth_required`; every other
    code gives `error`.
-2. Without a structured code, the HTTP-style code and message decide: 407 or
-   "CAPTCHA" gives `captcha`; 429 or "rate limit" gives `rate_limited`;
-   two-factor, data-password and 401/403 keywords give `auth_required`; 404
-   gives `not_found`, 409 `conflict`, 5xx `server_error`, other 4xx
+2. Without a structured code (`classifyErrorByStatus`), the HTTP-style code
+   and message decide: 407 or "CAPTCHA" gives `captcha`; 429 or "rate limit"
+   gives `rate_limited`; 401, 403 or "Authentication" gives `auth_required`;
+   404 gives `not_found`, 409 `conflict`, 5xx `server_error`, other 4xx
    `client_error`, anything else `unknown_error`.
 3. `retryable` is true only for `network_failure` and `server_error` with
    code 500, 502, 503 or 504; `temporary` is true when `retryable` is true or

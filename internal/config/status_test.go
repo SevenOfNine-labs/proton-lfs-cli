@@ -7,13 +7,11 @@ import (
 )
 
 func TestStatusReportPersistence(t *testing.T) {
-	// Create temp directory for test
 	tmpDir := t.TempDir()
 
 	testPath := filepath.Join(tmpDir, "status.json")
 	t.Setenv(EnvStatusFile, testPath)
 
-	// Write status
 	originalStatus := StatusReport{
 		State:       StateOK,
 		LastOID:     "abc123",
@@ -21,8 +19,7 @@ func TestStatusReportPersistence(t *testing.T) {
 		Error:       "",
 		ErrorCode:   "",
 		ErrorDetail: "",
-		RetryCount:  0,
-		Timestamp:   time.Now().Truncate(time.Second), // Truncate for comparison
+		Timestamp:   time.Now().Truncate(time.Second),
 	}
 
 	err := WriteStatus(originalStatus)
@@ -30,13 +27,11 @@ func TestStatusReportPersistence(t *testing.T) {
 		t.Fatalf("WriteStatus failed: %v", err)
 	}
 
-	// Read status
 	readStatus, err := ReadStatus()
 	if err != nil {
 		t.Fatalf("ReadStatus failed: %v", err)
 	}
 
-	// Compare
 	if readStatus.State != originalStatus.State {
 		t.Errorf("State mismatch: got %s, want %s", readStatus.State, originalStatus.State)
 	}
@@ -47,7 +42,6 @@ func TestStatusReportPersistence(t *testing.T) {
 		t.Errorf("LastOp mismatch: got %s, want %s", readStatus.LastOp, originalStatus.LastOp)
 	}
 
-	// Timestamp comparison (within 1 second tolerance)
 	timeDiff := readStatus.Timestamp.Sub(originalStatus.Timestamp)
 	if timeDiff < 0 {
 		timeDiff = -timeDiff
@@ -63,7 +57,6 @@ func TestStatusWithErrorFields(t *testing.T) {
 	testPath := filepath.Join(tmpDir, "status.json")
 	t.Setenv(EnvStatusFile, testPath)
 
-	// Write status with error fields
 	originalStatus := StatusReport{
 		State:       StateError,
 		LastOID:     "def456",
@@ -73,7 +66,6 @@ func TestStatusWithErrorFields(t *testing.T) {
 		ErrorDetail: "Retry may succeed after transient failure",
 		Retryable:   true,
 		Temporary:   true,
-		RetryCount:  3,
 		Timestamp:   time.Now(),
 	}
 
@@ -82,21 +74,16 @@ func TestStatusWithErrorFields(t *testing.T) {
 		t.Fatalf("WriteStatus failed: %v", err)
 	}
 
-	// Read status
 	readStatus, err := ReadStatus()
 	if err != nil {
 		t.Fatalf("ReadStatus failed: %v", err)
 	}
 
-	// Compare error fields
 	if readStatus.ErrorCode != originalStatus.ErrorCode {
 		t.Errorf("ErrorCode mismatch: got %s, want %s", readStatus.ErrorCode, originalStatus.ErrorCode)
 	}
 	if readStatus.ErrorDetail != originalStatus.ErrorDetail {
 		t.Errorf("ErrorDetail mismatch: got %s, want %s", readStatus.ErrorDetail, originalStatus.ErrorDetail)
-	}
-	if readStatus.RetryCount != originalStatus.RetryCount {
-		t.Errorf("RetryCount mismatch: got %d, want %d", readStatus.RetryCount, originalStatus.RetryCount)
 	}
 	if readStatus.Retryable != originalStatus.Retryable {
 		t.Errorf("Retryable mismatch: got %v, want %v", readStatus.Retryable, originalStatus.Retryable)
@@ -111,7 +98,6 @@ func TestStatusStates(t *testing.T) {
 		name  string
 		state string
 	}{
-		{"idle state", StateIdle},
 		{"transferring state", StateTransferring},
 		{"ok state", StateOK},
 		{"error state", StateError},
@@ -167,7 +153,6 @@ func TestStatusAtomicWrite(t *testing.T) {
 	testPath := filepath.Join(tmpDir, "status.json")
 	t.Setenv(EnvStatusFile, testPath)
 
-	// Write multiple times to ensure atomic writes don't corrupt
 	for i := 0; i < 10; i++ {
 		status := StatusReport{
 			State:     StateOK,
@@ -180,7 +165,6 @@ func TestStatusAtomicWrite(t *testing.T) {
 			t.Fatalf("WriteStatus failed on iteration %d: %v", i, err)
 		}
 
-		// Verify we can read immediately after write
 		_, err = ReadStatus()
 		if err != nil {
 			t.Fatalf("ReadStatus failed on iteration %d: %v", i, err)

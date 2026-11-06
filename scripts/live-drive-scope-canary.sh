@@ -15,67 +15,14 @@ if [[ "${PROTON_LFS_LIVE_CANARY:-}" != "${LIVE_CANARY_ACK_VALUE}" ]]; then
   fail "Refusing to run live Drive scope canary without the exact PROTON_LFS_LIVE_CANARY acknowledgement."
 fi
 
-if [[ -z "${LIVE_CANARY_DOCTOR_ARGS:-}" ]]; then
-  fail "Refusing to run live Drive scope canary without LIVE_CANARY_DOCTOR_ARGS."
-fi
-
 cd "${ROOT_DIR}"
 
 echo "Running guarded live Drive scope canary."
 echo "This performs exactly one read-only bridge list request and no transfer."
 
-build_request_script='
-const raw = (process.env.LIVE_CANARY_DOCTOR_ARGS || "").trim();
-const tokens = raw ? raw.split(/\s+/) : [];
-const request = { folder: "/" };
-const valueOptions = new Set([
-  "--data-credential-provider",
-  "--data-credential-host",
-  "--key-password-provider",
-  "--key-password-host",
-]);
-const flagOptions = new Set(["--require-data-password"]);
-
-function setOption(option, value) {
-  if (!value || value.startsWith("--")) {
-    throw new Error(`missing value after ${option}`);
-  }
-  if (option === "--data-credential-provider") request.dataCredentialProvider = value;
-  if (option === "--data-credential-host") request.dataCredentialHost = value;
-}
-
-for (let i = 0; i < tokens.length; i += 1) {
-  const token = tokens[i];
-  const eq = token.indexOf("=");
-  const option = eq === -1 ? token : token.slice(0, eq);
-  const inlineValue = eq === -1 ? "" : token.slice(eq + 1);
-
-  if (flagOptions.has(option)) continue;
-  if (!valueOptions.has(option)) {
-    throw new Error(`unsupported LIVE_CANARY_DOCTOR_ARGS option for scope canary: ${option}`);
-  }
-  if (eq !== -1) {
-    setOption(option, inlineValue);
-    continue;
-  }
-  i += 1;
-  setOption(option, tokens[i] || "");
-}
-
-console.log(JSON.stringify(request));
-'
-
-set +e
-scope_request="$(LIVE_CANARY_DOCTOR_ARGS="${LIVE_CANARY_DOCTOR_ARGS}" "${NODE_BIN}" -e "${build_request_script}" 2>&1)"
-request_status=$?
-set -e
-if [[ "${request_status}" -ne 0 ]]; then
-  fail "Failed to build live Drive scope request: ${scope_request}"
-fi
-
 set +e
 bridge_output="$(
-  printf '%s\n' "${scope_request}" | "${NODE_BIN}" "${DRIVE_CLI_BIN}" bridge list 2>&1
+  printf '%s\n' '{"folder":"/"}' | "${NODE_BIN}" "${DRIVE_CLI_BIN}" bridge list 2>&1
 )"
 bridge_status=$?
 set -e
@@ -105,14 +52,10 @@ try {
 }
 
 let details = {};
-if (typeof response.details === "string" && response.details.trim()) {
-  try {
-    details = JSON.parse(response.details);
-  } catch {
-    details = {};
-  }
-} else if (response.details && typeof response.details === "object") {
-  details = response.details;
+try {
+  details = JSON.parse(String(response.details || "{}")) || {};
+} catch {
+  details = {};
 }
 
 const errorText = String(response.error || "");

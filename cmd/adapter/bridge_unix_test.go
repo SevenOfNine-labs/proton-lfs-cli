@@ -26,7 +26,7 @@ func TestTerminateActiveKillsRunningBridge(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		_, err := bc.Exists(OperationCredentials{}, validOID)
+		_, err := bc.Exists(validOID)
 		done <- err
 	}()
 

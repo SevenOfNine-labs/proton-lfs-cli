@@ -556,46 +556,6 @@ func TestDownloadSucceedsInMockMode(t *testing.T) {
 	_ = os.Remove(complete.Path)
 }
 
-func TestClassifyErrorAuthChallengeStates(t *testing.T) {
-	cases := []struct {
-		name           string
-		code           int
-		message        string
-		wantErrorCode  string
-		wantDetailPart string
-	}{
-		{
-			name:           "totp",
-			code:           401,
-			message:        "two-factor authentication required",
-			wantErrorCode:  "two_factor_required",
-			wantDetailPart: "two-factor",
-		},
-		{
-			name:           "data password",
-			code:           401,
-			message:        "mailbox/data password required for this Proton account",
-			wantErrorCode:  "data_password_required",
-			wantDetailPart: "mailbox/data password",
-		},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			state, errorCode, detail := classifyError(tc.code, "", tc.message)
-			if state != config.StateAuthRequired {
-				t.Fatalf("expected auth-required state, got %q", state)
-			}
-			if errorCode != tc.wantErrorCode {
-				t.Fatalf("expected errorCode %q, got %q", tc.wantErrorCode, errorCode)
-			}
-			if !strings.Contains(strings.ToLower(detail), tc.wantDetailPart) {
-				t.Fatalf("expected detail to mention %q, got %q", tc.wantDetailPart, detail)
-			}
-		})
-	}
-}
-
 func TestSendBackendTransferErrorWritesRetryMetadata(t *testing.T) {
 	statusPath := filepath.Join(t.TempDir(), "status.json")
 	t.Setenv(config.EnvStatusFile, statusPath)
@@ -729,7 +689,7 @@ func TestPrintUsageContainsAllSections(t *testing.T) {
 		"DESCRIPTION",
 		"PROTOCOL COMPLIANCE",
 		"BACKENDS",
-		"AUTH AND LOCAL UNLOCK",
+		"AUTHENTICATION",
 		"SECURITY",
 		"FLAGS",
 		"ENVIRONMENT VARIABLES",
@@ -741,7 +701,6 @@ func TestPrintUsageContainsAllSections(t *testing.T) {
 		}
 	}
 
-	// Verify key content details
 	details := []string{
 		"git-lfs-proton-adapter",
 		"lfs.standalonetransferagent",
@@ -757,7 +716,6 @@ func TestPrintUsageContainsAllSections(t *testing.T) {
 }
 
 func TestCleanupStaleTempFiles(t *testing.T) {
-	// Create a temp file with the adapter prefix that looks stale
 	staleFile, err := os.CreateTemp("", "git-lfs-proton-stale-test-*")
 	if err != nil {
 		t.Fatal(err)
@@ -765,11 +723,9 @@ func TestCleanupStaleTempFiles(t *testing.T) {
 	stalePath := staleFile.Name()
 	staleFile.Close()
 
-	// Backdate the file to make it old enough to be cleaned up
 	oldTime := time.Now().Add(-20 * time.Minute)
 	os.Chtimes(stalePath, oldTime, oldTime)
 
-	// Create a fresh temp file that should NOT be cleaned up (too new)
 	freshFile, err := os.CreateTemp("", "git-lfs-proton-fresh-test-*")
 	if err != nil {
 		t.Fatal(err)
@@ -784,19 +740,15 @@ func TestCleanupStaleTempFiles(t *testing.T) {
 		t.Fatal("expected at least one stale file to be removed")
 	}
 
-	// Stale file should be gone
 	if _, err := os.Stat(stalePath); err == nil {
-		os.Remove(stalePath) // cleanup anyway
+		os.Remove(stalePath)
 		t.Fatal("stale file should have been removed")
 	}
 
-	// Fresh file should still exist
 	if _, err := os.Stat(freshPath); err != nil {
 		t.Fatal("fresh file should still exist")
 	}
 }
-
-// --- Untested Pure Function Tests ---
 
 func TestCalculateFileSHA256(t *testing.T) {
 	t.Run("known content", func(t *testing.T) {
@@ -864,7 +816,6 @@ func TestCopyFile(t *testing.T) {
 			t.Fatal("copy content mismatch")
 		}
 
-		// No temp residue
 		entries, _ := os.ReadDir(dir)
 		for _, e := range entries {
 			if strings.Contains(e.Name(), ".tmp-") {
@@ -1257,7 +1208,7 @@ func TestClassifyErrorPrefersStructuredCode(t *testing.T) {
 	}{
 		{"insufficient scope is not an auth retry", 403, ErrCodeInsufficientScope, "scope", config.StateError, "insufficient_scope"},
 		{"permission denied is not an auth retry", 403, ErrCodePermissionDenied, "denied", config.StateError, "permission_denied"},
-		{"rate limited keeps its state even with 2fa text", 429, ErrCodeRateLimited, "rate limited while loading 2FA settings", config.StateRateLimited, "rate_limited"},
+		{"rate limited keeps its state even with auth text", 429, ErrCodeRateLimited, "rate limited while checking Authentication", config.StateRateLimited, "rate_limited"},
 		{"session not initialized is a protocol error, not auth", 400, "", "session not initialized", config.StateError, "client_error"},
 		{"captcha by status without code", 407, "", "x", config.StateCaptcha, "captcha_required"},
 	}
@@ -1268,5 +1219,24 @@ func TestClassifyErrorPrefersStructuredCode(t *testing.T) {
 				t.Fatalf("classifyError(%d, %q, %q) = (%q, %q), want (%q, %q)", tc.code, tc.errorCode, tc.message, state, errorCode, tc.wantState, tc.wantCode)
 			}
 		})
+	}
+}
+
+func TestTransferErrorRecordsOperationInStatusFile(t *testing.T) {
+	statusPath := filepath.Join(t.TempDir(), "status.json")
+	t.Setenv(config.EnvStatusFile, statusPath)
+
+	adapter := NewAdapter()
+	adapter.currentOperation = DirectionDownload
+	if err := adapter.sendTransferError(json.NewEncoder(io.Discard), validOID, 404, "object not found"); err != nil {
+		t.Fatal(err)
+	}
+
+	report, err := config.ReadStatus()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.State != config.StateError || report.LastOp != "download" || report.LastOID != validOID {
+		t.Fatalf("status report = %+v, want error state for download of %s", report, validOID)
 	}
 }

@@ -11,31 +11,17 @@ import (
 type Preferences struct {
 	// KeyPasswordProvider stores the browser-fork key password: pass-cli or
 	// git-credential.
-	KeyPasswordProvider    string `json:"keyPasswordProvider"`
-	DataCredentialProvider string `json:"dataCredentialProvider,omitempty"`
-	DataCredentialHost     string `json:"dataCredentialHost,omitempty"`
-	Enabled                bool   `json:"enabled"`
-}
-
-// prefsFile is the on-disk form of Preferences. Files written before
-// 2026-11 stored the key-password provider under "credentialProvider"; the
-// value is read from there once and saved under the current key on the next
-// SavePrefs.
-type prefsFile struct {
-	Preferences
-	FormerKeyPasswordProvider string `json:"credentialProvider,omitempty"`
+	KeyPasswordProvider string `json:"keyPasswordProvider"`
 }
 
 // DefaultPreferences returns the default preferences.
 func DefaultPreferences() Preferences {
-	return Preferences{
-		KeyPasswordProvider: DefaultKeyPasswordProvider,
-		Enabled:             true,
-	}
+	return Preferences{KeyPasswordProvider: DefaultKeyPasswordProvider}
 }
 
-// LoadPrefs reads preferences from the config file.
-// Returns defaults if the file is missing or unreadable.
+// LoadPrefs reads preferences from the config file. It returns the defaults
+// when the file is missing or unreadable, and the default key-password
+// provider when the file names none.
 func LoadPrefs() Preferences {
 	path, err := PrefsFilePath()
 	if err != nil {
@@ -45,19 +31,12 @@ func LoadPrefs() Preferences {
 	if err != nil {
 		return DefaultPreferences()
 	}
-	var file prefsFile
-	if err := json.Unmarshal(data, &file); err != nil {
+	var prefs Preferences
+	if err := json.Unmarshal(data, &prefs); err != nil {
 		return DefaultPreferences()
-	}
-	prefs := file.Preferences
-	if prefs.KeyPasswordProvider == "" {
-		prefs.KeyPasswordProvider = file.FormerKeyPasswordProvider
 	}
 	if prefs.KeyPasswordProvider == "" {
 		prefs.KeyPasswordProvider = DefaultKeyPasswordProvider
-	}
-	if prefs.DataCredentialProvider != "" && prefs.DataCredentialHost == "" {
-		prefs.DataCredentialHost = DefaultDataCredentialHost
 	}
 	return prefs
 }

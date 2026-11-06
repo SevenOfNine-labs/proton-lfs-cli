@@ -45,7 +45,7 @@ func findToolBinary(root, envName, defaultName string) (string, error) {
 	return "", fmt.Errorf("unable to find %s binary", defaultName)
 }
 
-// goBinary returns the Go command used to build test helpers: $GO when set
+// goBinary returns the Go command that builds test helpers: $GO when set
 // (the Makefile passes its GO variable through), otherwise go on PATH.
 func goBinary() string {
 	if v := strings.TrimSpace(os.Getenv("GO")); v != "" {
@@ -196,7 +196,6 @@ func TestGitLFSCustomTransferStandaloneUpload(t *testing.T) {
 func TestGitLFSCustomTransferDownloadRoundTrip(t *testing.T) {
 	s := setupRepositoryForUpload(t)
 
-	// Upload succeeds in the source repository and pushes pointers.
 	mustRun(t, s.repoPath, s.env, s.gitBin, "push", "origin", "main")
 	mustRun(t, s.repoPath, s.env, s.gitLFSBin, "push", "origin", "main")
 

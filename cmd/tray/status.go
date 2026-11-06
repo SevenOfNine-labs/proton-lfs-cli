@@ -10,16 +10,17 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"unicode/utf8"
 
 	"fyne.io/systray"
 
+	"github.com/SevenOfNine-labs/proton-lfs-cli/internal/bridgeproto"
 	"github.com/SevenOfNine-labs/proton-lfs-cli/internal/config"
 )
 
 const pollInterval = 5 * time.Second
 const refreshBeforeExpiry = 10 * time.Minute
 const refreshRetryInterval = time.Minute
+const refreshMaxRetryInterval = 30 * time.Minute
 const refreshFallbackInterval = 12 * time.Hour
 
 var (
@@ -31,40 +32,54 @@ var (
 
 var refreshState = sessionRefreshState{}
 
+// sessionChange is the session uid the tray last saw and when it changed
+// while the tray ran; a login always yields a new uid.
+var sessionChange struct {
+	sync.Mutex
+	seen bool
+	uid  string
+	at   time.Time
+}
+
+// sessionMetadata is proton-drive-cli's session.json (SessionCredentials in
+// src/types/auth.ts).
 type sessionMetadata struct {
-	SessionID            string   `json:"sessionId"`
-	UID                  string   `json:"uid"`
-	AccessToken          string   `json:"accessToken"`
-	RefreshToken         string   `json:"refreshToken"`
-	Scopes               []string `json:"scopes"`
-	PasswordMode         int      `json:"passwordMode"`
-	AuthMode             string   `json:"authMode"`
-	KeyPasswordPersisted bool     `json:"keyPasswordPersisted"`
-	TokenExpiresAt       int64    `json:"tokenExpiresAt"`
+	UID                 string   `json:"uid"`
+	AccessToken         string   `json:"accessToken"`
+	RefreshToken        string   `json:"refreshToken"`
+	Scopes              []string `json:"scopes"`
+	KeyPasswordProvider string   `json:"keyPasswordProvider"`
+	KeyPasswordHost     string   `json:"keyPasswordHost"`
+	TokenExpiresAt      int64    `json:"tokenExpiresAt"`
+	// WrittenAt is the file's modification time: login and every token
+	// refresh rewrite session.json.
+	WrittenAt time.Time `json:"-"`
 }
 
 type authReadiness struct {
-	statusTitle        string
-	sessionTitle       string
-	transferTitle      string
-	refreshTitle       string
-	tooltip            string
-	actionTitle        string
-	action             authMenuAction
-	dataPasswordActive bool
-	signedIn           bool
-	ready              bool
-	blocked            bool
+	sessionChangedAt time.Time
+	statusTitle      string
+	sessionTitle     string
+	transferTitle    string
+	refreshTitle     string
+	tooltip          string
+	actionTitle      string
+	action           authMenuAction
+	signedIn         bool
+	ready            bool
+	blocked          bool
 }
 
 type sessionRefreshState struct {
-	InProgress      bool
-	LastAttempt     time.Time
-	LastSuccess     time.Time
-	LastError       string
-	NextAttempt     time.Time
-	ActionRequired  bool
-	ActionSessionID string
+	InProgress     bool
+	LastAttempt    time.Time
+	LastSuccess    time.Time
+	LastError      string
+	NextAttempt    time.Time
+	ActionRequired bool
+	// FailureUID is the session uid LastError belongs to.
+	FailureUID          string
+	ConsecutiveFailures int
 }
 
 type refreshCommandResult struct {
@@ -74,6 +89,7 @@ type refreshCommandResult struct {
 	Error       string           `json:"error"`
 	ErrorCode   string           `json:"errorCode"`
 	Recoverable *bool            `json:"recoverable"`
+	RetryAfter  int              `json:"retryAfter"`
 	StatusCode  int              `json:"statusCode"`
 	ProtonCode  int              `json:"protonCode"`
 	ProtonError string           `json:"protonError"`
@@ -87,8 +103,7 @@ type refreshDecision struct {
 }
 
 // traySnapshot is everything one poll tick needs, read once: the adapter's
-// status file, the global git LFS registration and the derived auth
-// readiness.
+// status file, the global git LFS registration and the auth readiness.
 type traySnapshot struct {
 	report     config.StatusReport
 	hasReport  bool
@@ -135,16 +150,15 @@ func sessionFilePath() string {
 	return filepath.Join(home, ".proton-drive-cli", "session.json")
 }
 
-// takeTraySnapshot reads the status file and the git registration once and
-// derives the auth readiness from the same git values.
+// takeTraySnapshot reads the status file, the git registration and the
+// session file once each.
 func takeTraySnapshot(now time.Time) traySnapshot {
 	report, err := config.ReadStatus()
-	lfs := readGitLFSConfig()
 	return traySnapshot{
 		report:     report,
 		hasReport:  err == nil,
-		lfsEnabled: lfs.StandaloneAgent == gitStandaloneAgent,
-		readiness:  inspectAuthReadinessWith(now, lfs),
+		lfsEnabled: isLFSEnabled(),
+		readiness:  inspectAuthReadiness(now),
 	}
 }
 
@@ -185,8 +199,12 @@ func authReadinessOverridesTransferStatus(s traySnapshot) bool {
 		return true
 	}
 	switch s.report.State {
-	case config.StateIdle, config.StateOK:
+	case config.StateOK:
 		return true
+	case config.StateAuthRequired, config.StateCaptcha:
+		return s.readiness.sessionChangedAt.After(s.report.Timestamp)
+	case config.StateRateLimited:
+		return s.report.LastOp == "login" && s.readiness.sessionChangedAt.After(s.report.Timestamp)
 	default:
 		return false
 	}
@@ -197,7 +215,7 @@ func authReadinessOverridesTransferStatus(s traySnapshot) bool {
 // three stop transfers until the user acts, and the tooltip names which.
 func transferStateIcon(report config.StatusReport) []byte {
 	switch report.State {
-	case config.StateIdle, config.StateOK:
+	case config.StateOK:
 		return iconOK
 	case config.StateError, config.StateRateLimited, config.StateAuthRequired, config.StateCaptcha:
 		return iconError
@@ -208,22 +226,22 @@ func transferStateIcon(report config.StatusReport) []byte {
 	}
 }
 
-// maybeRefreshSession proactively refreshes the Proton session token near
-// expiry. This calls POST /auth/v4/refresh and never attempts account login.
+// maybeRefreshSession refreshes the Proton session token near expiry through
+// `proton-drive-cli session refresh` (POST /auth/v4/refresh).
 func maybeRefreshSession() {
 	meta, ok := readSessionMetadata()
-	if !ok || meta.RefreshToken == "" {
+	if !ok || !validSessionShape(meta) {
 		return
 	}
 	now := timeNow()
-	decision := decideRefresh(now, meta, snapshotRefreshState())
+	decision := decideRefresh(now, meta, currentRefreshState(meta))
 	if !decision.Attempt {
 		setRefreshNextAttempt(decision.NextAttempt)
 		return
 	}
 	driveCLI := findDriveCLI()
 	if driveCLI == "" {
-		recordRefreshFailure(now, meta.SessionID, "proton-drive-cli not found", true)
+		recordRefreshFailure(now, meta.UID, "proton-drive-cli not found", true)
 		refreshTrayState()
 		return
 	}
@@ -232,16 +250,15 @@ func maybeRefreshSession() {
 	}
 	refreshTrayState()
 	go func() {
-		performSessionRefresh(driveCLI, meta.SessionID)
+		performSessionRefresh(driveCLI, meta.UID)
 		refreshTrayState()
 	}()
 }
 
 // performSessionRefresh runs `session refresh --json` bounded by
-// driveCLITimeout and records the outcome. A timeout is a recoverable
-// failure: the state leaves "in progress" and the next attempt is scheduled
-// after refreshRetryInterval.
-func performSessionRefresh(driveCLI, sessionID string) {
+// driveCLITimeout and records the outcome; a timeout is a recoverable failure
+// retried after refreshBackoff.
+func performSessionRefresh(driveCLI, uid string) {
 	ctx, cancel := context.WithTimeout(context.Background(), driveCLITimeout)
 	defer cancel()
 	cmd := driveCLICommand(ctx, driveCLI, "session", "refresh", "--json")
@@ -250,18 +267,26 @@ func performSessionRefresh(driveCLI, sessionID string) {
 	finishedAt := timeNow()
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		message := fmt.Sprintf("session refresh timed out after %s", driveCLITimeout)
-		recordRefreshFailure(finishedAt, sessionID, message, true)
+		recordRefreshFailure(finishedAt, uid, message, true)
 		trayLog.Printf("refresh: %s", message)
 		return
 	}
 	result, parsed := parseRefreshCommandResult(out)
 	switch {
-	case parsed && result.OK:
+	case parsed && result.OK && result.Refreshed:
 		recordRefreshSuccess(finishedAt)
 		trayLog.Print("refresh: session token refreshed")
+	case parsed && result.OK:
+		// `session refresh --json` reports ok without a refresh only for state
+		// no_session (proton-drive-cli src/cli/login.ts).
+		recordRefreshFailure(finishedAt, uid, "no usable session; run proton-drive-cli login", false)
+		trayLog.Printf("refresh: state %s", result.State)
 	case err != nil || parsed:
 		message, recoverable := refreshFailureFromCommand(result, parsed, err)
-		recordRefreshFailure(finishedAt, sessionID, message, recoverable)
+		recordRefreshFailure(finishedAt, uid, message, recoverable)
+		if recoverable && result.RetryAfter > 0 {
+			deferRefreshUntil(finishedAt.Add(time.Duration(result.RetryAfter) * time.Second))
+		}
 		trayLog.Printf("refresh: failed: %s", message)
 	default:
 		recordRefreshSuccess(finishedAt)
@@ -274,24 +299,35 @@ func readSessionMetadata() (sessionMetadata, bool) {
 	if sf == "" {
 		return sessionMetadata{}, false
 	}
-	data, err := os.ReadFile(sf)
+	f, err := os.Open(sf)
 	if err != nil {
 		return sessionMetadata{}, false
 	}
-	var meta sessionMetadata
-	if err := json.Unmarshal(data, &meta); err != nil {
+	defer func() { _ = f.Close() }()
+	info, err := f.Stat()
+	if err != nil {
 		return sessionMetadata{}, false
 	}
+	// An existing file that does not decode is an invalid session, as in
+	// proton-drive-cli's SessionManager.readStoredSession.
+	var meta sessionMetadata
+	if err := json.NewDecoder(f).Decode(&meta); err != nil {
+		return sessionMetadata{WrittenAt: info.ModTime()}, true
+	}
+	meta.WrittenAt = info.ModTime()
 	return meta, true
 }
 
+// validSessionShape mirrors isSessionCredentials in proton-drive-cli
+// src/auth/session.ts.
 func validSessionShape(meta sessionMetadata) bool {
-	return meta.SessionID != "" &&
-		meta.UID != "" &&
-		meta.AccessToken != "" &&
-		meta.RefreshToken != "" &&
-		meta.Scopes != nil &&
-		meta.PasswordMode > 0
+	for _, field := range []string{meta.UID, meta.AccessToken, meta.RefreshToken, meta.KeyPasswordHost} {
+		if strings.TrimSpace(field) == "" {
+			return false
+		}
+	}
+	return meta.KeyPasswordProvider == config.CredentialProviderPassCLI ||
+		meta.KeyPasswordProvider == config.CredentialProviderGitCredential
 }
 
 func tokenExpiry(meta sessionMetadata) time.Time {
@@ -301,53 +337,21 @@ func tokenExpiry(meta sessionMetadata) time.Time {
 	return time.UnixMilli(meta.TokenExpiresAt)
 }
 
-// hasConfiguredDataCredential reports whether a mailbox/data password
-// provider is configured in prefs, the environment or the git LFS args.
-func hasConfiguredDataCredential(lfs gitLFSConfig) bool {
-	prefs := config.LoadPrefs()
-	if strings.TrimSpace(prefs.DataCredentialProvider) != "" {
-		return true
-	}
-	if config.EnvTrim(config.EnvDataCredentialProvider) != "" {
-		return true
-	}
-	return parseFlagValue(lfs.TransferArgs, "--data-credential-provider") != ""
-}
-
-func browserForkKeyPasswordPersisted(meta sessionMetadata) bool {
-	return meta.AuthMode == "browser-fork" && meta.KeyPasswordPersisted
-}
-
-func parseFlagValue(text string, flag string) string {
-	fields := strings.Fields(text)
-	for i, field := range fields {
-		if field == flag && i+1 < len(fields) {
-			return strings.Trim(fields[i+1], `"'`)
-		}
-		if strings.HasPrefix(field, flag+"=") {
-			return strings.Trim(strings.TrimPrefix(field, flag+"="), `"'`)
-		}
-	}
-	return ""
-}
-
-// inspectAuthReadiness derives the readiness from the session file, the
-// refresh state and the current git registration.
+// inspectAuthReadiness derives the readiness from the session file and the
+// refresh state.
 func inspectAuthReadiness(now time.Time) authReadiness {
-	return inspectAuthReadinessWith(now, readGitLFSConfig())
-}
-
-func inspectAuthReadinessWith(now time.Time, lfs gitLFSConfig) authReadiness {
 	meta, hasSession := readSessionMetadata()
-	health := snapshotRefreshState()
+	health := currentRefreshState(meta)
+	changedAt := observeSessionUID(meta.UID, now)
 	base := authReadiness{
-		statusTitle:   "Status: Not connected",
-		sessionTitle:  "Session: Not connected",
-		transferTitle: "Transfers: Sign-in required",
-		actionTitle:   "Connect to Proton...",
-		action:        authActionConnect,
-		refreshTitle:  refreshTitle(now, meta, hasSession, health),
-		tooltip:       "Proton LFS - Not connected",
+		sessionChangedAt: changedAt,
+		statusTitle:      "Status: Not connected",
+		sessionTitle:     "Session: Not connected",
+		transferTitle:    "Transfers: Sign-in required",
+		actionTitle:      "Connect to Proton...",
+		action:           authActionConnect,
+		refreshTitle:     refreshTitle(now, meta, hasSession, health),
+		tooltip:          "Proton LFS - Not connected",
 	}
 	if !hasSession {
 		return base
@@ -373,28 +377,11 @@ func inspectAuthReadinessWith(now time.Time, lfs gitLFSConfig) authReadiness {
 		base.blocked = true
 		return base
 	}
+	base.sessionTitle = "Session: Signed in (" + meta.KeyPasswordProvider + ")"
 	if expiry := tokenExpiry(meta); !expiry.IsZero() && !now.Before(expiry) {
-		base.statusTitle = "Status: Setup needed"
-		base.sessionTitle = "Session: Expired"
-		base.transferTitle = "Transfers: Refresh required"
-		base.tooltip = "Proton LFS - Setup needed: session refresh required"
-		base.blocked = true
-		return base
-	}
-	if meta.AuthMode == "browser-fork" && !meta.KeyPasswordPersisted {
-		base.statusTitle = "Status: Setup needed"
-		base.transferTitle = "Transfers: Reconnect required"
-		base.tooltip = "Proton LFS - Setup needed: browser-fork key password missing"
-		base.blocked = true
-		return base
-	}
-	if !browserForkKeyPasswordPersisted(meta) && !hasConfiguredDataCredential(lfs) {
-		base.statusTitle = "Status: Setup needed"
-		base.transferTitle = "Transfers: Data password needed"
-		base.dataPasswordActive = true
-		base.tooltip = "Proton LFS - Setup needed: local unlock material required"
-		base.blocked = true
-		return base
+		// Bridge commands refresh an expired access token before use
+		// (proton-drive-cli src/sdk/client.ts loadUsableSession).
+		base.sessionTitle = "Session: Signed in (" + meta.KeyPasswordProvider + "), token refresh due"
 	}
 	base.statusTitle = "Status: Ready"
 	base.transferTitle = "Transfers: Ready"
@@ -426,14 +413,7 @@ func applyAuthReadinessLabels(readiness authReadiness) {
 			mPrimaryAuth.Enable()
 		}
 	}
-	if mDataPassword != nil {
-		if readiness.dataPasswordActive {
-			mDataPassword.Enable()
-		} else {
-			mDataPassword.Disable()
-		}
-	}
-	currentAuthAction = readiness.action
+	currentAuthAction.Store(readiness.action)
 }
 
 func snapshotRefreshState() sessionRefreshState {
@@ -463,7 +443,7 @@ func markRefreshStarted(now time.Time) bool {
 	refreshState.LastAttempt = now
 	refreshState.LastError = ""
 	refreshState.ActionRequired = false
-	refreshState.ActionSessionID = ""
+	refreshState.FailureUID = ""
 	return true
 }
 
@@ -474,28 +454,49 @@ func recordRefreshSuccess(now time.Time) {
 	refreshState.LastSuccess = now
 	refreshState.LastError = ""
 	refreshState.ActionRequired = false
-	refreshState.ActionSessionID = ""
+	refreshState.FailureUID = ""
+	refreshState.ConsecutiveFailures = 0
 	if meta, ok := readSessionMetadata(); ok {
-		refreshState.NextAttempt = nextRefreshAttempt(now, meta)
+		refreshState.NextAttempt = nextRefreshAttempt(now, meta, now)
 	} else {
 		refreshState.NextAttempt = time.Time{}
 	}
 }
 
-func recordRefreshFailure(now time.Time, sessionID string, message string, recoverable bool) {
+func recordRefreshFailure(now time.Time, uid string, message string, recoverable bool) {
 	refreshMu.Lock()
 	defer refreshMu.Unlock()
 	refreshState.InProgress = false
 	refreshState.LastAttempt = now
-	refreshState.LastError = truncate(strings.TrimSpace(message), 120)
+	refreshState.LastError = bridgeproto.Truncate(strings.TrimSpace(message), 120)
 	refreshState.ActionRequired = !recoverable
-	refreshState.ActionSessionID = ""
+	refreshState.FailureUID = uid
+	refreshState.ConsecutiveFailures++
 	if recoverable {
-		refreshState.NextAttempt = now.Add(refreshRetryInterval)
+		refreshState.NextAttempt = now.Add(refreshBackoff(refreshState.ConsecutiveFailures))
 		return
 	}
-	refreshState.ActionSessionID = sessionID
 	refreshState.NextAttempt = time.Time{}
+}
+
+// deferRefreshUntil moves the next attempt to at least t, the Retry-After of
+// a rate-limited refresh (RFC 9110, section 10.2.3).
+func deferRefreshUntil(t time.Time) {
+	refreshMu.Lock()
+	defer refreshMu.Unlock()
+	if t.After(refreshState.NextAttempt) {
+		refreshState.NextAttempt = t
+	}
+}
+
+// refreshBackoff is binary exponential backoff: refreshRetryInterval doubled
+// per further consecutive failure, at most refreshMaxRetryInterval.
+func refreshBackoff(failures int) time.Duration {
+	delay := refreshRetryInterval
+	for i := 1; i < failures && delay < refreshMaxRetryInterval; i++ {
+		delay *= 2
+	}
+	return min(delay, refreshMaxRetryInterval)
 }
 
 func decideRefresh(now time.Time, meta sessionMetadata, health sessionRefreshState) refreshDecision {
@@ -505,28 +506,88 @@ func decideRefresh(now time.Time, meta sessionMetadata, health sessionRefreshSta
 	if refreshActionRequiredForSession(meta, health) {
 		return refreshDecision{}
 	}
-	if !health.NextAttempt.IsZero() && now.Before(health.NextAttempt) {
+	if health.LastError != "" && !health.NextAttempt.IsZero() && now.Before(health.NextAttempt) {
 		return refreshDecision{NextAttempt: health.NextAttempt}
 	}
-	next := nextRefreshAttempt(now, meta)
-	if next.IsZero() || !now.Before(next) {
+	next := nextRefreshAttempt(now, meta, health.LastSuccess)
+	if !now.Before(next) {
 		return refreshDecision{Attempt: true}
 	}
 	return refreshDecision{NextAttempt: next}
 }
 
-func nextRefreshAttempt(now time.Time, meta sessionMetadata) time.Time {
+// nextRefreshAttempt precedes the token expiry by refreshBeforeExpiry, at most
+// half the token lifetime, or follows the last write by refreshFallbackInterval
+// when ExpiresIn was absent (optional in Proton's api-auth-types.ts).
+func nextRefreshAttempt(now time.Time, meta sessionMetadata, lastSuccess time.Time) time.Time {
+	var next time.Time
 	expiry := tokenExpiry(meta)
-	if expiry.IsZero() {
-		return now.Add(refreshFallbackInterval)
+	switch {
+	case !expiry.IsZero():
+		lead := refreshBeforeExpiry
+		if !meta.WrittenAt.IsZero() && expiry.After(meta.WrittenAt) {
+			lead = min(lead, expiry.Sub(meta.WrittenAt)/2)
+		}
+		next = expiry.Add(-lead)
+	case !meta.WrittenAt.IsZero():
+		next = meta.WrittenAt.Add(refreshFallbackInterval)
+	default:
+		next = now.Add(refreshFallbackInterval)
 	}
-	return expiry.Add(-refreshBeforeExpiry)
+	if floor := lastSuccess.Add(refreshRetryInterval); !lastSuccess.IsZero() && next.Before(floor) {
+		return floor
+	}
+	return next
+}
+
+// withoutStaleFailure drops a recorded refresh failure of another session uid
+// or one older than the last write of session.json (a login or another
+// process's refresh).
+func withoutStaleFailure(meta sessionMetadata, health sessionRefreshState) sessionRefreshState {
+	if health.LastError == "" {
+		return health
+	}
+	otherSession := health.FailureUID != meta.UID
+	rewritten := !meta.WrittenAt.IsZero() && meta.WrittenAt.After(health.LastAttempt)
+	if !otherSession && !rewritten {
+		return health
+	}
+	health.LastError = ""
+	health.ActionRequired = false
+	health.FailureUID = ""
+	health.NextAttempt = time.Time{}
+	health.ConsecutiveFailures = 0
+	return health
+}
+
+// currentRefreshState applies withoutStaleFailure to the stored refresh state
+// and keeps the result.
+func currentRefreshState(meta sessionMetadata) sessionRefreshState {
+	refreshMu.Lock()
+	defer refreshMu.Unlock()
+	refreshState = withoutStaleFailure(meta, refreshState)
+	return refreshState
+}
+
+// observeSessionUID records uid and returns when it last changed while the
+// tray ran; the first observation has no change time.
+func observeSessionUID(uid string, now time.Time) time.Time {
+	sessionChange.Lock()
+	defer sessionChange.Unlock()
+	if sessionChange.seen && uid != sessionChange.uid {
+		sessionChange.at = now
+	}
+	sessionChange.seen = true
+	sessionChange.uid = uid
+	return sessionChange.at
 }
 
 func refreshTitle(now time.Time, meta sessionMetadata, hasSession bool, health sessionRefreshState) string {
 	switch {
 	case !hasSession:
 		return "Refresh: No session"
+	case !validSessionShape(meta):
+		return "Refresh: Reconnect required"
 	case health.InProgress:
 		return "Refresh: Updating..."
 	case refreshActionRequiredForSession(meta, health):
@@ -539,24 +600,23 @@ func refreshTitle(now time.Time, meta sessionMetadata, hasSession bool, health s
 	case !health.LastSuccess.IsZero():
 		return "Refresh: Last refreshed " + relativeTime(health.LastSuccess)
 	}
-	next := nextRefreshAttempt(now, meta)
-	if next.IsZero() {
-		return "Refresh: Scheduled"
-	}
+	next := nextRefreshAttempt(now, meta, health.LastSuccess)
 	if !now.Before(next) {
 		return "Refresh: Due now"
 	}
 	return "Refresh: Due in " + compactDuration(next.Sub(now))
 }
 
+// clearRefreshState keeps InProgress so that a refresh still running for the
+// replaced session blocks a second one; its result is dropped by uid.
 func clearRefreshState() {
 	refreshMu.Lock()
 	defer refreshMu.Unlock()
-	refreshState = sessionRefreshState{}
+	refreshState = sessionRefreshState{InProgress: refreshState.InProgress}
 }
 
 func refreshActionRequiredForSession(meta sessionMetadata, health sessionRefreshState) bool {
-	return health.ActionRequired && health.ActionSessionID != "" && health.ActionSessionID == meta.SessionID
+	return health.ActionRequired && health.FailureUID != "" && health.FailureUID == meta.UID
 }
 
 func parseRefreshCommandResult(out []byte) (refreshCommandResult, bool) {
@@ -670,22 +730,22 @@ func statusTooltip(report config.StatusReport) string {
 		return "Proton LFS — Transferring…"
 	case report.State == config.StateRateLimited:
 		if report.ErrorDetail != "" {
-			return fmt.Sprintf("Proton LFS — Rate Limited: %s%s", truncate(report.ErrorDetail, 60), statusMetadataSuffix(report))
+			return fmt.Sprintf("Proton LFS — Rate Limited: %s%s", bridgeproto.Truncate(report.ErrorDetail, 60), statusMetadataSuffix(report))
 		}
 		return "Proton LFS — Rate Limit Active" + statusMetadataSuffix(report)
 	case report.State == config.StateAuthRequired:
 		if report.ErrorDetail != "" {
-			return fmt.Sprintf("Proton LFS — Authentication Required: %s", truncate(report.ErrorDetail, 60))
+			return fmt.Sprintf("Proton LFS — Authentication Required: %s", bridgeproto.Truncate(report.ErrorDetail, 60))
 		}
 		return "Proton LFS — Authentication Required"
 	case report.State == config.StateCaptcha:
 		return "Proton LFS — CAPTCHA Verification Required"
 	case report.State == config.StateError:
 		if report.ErrorCode != "" && report.ErrorDetail != "" {
-			return fmt.Sprintf("Proton LFS — %s: %s%s", report.ErrorCode, truncate(report.ErrorDetail, 50), statusMetadataSuffix(report))
+			return fmt.Sprintf("Proton LFS — %s: %s%s", report.ErrorCode, bridgeproto.Truncate(report.ErrorDetail, 50), statusMetadataSuffix(report))
 		}
 		if report.Error != "" {
-			return fmt.Sprintf("Proton LFS — Error: %s%s", truncate(report.Error, 60), statusMetadataSuffix(report))
+			return fmt.Sprintf("Proton LFS — Error: %s%s", bridgeproto.Truncate(report.Error, 60), statusMetadataSuffix(report))
 		}
 		return "Proton LFS — Error" + statusMetadataSuffix(report)
 	case report.State == config.StateOK && !report.Timestamp.IsZero():
@@ -761,14 +821,4 @@ func relativeTime(t time.Time) string {
 	default:
 		return fmt.Sprintf("%dd ago", int(d.Hours()/24))
 	}
-}
-
-// truncate shortens s to limit runes, ending with an ellipsis. It counts
-// runes, not bytes, so the result is always valid UTF-8.
-func truncate(s string, limit int) string {
-	if utf8.RuneCountInString(s) <= limit {
-		return s
-	}
-	runes := []rune(s)
-	return string(runes[:limit-1]) + "…"
 }

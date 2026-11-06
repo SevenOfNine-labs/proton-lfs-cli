@@ -141,9 +141,8 @@ requirements:
     tests:
       - tests/integration/git_lfs_sdk_backend_test.go
     gaps:
-      - real mode requires an existing browser-fork Proton session plus
-        optional mailbox/data-password unlock material in pass-cli or
-        git-credential
+      - real mode requires an existing browser-fork Proton session whose key
+        password is stored in pass-cli or git-credential
 
   - id: CT-SDK-003
     source: docs/architecture/proton-sdk-bridge.md
@@ -185,7 +184,7 @@ requirements:
 
   - id: CT-CLI-002
     source: docs/security/threat-model.md
-    clause: credential-injection-via-stdin
+    clause: bridge-request-via-stdin-without-credentials
     scope: adapter-bridge
     status: covered
     tests:
@@ -263,12 +262,12 @@ requirements:
       - cmd/adapter/bridge_contract_test.go
       - cmd/adapter/bridge_test.go
       - cmd/adapter/backend_test.go
-      - cmd/adapter/gitcred_test.go
+      - tests/integration/credential_security_test.go
     requirement: >-
-      Root bridge requests may include only bridge operation fields
-      and local unlock selectors. They must not include `credentialProvider`,
-      `allowLogin`, username, password, mailbox password, or second-factor
-      login fields.
+      Root bridge requests may include only `storageBase`, `appVersion`
+      and the operation fields of the command. They must not include
+      `credentialProvider`, `allowLogin`, username, password, credential
+      provider or host selectors, or second-factor fields.
 
   - id: AUTH-004
     source: submodules/proton-drive-cli/schemas/bridge/v1/auth-state-payload.schema.json
@@ -282,8 +281,9 @@ requirements:
       - tests/integration/git_lfs_e2e_mock_test.go
     requirement: >-
       Transfer setup must call `bridge auth-state` before `init`,
-      reject any `willAttemptNetwork=true` payload, and fail closed for every
-      non-ready state without invoking any login command.
+      reject any `willAttemptNetwork=true` payload, continue only for ready
+      and session_expired (bridge init refreshes the access token), and fail
+      closed for every other state without invoking any login command.
 
   - id: AUTH-005
     source: submodules/proton-drive-cli/schemas/bridge/v1/auth-state-payload.schema.json
@@ -296,9 +296,9 @@ requirements:
       - internal/preflight/doctor_test.go
       - tests/integration/git_lfs_e2e_mock_test.go
     requirement: >-
-      `ready`, `needs_login`, `needs_data_password`,
-      `needs_key_password`, `session_expired`, `session_invalid`, and
-      `configuration_error` must each have deterministic root classification.
+      `ready`, `needs_login`, `session_invalid`, `session_expired` and
+      `needs_key_password` must each have
+      deterministic root classification.
 
   - id: AUTH-006
     source: NIST SP 800-63B
@@ -309,12 +309,14 @@ requirements:
       - submodules/proton-drive-cli/src/auth/session.test.ts
       - submodules/proton-drive-cli/src/auth/key-password-store.test.ts
       - submodules/proton-drive-cli/src/auth/browser-fork.test.ts
+      - submodules/proton-drive-cli/src/auth/index.test.ts
       - tests/integration/credential_security_test.go
     requirement: >-
       Session tokens and browser-fork key passwords must be stored
       only in owner-restricted session files or the configured secure local
-      provider, and failed persistence must clean up derived key-password
-      material.
+      provider. Failed persistence, logout, a login with a new session UID
+      and a refresh token the API rejects must remove the key-password
+      entry of the affected session.
 
   - id: AUTH-007
     source: docs/operations/live-canary-runbook.md
@@ -405,4 +407,4 @@ propagation:
     requirement: subprocess must accept JSON on stdin and return JSON envelope on stdout
   - from: CT-CLI-002
     to: proton-drive-cli
-    requirement: credentials must be received via stdin, never via command-line arguments
+    requirement: bridge requests must be received via stdin, never via command-line arguments, and carry no credentials

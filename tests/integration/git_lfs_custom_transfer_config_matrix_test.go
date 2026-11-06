@@ -49,7 +49,6 @@ func TestGitLFSCustomTransferDirectionUploadOnlyAllowsPushAndRejectsPull(t *test
 	configureLocalCustomTransferDirection(t, s.repoPath, s, "upload")
 	oid := mustReadSingleOID(t, s)
 
-	// Upload path should work with upload-only direction.
 	mustRun(t, s.repoPath, s.env, s.gitBin, "push", "origin", "main")
 	mustRun(t, s.repoPath, s.env, s.gitLFSBin, "push", "origin", "main")
 

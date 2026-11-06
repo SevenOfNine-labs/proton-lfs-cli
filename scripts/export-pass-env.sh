@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Export only the Proton Pass CLI binary used by proton-drive-cli providers.
-# Account usernames/passwords are browser-fork-only and are never exported for
-# Git LFS transfers.
+# Prints the export of PROTON_PASS_CLI_BIN, the pass-cli binary that
+# proton-drive-cli uses as key-password provider.
 DEFAULT_PASS_CLI_BIN="${PROTON_PASS_CLI_BIN:-pass-cli}"
 
 usage() {
@@ -13,12 +12,8 @@ Usage:
 
 Options:
   --pass-cli <bin>        pass-cli binary path (default: pass-cli)
-  --skip-check            do not validate references through pass-cli
+  --skip-check            do not check that pass-cli is installed and logged in
   -h, --help              show this help
-
-This helper does not export Proton account username/password references.
-Browser-fork login and two-password unlocks are resolved by proton-drive-cli
-through the selected provider (`pass-cli` or `git-credential`).
 EOF
 }
 
@@ -34,10 +29,6 @@ while [[ $# -gt 0 ]]; do
       fi
       PASS_CLI_BIN="$2"
       shift 2
-      ;;
-    --ref-root | --username-ref | --password-ref)
-      echo "Account credential reference options were removed; browser-fork auth searches provider vaults directly." >&2
-      exit 2
       ;;
     --skip-check)
       SKIP_CHECK="true"
@@ -81,9 +72,4 @@ shell_quote() {
 
 cat <<EOF
 export PROTON_PASS_CLI_BIN=$(shell_quote "$PASS_CLI_BIN")
-unset PROTON_PASS_REF_ROOT
-unset PROTON_PASS_USERNAME_REF
-unset PROTON_PASS_PASSWORD_REF
-unset PROTON_USERNAME
-unset PROTON_PASSWORD
 EOF

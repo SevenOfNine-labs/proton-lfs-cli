@@ -9,11 +9,9 @@ import (
 var testAuthStates = []string{
 	"ready",
 	"needs_login",
-	"needs_data_password",
 	"needs_key_password",
 	"session_expired",
 	"session_invalid",
-	"configuration_error",
 }
 
 func doctorJSON(state string, transferReady bool, liveCanaryReady bool, extra string) []byte {
@@ -43,14 +41,13 @@ func boolJSON(value bool) string {
 	return "false"
 }
 
-func TestValidateDoctorReadinessAllowsReadyBrowserForkLiveCanary(t *testing.T) {
+func TestValidateDoctorReadinessAllowsReadyLiveCanary(t *testing.T) {
 	readiness, err := ValidateDoctorReadiness(
-		doctorJSON("ready", true, true, `"authMode":"browser-fork"`),
+		doctorJSON("ready", true, true, ""),
 		testAuthStates,
 		DoctorReadinessRequirements{
 			RequireLiveCanary: true,
 			RequireState:      "ready",
-			RequireAuthMode:   "browser-fork",
 		},
 	)
 	if err != nil {
@@ -63,7 +60,7 @@ func TestValidateDoctorReadinessAllowsReadyBrowserForkLiveCanary(t *testing.T) {
 
 func TestValidateDoctorReadinessAllowsReadyTransfer(t *testing.T) {
 	readiness, err := ValidateDoctorReadiness(
-		doctorJSON("ready", true, true, `"authMode":"browser-fork"`),
+		doctorJSON("ready", true, true, ""),
 		testAuthStates,
 		DoctorReadinessRequirements{
 			RequireTransfer: true,
@@ -80,14 +77,14 @@ func TestValidateDoctorReadinessAllowsReadyTransfer(t *testing.T) {
 
 func TestValidateDoctorReadinessRejectsBlockedTransfer(t *testing.T) {
 	_, err := ValidateDoctorReadiness(
-		doctorJSON("needs_data_password", false, false, ""),
+		doctorJSON("needs_key_password", false, false, ""),
 		testAuthStates,
 		DoctorReadinessRequirements{RequireTransfer: true},
 	)
 	if err == nil {
 		t.Fatal("expected blocked transfer error")
 	}
-	for _, want := range []string{"authState=needs_data_password", "fix the local blocker"} {
+	for _, want := range []string{"authState=needs_key_password", "fix the local blocker"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("error missing %q: %v", want, err)
 		}
@@ -143,31 +140,17 @@ func TestValidateDoctorReadinessRejectsUnknownAuthState(t *testing.T) {
 	}
 }
 
-func TestValidateDoctorReadinessRequiresBrowserForkReadyTransfer(t *testing.T) {
+func TestValidateDoctorReadinessRejectsStateMismatch(t *testing.T) {
 	_, err := ValidateDoctorReadiness(
-		doctorJSON("ready", true, true, `"authMode":"legacy"`),
+		doctorJSON("session_expired", true, true, ""),
 		testAuthStates,
 		DoctorReadinessRequirements{
 			RequireTransfer: true,
 			RequireState:    "ready",
-			RequireAuthMode: "browser-fork",
 		},
 	)
-	if err == nil || !strings.Contains(err.Error(), "auth mode mismatch") {
-		t.Fatalf("expected auth mode mismatch, got %v", err)
-	}
-
-	_, err = ValidateDoctorReadiness(
-		doctorJSON("ready", true, true, `"authMode":"browser-fork"`),
-		testAuthStates,
-		DoctorReadinessRequirements{
-			RequireTransfer: true,
-			RequireState:    "ready",
-			RequireAuthMode: "browser-fork",
-		},
-	)
-	if err != nil {
-		t.Fatalf("expected browser-fork ready transfer to pass, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "auth state mismatch") {
+		t.Fatalf("expected auth state mismatch, got %v", err)
 	}
 }
 

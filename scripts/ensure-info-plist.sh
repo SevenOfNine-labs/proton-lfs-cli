@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ensure-info-plist.sh — Write Info.plist (always regenerated to stay current).
+# ensure-info-plist.sh — Write the Info.plist of the macOS .app bundle.
 # Usage: ensure-info-plist.sh <plist-path> <version>
 set -euo pipefail
 

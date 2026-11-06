@@ -9,16 +9,11 @@ import (
 	"testing"
 )
 
-// TestE2EMockedPipeline exercises the full Git LFS pipeline through the
-// adapter and mock proton-drive-cli bridge subprocess (direct subprocess,
-// no HTTP bridge).
-//
-// Prerequisites:
-//   - PROTON_DRIVE_CLI_BIN points at mock-proton-drive-cli.js
+// TestE2EMockedPipeline pushes and pulls one object through the adapter and
+// tests/testdata/mock-proton-drive-cli.js (or PROTON_DRIVE_CLI_BIN).
 func TestE2EMockedPipeline(t *testing.T) {
 	root := repoRoot(t)
 
-	// Verify mock infrastructure is available.
 	mockBridge := os.Getenv("PROTON_DRIVE_CLI_BIN")
 	if mockBridge == "" {
 		mockBridge = filepath.Join(root, "tests", "testdata", "mock-proton-drive-cli.js")
@@ -27,23 +22,18 @@ func TestE2EMockedPipeline(t *testing.T) {
 		t.Skipf("mock bridge not found at %s: %v", mockBridge, err)
 	}
 
-	// Set up mock storage directory for the bridge.
 	mockStorageDir := filepath.Join(t.TempDir(), "mock-bridge-storage")
 
-	// Build adapter and set up repository.
 	s := setupRepositoryForUpload(t)
 
-	// Build bridge environment. Account auth is represented by mock auth-state.
 	sdkEnv := append(
 		s.env,
 		"PROTON_DRIVE_CLI_BIN="+mockBridge,
 		"MOCK_BRIDGE_STORAGE_DIR="+mockStorageDir,
 	)
 
-	// Configure Git LFS to use the SDK backend pointing at mock bridge.
 	configureSDKCustomTransfer(t, s.repoPath, sdkEnv, s.gitBin, s.adapterPath, mockBridge)
 
-	// Verify the OID from the tracked file.
 	lsFilesOutput := mustRun(t, s.repoPath, sdkEnv, s.gitLFSBin, "ls-files", "-l")
 	fields := strings.Fields(strings.TrimSpace(lsFilesOutput))
 	if len(fields) == 0 {
@@ -54,30 +44,25 @@ func TestE2EMockedPipeline(t *testing.T) {
 		t.Fatalf("expected 64-char oid, got: %q", oid)
 	}
 
-	// Push commits and LFS objects.
 	mustRun(t, s.repoPath, sdkEnv, s.gitBin, "push", "origin", "main")
 	lfsPushOutput := mustRun(t, s.repoPath, sdkEnv, s.gitLFSBin, "push", "origin", "main")
 	if strings.Contains(strings.ToLower(lfsPushOutput), "error") {
 		t.Fatalf("unexpected error in lfs push output:\n%s", lfsPushOutput)
 	}
 
-	// Clone into a fresh directory, skipping LFS smudge.
 	cloneBase := t.TempDir()
 	clonePath := filepath.Join(cloneBase, "clone")
 	cloneEnv := append(sdkEnv, "GIT_LFS_SKIP_SMUDGE=1")
 	mustRun(t, cloneBase, cloneEnv, s.gitBin, "clone", s.remotePath, clonePath)
 
-	// Install LFS and configure the clone to use our adapter.
 	mustRun(t, clonePath, sdkEnv, s.gitLFSBin, "install", "--local")
 	configureSDKCustomTransfer(t, clonePath, sdkEnv, s.gitBin, s.adapterPath, mockBridge)
 
-	// Pull LFS objects.
 	out, err := runCmd(clonePath, sdkEnv, s.gitLFSBin, "pull", "origin", "main")
 	if err != nil {
 		t.Fatalf("expected lfs pull to succeed, err: %v\noutput:\n%s", err, out)
 	}
 
-	// Verify downloaded content matches the original.
 	artifactPath := filepath.Join(clonePath, "artifact.bin")
 	contents, err := os.ReadFile(artifactPath)
 	if err != nil {

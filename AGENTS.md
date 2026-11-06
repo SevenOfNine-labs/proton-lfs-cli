@@ -2,7 +2,7 @@
 
 ## Repository Identity
 
-- Canonical repository name: `proton-lfs-cli` (renamed from `proton-git-lfs`).
+- Canonical repository name: `proton-lfs-cli` (`github.com/SevenOfNine-labs/proton-lfs-cli`).
 - Keep instruction files aligned with `submodules/proton-drive-cli/AGENTS.md` and `submodules/proton-drive-cli/CLAUDE.md`.
 
 
@@ -10,10 +10,10 @@
 
 - `cmd/adapter/`: Go Git LFS custom transfer adapter (`main.go` protocol loop, `backend.go` local and Proton Drive backends, `bridge.go` proton-drive-cli subprocess client with JSON stdin/stdout).
 - `cmd/tray/`: System tray app and `proton-lfs-tray` command-line helpers.
-- `internal/config/`: Shared constants, status file and preferences; `internal/preflight/`: parser of `proton-drive-cli doctor --json` for the canary gates.
+- `internal/config/`: Shared constants, status file and preferences; `internal/bridgeproto/`: bridge envelope parser, environment allowlist and redaction shared by adapter and tray; `internal/preflight/`: parser of `proton-drive-cli doctor --json` for the canary gates.
 - `tests/integration/`: Black-box Git LFS integration tests for protocol, concurrency, adapter exit, failure modes, credentials, and the sdk backend.
 - `scripts/`: Build, packaging, install, and canary scripts.
-- `docs/`: Architecture, operations, reference, testing, security, and history docs (start at `docs/README.md`).
+- `docs/`: Architecture, operations, reference, testing, and security docs (start at `docs/README.md`).
 - `submodules/`: Upstream dependencies (`git-lfs`, `pass-cli`, `proton-drive-cli`) used for reference and integration.
 
 ## Build, Test, and Development Commands
@@ -23,11 +23,11 @@
 - `make test`: Run the Go unit tests for `./cmd/...` and `./internal/...`.
 - `cd submodules/proton-drive-cli && yarn test`: Run the proton-drive-cli Jest tests.
 - `make test-integration`: Run Go integration tests (`-tags integration`).
-- `make check-sdk-prereqs && make test-integration-sdk`: Validate/pass-cli-driven SDK integration path.
+- `make check-sdk-prereqs && make test-integration-sdk`: Validate prerequisites, then run the SDK integration path against a saved browser-fork session (requires a logged-in pass-cli unless `KEY_PASSWORD_PROVIDER=git-credential`).
 - `make build-drive-cli`: Build the proton-drive-cli TypeScript bridge.
 - `make test-e2e-mock`: Run the mocked end-to-end pipeline through `tests/testdata/mock-proton-drive-cli.js`.
 - `make test-integration-credentials`: Run credential flow security tests.
-- `make fmt && make lint`: Run formatting and lint checks before pushing.
+- `make fmt && make lint`: Run formatting and lint checks (go vet, golangci-lint, comment policy) before pushing.
 
 ## Coding Style & Naming Conventions
 
@@ -42,7 +42,45 @@
 - Add unit tests with every behavior change in both Go and TypeScript layers.
 - Add/extend integration tests in `tests/integration/` for protocol or workflow changes.
 - Target meaningful coverage on new code paths (project guidance: ~80%+ for new logic).
-- For SDK backend checks, set prerequisites first (`pass-cli login` and `make build-drive-cli`).
+- For SDK backend checks, set prerequisites first (`make build-drive-cli`, one `proton-drive-cli login --key-password-provider <provider>`, and `pass-cli login` when the provider is pass-cli; the Makefile reads the provider from `KEY_PASSWORD_PROVIDER`).
+
+## Code Comments and Legacy (MANDATORY)
+
+Comments carry only what the code cannot say: the normative source behind a
+decision. Every comment is one of:
+
+- a reference to a standard or specification, with the section where useful
+  (RFC 9580 OpenPGP, RFC 9110 HTTP, RFC 2119 keywords, POSIX `rename(2)`,
+  Git LFS custom transfer specification, Desktop Entry Specification 1.5,
+  XDG Base Directory, JSON Schema 2020-12, NIST SP 800-38D AES-GCM, ...);
+- a reference to a scientific publication or a named algorithm (SRP-6a,
+  Argon2, ...);
+- a reference to external documentation of an API or tool the code relies
+  on, naming the file, function or URL (Proton Drive SDK and account module
+  sources, Node.js, Go standard library, man pages);
+- a one- or two-line statement of an invariant or contract that a reader
+  cannot infer from the code (for example "rename(2) replaces the target
+  atomically"), or the API contract in a doc comment of an exported symbol.
+
+Forbidden in comments, documentation and commit-facing text alike:
+
+- history and legacy notes: what the code did before, earlier versions,
+  former names, "previously", "no longer", "used to", "kept for
+  compatibility", "since version X", migration stories;
+- excuses, hedges and placeholders: "for now", "workaround", "hack",
+  "temporary fix", "TODO", "FIXME", "XXX", "unfortunately", "hopefully";
+- narration of what the next lines do, change logs, author notes, and
+  references to issues or pull requests in place of the specification;
+- comments longer than three lines outside doc comments of exported APIs.
+
+No legacy code: code, options, configuration keys, file formats, schema
+fields and documentation that exist only to serve an earlier version are
+deleted, not kept behind a comment or a migration. History lives in Git and
+in the generated changelog.
+
+`scripts/check-comment-policy.sh` enforces the forbidden vocabulary on every
+commit (pre-commit) and in CI; reviews treat any other violation of this
+section as a defect.
 
 ## Changeset Tracking (MANDATORY)
 
