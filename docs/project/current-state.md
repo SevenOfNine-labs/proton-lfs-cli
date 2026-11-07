@@ -13,10 +13,12 @@ Date: 2026-11-06
   payloads.
 - Account login is browser-fork-only (`proton-drive-cli login`). The fork
   delivers the key password for every account type; proton-drive-cli stores
-  it, keyed by the session UID, through its key-password provider
-  (`pass-cli` or `git-credential`). Git LFS transfers receive no credentials.
+  it with the session tokens as one entry, keyed by the session UID, in its
+  credential store (`pass-cli`, or `git-credential` with an OS secret-store
+  helper); `session.json` holds no secret. Git LFS transfers receive no
+  credentials.
 - Transfers call `bridge auth-state` before `bridge init` and refuse
-  `needs_login`, `session_invalid` and `needs_key_password` without starting
+  `needs_login`, `session_invalid` and `credentials_unavailable` without starting
   a login; `session_expired` continues to `bridge init`, which refreshes the
   access token.
 - Bridge requests carry only `storageBase`, `appVersion` and the command
@@ -24,16 +26,17 @@ Date: 2026-11-06
   request-field rules are versioned in `proton-drive-cli`; root Go contract
   tests verify the adapter's request shapes, the auth states and the 27
   bridge error codes against them.
-- A stored key password that is missing or does not decrypt the account keys
-  is reported as `key_password_required` with the instruction to run
-  `proton-drive-cli login`.
+- A session entry the credential store cannot return, or whose key password
+  does not decrypt the account keys, is reported as `credentials_unavailable`
+  with the instruction to fix the store or run `proton-drive-cli login`.
 - An expired access token does not block transfers: `bridge init` refreshes
   it before use.
-- Session lifecycle in proton-drive-cli: logout removes the key-password
-  entry, revokes the session and deletes the local session files; a login
-  that yields a new UID removes the previous UID's key-password entry; a
-  refresh token the API rejects with a Proton error body and HTTP 4xx
-  other than 408 and 429 signs the session out (session file, crypto cache and key-password entry deleted).
+- Session lifecycle in proton-drive-cli: every token refresh rewrites the
+  credential-store entry; logout removes the entry, revokes the session and
+  deletes the local session files; a login that yields a new UID removes the
+  previous UID's entry; a refresh token the API rejects with a Proton error
+  body and HTTP 4xx other than 408 and 429 signs the session out (session
+  file, crypto cache and credential-store entry deleted).
 - Security hardening: OID validation, path traversal prevention, one bridge subprocess per command with a size-scaled timeout (`--bridge-timeout`, default 5 min, plus 1 s per 256 KiB) and process-group kill on expiry.
 - Security tests: malicious OIDs never reach the bridge, secret-shaped
   environment variables are not forwarded, OID case is normalized, session
@@ -109,7 +112,7 @@ SDK integration path (one real Proton Drive round trip per test):
 
 ```bash
 pass-cli login
-proton-drive-cli login --key-password-provider pass-cli
+proton-drive-cli login --credential-store pass-cli
 eval "$(make -s pass-env)"
 make check-sdk-prereqs
 make test-integration-sdk

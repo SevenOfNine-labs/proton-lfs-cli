@@ -52,7 +52,7 @@ func setupFakeHome(t *testing.T, opts fakeHomeOpts) string {
 			t.Fatal(err)
 		}
 		if err := os.WriteFile(filepath.Join(dir, "session.json"),
-			[]byte(`{"uid":"test","accessToken":"test","refreshToken":"test","keyPasswordProvider":"pass-cli","keyPasswordHost":"proton-drive-key.proton-lfs-cli.local"}`), 0o600); err != nil {
+			[]byte(`{"uid":"test","credentialStore":"pass-cli","credentialHost":"proton-drive-cli.invalid","revision":"rev-1"}`), 0o600); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -96,11 +96,11 @@ func TestCliStatusConnectedOK(t *testing.T) {
 		State: config.StateOK, LastOp: "upload", Timestamp: ts,
 	})
 	home := setupFakeHome(t, fakeHomeOpts{
-		configJSON: `{"keyPasswordProvider":"pass-cli"}`,
+		configJSON: `{"credentialStore":"pass-cli"}`,
 		statusJSON: string(statusJSON),
 	})
 	session := validStatusTestSession(time.Now())
-	session.KeyPasswordProvider = "git-credential"
+	session.CredentialStore = "git-credential"
 	writeSessionForStatusTest(t, home, session)
 	setupGitConfig(t, "[lfs]\n\tstandalonetransferagent = proton\n")
 
@@ -112,9 +112,9 @@ func TestCliStatusConnectedOK(t *testing.T) {
 		t.Fatalf("expected exit 0, got %d", code)
 	}
 	for _, want := range []string{
-		"Session:  logged in, key password in git-credential (proton-drive-key.proton-lfs-cli.local)",
+		"Session:  signed in; credential store git-credential (proton-drive-cli.invalid); proton-drive-cli doctor verifies it",
 		"LFS:      enabled",
-		"Provider: pass-cli (next login)",
+		"Store:    pass-cli (next login)",
 		"upload just now (ok)",
 	} {
 		if !strings.Contains(out, want) {
@@ -138,7 +138,7 @@ func TestCliStatusDisconnected(t *testing.T) {
 	for _, want := range []string{
 		"Session:  not connected",
 		"LFS:      not registered",
-		"Provider: pass-cli",
+		"Store:    pass-cli",
 		"Transfer: no data",
 	} {
 		if !strings.Contains(out, want) {
@@ -187,8 +187,8 @@ func TestCliStatusAuthBlockerIsNotRetryable(t *testing.T) {
 	statusJSON, _ := json.Marshal(config.StatusReport{
 		State:     config.StateAuthRequired,
 		LastOp:    "upload",
-		Error:     "stored browser-fork key password required",
-		ErrorCode: "key_password_required",
+		Error:     "Proton session credentials are unavailable from the credential store",
+		ErrorCode: "credentials_unavailable",
 	})
 	setupFakeHome(t, fakeHomeOpts{statusJSON: string(statusJSON)})
 	setupGitConfig(t, "")
@@ -200,8 +200,8 @@ func TestCliStatusAuthBlockerIsNotRetryable(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("expected exit 0, got %d", code)
 	}
-	if !strings.Contains(out, "stored browser-fork key password required") ||
-		!strings.Contains(out, "code=key_password_required") {
+	if !strings.Contains(out, "Proton session credentials are unavailable from the credential store") ||
+		!strings.Contains(out, "code=credentials_unavailable") {
 		t.Errorf("output missing auth blocker details:\n%s", out)
 	}
 	if strings.Contains(out, "retryable") || strings.Contains(out, "temporary") {
@@ -209,9 +209,9 @@ func TestCliStatusAuthBlockerIsNotRetryable(t *testing.T) {
 	}
 }
 
-func TestCliConfigShowAndSetProvider(t *testing.T) {
+func TestCliConfigShowAndSetCredentialStore(t *testing.T) {
 	saveFuncVars(t)
-	setupFakeHome(t, fakeHomeOpts{configJSON: `{"keyPasswordProvider":"pass-cli"}`})
+	setupFakeHome(t, fakeHomeOpts{configJSON: `{"credentialStore":"pass-cli"}`})
 
 	var show bytes.Buffer
 	if code := cliConfig(&show, nil); code != 0 {
@@ -225,11 +225,11 @@ func TestCliConfigShowAndSetProvider(t *testing.T) {
 	if code := cliConfig(&set, []string{"git-credential"}); code != 0 {
 		t.Fatalf("set config exit %d", code)
 	}
-	if !strings.Contains(set.String(), "Key-password provider set to git-credential") {
+	if !strings.Contains(set.String(), "Credential store set to git-credential") {
 		t.Fatalf("unexpected output: %s", set.String())
 	}
-	if prefs := config.LoadPrefs(); prefs.KeyPasswordProvider != "git-credential" {
-		t.Fatalf("expected git-credential in config, got %q", prefs.KeyPasswordProvider)
+	if prefs := config.LoadPrefs(); prefs.CredentialStore != "git-credential" {
+		t.Fatalf("expected git-credential in config, got %q", prefs.CredentialStore)
 	}
 }
 
@@ -241,22 +241,22 @@ func TestCliConfigHelpAndInvalid(t *testing.T) {
 	if code := cliConfig(&help, []string{"--help"}); code != 0 {
 		t.Fatalf("help exit %d", code)
 	}
-	if !strings.Contains(help.String(), "browser-fork key-password provider") {
-		t.Fatalf("help should describe key-password provider:\n%s", help.String())
+	if !strings.Contains(help.String(), "credential store the next login") {
+		t.Fatalf("help should describe the credential store:\n%s", help.String())
 	}
 
 	var invalid bytes.Buffer
 	if code := cliConfig(&invalid, []string{"keychain"}); code != 1 {
-		t.Fatalf("invalid provider exit %d, want 1", code)
+		t.Fatalf("invalid store exit %d, want 1", code)
 	}
-	if !strings.Contains(invalid.String(), "unknown provider") {
-		t.Fatalf("expected unknown provider error, got: %s", invalid.String())
+	if !strings.Contains(invalid.String(), "unknown credential store") {
+		t.Fatalf("expected unknown credential store error, got: %s", invalid.String())
 	}
 }
 
 func TestCliRegisterWritesTransferArgs(t *testing.T) {
 	saveFuncVars(t)
-	setupFakeHome(t, fakeHomeOpts{configJSON: `{"keyPasswordProvider":"git-credential"}`})
+	setupFakeHome(t, fakeHomeOpts{configJSON: `{"credentialStore":"git-credential"}`})
 	gitCfg := setupGitConfig(t, "")
 
 	findAdapter = func() string { return "/tmp/test-adapter" }
@@ -273,7 +273,7 @@ func TestCliRegisterWritesTransferArgs(t *testing.T) {
 		"LFS backend enabled",
 		"adapter: /tmp/test-adapter",
 		"drive-cli: /tmp/test-drive-cli",
-		"provider: git-credential",
+		"store: git-credential",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output missing %q:\n%s", want, out)
@@ -298,7 +298,7 @@ func TestCliRegisterWritesTransferArgs(t *testing.T) {
 
 func TestCliRegisterQuotesDriveCLIPath(t *testing.T) {
 	saveFuncVars(t)
-	setupFakeHome(t, fakeHomeOpts{configJSON: `{"keyPasswordProvider":"pass-cli"}`})
+	setupFakeHome(t, fakeHomeOpts{configJSON: `{"credentialStore":"pass-cli"}`})
 	gitCfg := setupGitConfig(t, "")
 
 	findAdapter = func() string { return "/tmp/test-adapter" }
@@ -335,12 +335,12 @@ func TestCliRegisterNoAdapter(t *testing.T) {
 	}
 }
 
-func TestCliLoginPassesKeyPasswordProvider(t *testing.T) {
-	for _, provider := range []string{"git-credential", "pass-cli"} {
-		t.Run(provider, func(t *testing.T) {
+func TestCliLoginPassesCredentialStore(t *testing.T) {
+	for _, store := range []string{"git-credential", "pass-cli"} {
+		t.Run(store, func(t *testing.T) {
 			saveFuncVars(t)
 			setupFakeHome(t, fakeHomeOpts{
-				configJSON: fmt.Sprintf(`{"keyPasswordProvider":"%s"}`, provider),
+				configJSON: fmt.Sprintf(`{"credentialStore":"%s"}`, store),
 			})
 
 			findDriveCLI = func() string { return "/tmp/test-drive-cli" }
@@ -362,7 +362,7 @@ func TestCliLoginPassesKeyPasswordProvider(t *testing.T) {
 			if gotDriveCLI != "/tmp/test-drive-cli" {
 				t.Fatalf("drive cli = %q", gotDriveCLI)
 			}
-			wantArgs := []string{"--key-password-provider", provider}
+			wantArgs := []string{"--credential-store", store}
 			if !reflect.DeepEqual(gotArgs, wantArgs) {
 				t.Fatalf("login args = %#v, want %#v", gotArgs, wantArgs)
 			}
@@ -375,7 +375,7 @@ func TestCliLoginPassesKeyPasswordProvider(t *testing.T) {
 
 func TestCliLoginLoginFails(t *testing.T) {
 	saveFuncVars(t)
-	setupFakeHome(t, fakeHomeOpts{configJSON: `{"keyPasswordProvider":"pass-cli"}`})
+	setupFakeHome(t, fakeHomeOpts{configJSON: `{"credentialStore":"pass-cli"}`})
 
 	findDriveCLI = func() string { return "/tmp/test-drive-cli" }
 	loginDrive = func(_ string, _ ...string) error {
@@ -394,7 +394,7 @@ func TestCliLoginLoginFails(t *testing.T) {
 
 func TestCliLoginNoBinary(t *testing.T) {
 	saveFuncVars(t)
-	setupFakeHome(t, fakeHomeOpts{configJSON: `{"keyPasswordProvider":"pass-cli"}`})
+	setupFakeHome(t, fakeHomeOpts{configJSON: `{"credentialStore":"pass-cli"}`})
 
 	findDriveCLI = func() string { return "" }
 
@@ -409,7 +409,7 @@ func TestCliLoginNoBinary(t *testing.T) {
 
 func TestCliLoginCreatesSession(t *testing.T) {
 	saveFuncVars(t)
-	home := setupFakeHome(t, fakeHomeOpts{configJSON: `{"keyPasswordProvider":"git-credential"}`})
+	home := setupFakeHome(t, fakeHomeOpts{configJSON: `{"credentialStore":"git-credential"}`})
 	setupGitConfig(t, "")
 
 	findDriveCLI = func() string { return "/tmp/test-drive-cli" }
@@ -419,7 +419,7 @@ func TestCliLoginCreatesSession(t *testing.T) {
 			return err
 		}
 		return os.WriteFile(filepath.Join(dir, "session.json"),
-			[]byte(`{"uid":"test","accessToken":"test","refreshToken":"test","keyPasswordProvider":"pass-cli","keyPasswordHost":"proton-drive-key.proton-lfs-cli.local"}`), 0o600)
+			[]byte(`{"uid":"test","credentialStore":"pass-cli","credentialHost":"proton-drive-cli.invalid","revision":"rev-1"}`), 0o600)
 	}
 
 	var buf bytes.Buffer
@@ -433,7 +433,7 @@ func TestCliLoginCreatesSession(t *testing.T) {
 
 	var statusBuf bytes.Buffer
 	cliStatus(&statusBuf)
-	if !strings.Contains(statusBuf.String(), "Session:  logged in") {
+	if !strings.Contains(statusBuf.String(), "Session:  signed in") {
 		t.Errorf("status should show logged in after connect:\n%s", statusBuf.String())
 	}
 }
@@ -447,7 +447,7 @@ func TestCliStatusReflectsExternalLogin(t *testing.T) {
 	if code := cliStatus(&buf); code != 0 {
 		t.Fatalf("expected exit 0, got %d", code)
 	}
-	if !strings.Contains(buf.String(), "Session:  logged in") {
+	if !strings.Contains(buf.String(), "Session:  signed in") {
 		t.Errorf("status should reflect external session:\n%s", buf.String())
 	}
 }
@@ -498,13 +498,14 @@ func TestCliScopeDiagnosticsLocalRedactsSessionAndDoesNotProbeLive(t *testing.T)
 	saveFuncVars(t)
 	home := setupFakeHome(t, fakeHomeOpts{
 		sessionExists: true,
-		configJSON:    `{"keyPasswordProvider":"pass-cli"}`,
+		configJSON:    `{"credentialStore":"pass-cli"}`,
 	})
 	sessionPath := filepath.Join(home, ".proton-drive-cli", "session.json")
 	if err := os.WriteFile(sessionPath, []byte(`{
 		"uid":"raw-uid",
-		"accessToken":"raw-access-token",
-		"refreshToken":"raw-refresh-token",
+		"credentialStore":"pass-cli",
+		"credentialHost":"proton-drive-cli.invalid",
+		"revision":"9b2c4f7e-3d1a-4e8b-a6c5-0f1e2d3c4b5a",
 		"scopes":["drive","full","self"],
 		"tokenExpiresAt":1893456000000
 	}`), 0o600); err != nil {
@@ -521,7 +522,7 @@ func TestCliScopeDiagnosticsLocalRedactsSessionAndDoesNotProbeLive(t *testing.T)
 		if _, ok := request["folder"]; ok {
 			t.Fatalf("local diagnostics must not send list folder request: %#v", request)
 		}
-		payload := json.RawMessage(`{"state":"ready","hasSession":true,"sessionValid":true,"keyPasswordAvailable":true,"keyPasswordProvider":"pass-cli","willAttemptNetwork":false}`)
+		payload := json.RawMessage(`{"state":"ready","hasSession":true,"sessionValid":true,"credentialsAvailable":true,"credentialStore":"pass-cli","willAttemptNetwork":false}`)
 		return bridgeproto.Response{OK: true, Payload: payload}, nil
 	}
 
@@ -534,12 +535,12 @@ func TestCliScopeDiagnosticsLocalRedactsSessionAndDoesNotProbeLive(t *testing.T)
 		t.Fatalf("commands = %#v", commands)
 	}
 	out := buf.String()
-	for _, secret := range []string{"raw-access-token", "raw-refresh-token", "raw-uid"} {
+	for _, secret := range []string{"raw-uid", "9b2c4f7e-3d1a-4e8b-a6c5-0f1e2d3c4b5a"} {
 		if strings.Contains(out, secret) {
 			t.Fatalf("diagnostics leaked %q:\n%s", secret, out)
 		}
 	}
-	for _, want := range []string{"\"drive\"", "\"keyPasswordAvailable\": true", "\"keyPasswordProvider\": \"pass-cli\"", "\"rawTokenValuesIncluded\": false"} {
+	for _, want := range []string{"\"drive\"", "\"credentialsAvailable\": true", "\"credentialStore\": \"pass-cli\"", "\"credentialHost\": \"proton-drive-cli.invalid\"", "\"rawTokenValuesIncluded\": false"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("diagnostics missing %q:\n%s", want, out)
 		}
@@ -548,7 +549,7 @@ func TestCliScopeDiagnosticsLocalRedactsSessionAndDoesNotProbeLive(t *testing.T)
 
 func TestCliScopeDiagnosticsLiveRequiresAcknowledgementBeforeList(t *testing.T) {
 	saveFuncVars(t)
-	setupFakeHome(t, fakeHomeOpts{configJSON: `{"keyPasswordProvider":"pass-cli"}`})
+	setupFakeHome(t, fakeHomeOpts{configJSON: `{"credentialStore":"pass-cli"}`})
 	findDriveCLI = func() string { return "/tmp/proton-drive-cli" }
 
 	var commands []string
@@ -578,7 +579,7 @@ func TestCliScopeDiagnosticsLiveRequiresAcknowledgementBeforeList(t *testing.T) 
 
 func TestCliScopeDiagnosticsLiveSkipsProbeWhenAuthStateNotReady(t *testing.T) {
 	saveFuncVars(t)
-	setupFakeHome(t, fakeHomeOpts{configJSON: `{"keyPasswordProvider":"pass-cli"}`})
+	setupFakeHome(t, fakeHomeOpts{configJSON: `{"credentialStore":"pass-cli"}`})
 	t.Setenv("PROTON_LFS_LIVE_CANARY", scopeLiveAckValue)
 	findDriveCLI = func() string { return "/tmp/proton-drive-cli" }
 
@@ -610,7 +611,7 @@ func TestCliScopeDiagnosticsLiveSkipsProbeWhenAuthStateNotReady(t *testing.T) {
 func TestCliScopeDiagnosticsLiveInsufficientScopeHardStopRedacts(t *testing.T) {
 	saveFuncVars(t)
 	setupFakeHome(t, fakeHomeOpts{
-		configJSON: `{"keyPasswordProvider":"pass-cli"}`,
+		configJSON: `{"credentialStore":"pass-cli"}`,
 	})
 	t.Setenv("PROTON_LFS_LIVE_CANARY", scopeLiveAckValue)
 	t.Setenv(config.EnvStorageBase, "")
@@ -685,7 +686,7 @@ func TestUsageContainsSubcommands(t *testing.T) {
 func TestCliStatusReportsInvalidSessionFile(t *testing.T) {
 	saveFuncVars(t)
 	home := setupFakeHome(t, fakeHomeOpts{})
-	writeSessionForStatusTest(t, home, sessionMetadata{AccessToken: "test"})
+	writeSessionForStatusTest(t, home, sessionMetadata{UID: "test"})
 	setupGitConfig(t, "")
 
 	var buf bytes.Buffer

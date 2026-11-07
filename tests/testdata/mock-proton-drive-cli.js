@@ -55,19 +55,19 @@ function storagePath(oid) {
 if (command === 'auth-state') {
   const state = process.env.MOCK_BRIDGE_AUTH_STATE || 'ready';
   const hasSession = state !== 'needs_login';
-  const keyPasswordAvailable =
-    process.env.MOCK_BRIDGE_KEY_PASSWORD_AVAILABLE === 'true' || state === 'ready';
+  const credentialsAvailable =
+    process.env.MOCK_BRIDGE_CREDENTIALS_AVAILABLE === 'true' || state === 'ready';
   write({
     ok: true,
     payload: {
       state,
       hasSession,
-      sessionValid: state === 'ready' || state === 'needs_key_password',
+      sessionValid: state === 'ready' || state === 'credentials_unavailable',
       sessionExpired: state === 'session_expired',
       sessionUidPresent: hasSession,
-      keyPasswordAvailable,
-      keyPasswordProvider: process.env.MOCK_BRIDGE_KEY_PASSWORD_PROVIDER || 'git-credential',
-      keyPasswordHost: process.env.MOCK_BRIDGE_KEY_PASSWORD_HOST || 'proton-drive-key.proton-lfs-cli.local',
+      credentialsAvailable,
+      credentialStore: process.env.MOCK_BRIDGE_CREDENTIAL_STORE || 'git-credential',
+      credentialHost: process.env.MOCK_BRIDGE_CREDENTIAL_HOST || 'proton-drive-cli.invalid',
       willAttemptNetwork: false,
       errors: [],
       actions: []

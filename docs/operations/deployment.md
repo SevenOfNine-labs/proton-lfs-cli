@@ -11,8 +11,9 @@ and what is open.
 - Node.js per `.node-version` (26, the active LTS line) for building the
   `proton-drive-cli` SEA binary and for CI; Node.js 22+ is the runtime floor
   of `proton-drive-cli/dist/index.js` (`engines.node`).
-- `pass-cli` 2.7.0 when Proton Pass stores the browser-fork key password;
-  the `git-credential` provider needs no extra tool.
+- `pass-cli` 2.7.0 when Proton Pass is the credential store; the
+  `git-credential` store needs a git credential helper that encrypts secrets
+  at rest (`osxkeychain`, `wincred`, `libsecret` or Git Credential Manager).
 
 No .NET SDK and no internal Proton access are required for any path:
 
@@ -50,15 +51,15 @@ SDK-backed path:
 
 ```bash
 pass-cli login
-proton-drive-cli login --key-password-provider pass-cli
+proton-drive-cli login --credential-store pass-cli
 make test-integration-sdk
 ```
 
-Sign in once with `proton-drive-cli login --key-password-provider <provider>`
+Sign in once with `proton-drive-cli login --credential-store <store>`
 before SDK transfers; two-factor authentication and CAPTCHA are completed in
 the browser. The browser fork delivers the key password for every account
-type, and proton-drive-cli stores it, keyed by the session UID, in the
-chosen provider; transfers unlock Drive with it. No password is ever passed
+type, and proton-drive-cli stores it with the session tokens, keyed by the
+session UID, in the chosen credential store; transfers unlock Drive with it. No password is ever passed
 through an environment variable. Check readiness offline with
 `proton-drive-cli doctor`.
 
@@ -109,7 +110,7 @@ copies them to `~/.local/bin` on Linux).
 
 After installing or updating, write the global Git LFS settings for the
 installed programs and sign in whenever `proton-lfs-tray status` does not
-report `logged in, key password in …`:
+report `signed in` or `proton-drive-cli doctor` fails:
 
 ```bash
 proton-lfs-tray register

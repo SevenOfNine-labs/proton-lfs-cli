@@ -41,16 +41,15 @@ var sessionChange struct {
 	at   time.Time
 }
 
-// sessionMetadata is proton-drive-cli's session.json (SessionCredentials in
+// sessionMetadata is proton-drive-cli's session.json (SessionRecord in
 // src/types/auth.ts).
 type sessionMetadata struct {
-	UID                 string   `json:"uid"`
-	AccessToken         string   `json:"accessToken"`
-	RefreshToken        string   `json:"refreshToken"`
-	Scopes              []string `json:"scopes"`
-	KeyPasswordProvider string   `json:"keyPasswordProvider"`
-	KeyPasswordHost     string   `json:"keyPasswordHost"`
-	TokenExpiresAt      int64    `json:"tokenExpiresAt"`
+	UID             string   `json:"uid"`
+	Scopes          []string `json:"scopes"`
+	CredentialStore string   `json:"credentialStore"`
+	CredentialHost  string   `json:"credentialHost"`
+	Revision        string   `json:"revision"`
+	TokenExpiresAt  int64    `json:"tokenExpiresAt"`
 	// WrittenAt is the file's modification time: login and every token
 	// refresh rewrite session.json.
 	WrittenAt time.Time `json:"-"`
@@ -318,16 +317,16 @@ func readSessionMetadata() (sessionMetadata, bool) {
 	return meta, true
 }
 
-// validSessionShape mirrors isSessionCredentials in proton-drive-cli
+// validSessionShape mirrors isSessionRecord in proton-drive-cli
 // src/auth/session.ts.
 func validSessionShape(meta sessionMetadata) bool {
-	for _, field := range []string{meta.UID, meta.AccessToken, meta.RefreshToken, meta.KeyPasswordHost} {
+	for _, field := range []string{meta.UID, meta.CredentialHost, meta.Revision} {
 		if strings.TrimSpace(field) == "" {
 			return false
 		}
 	}
-	return meta.KeyPasswordProvider == config.CredentialProviderPassCLI ||
-		meta.KeyPasswordProvider == config.CredentialProviderGitCredential
+	return meta.CredentialStore == config.CredentialStorePassCLI ||
+		meta.CredentialStore == config.CredentialStoreGitCredential
 }
 
 func tokenExpiry(meta sessionMetadata) time.Time {
@@ -377,11 +376,11 @@ func inspectAuthReadiness(now time.Time) authReadiness {
 		base.blocked = true
 		return base
 	}
-	base.sessionTitle = "Session: Signed in (" + meta.KeyPasswordProvider + ")"
+	base.sessionTitle = "Session: Signed in (" + meta.CredentialStore + ")"
 	if expiry := tokenExpiry(meta); !expiry.IsZero() && !now.Before(expiry) {
 		// Bridge commands refresh an expired access token before use
 		// (proton-drive-cli src/sdk/client.ts loadUsableSession).
-		base.sessionTitle = "Session: Signed in (" + meta.KeyPasswordProvider + "), token refresh due"
+		base.sessionTitle = "Session: Signed in (" + meta.CredentialStore + "), token refresh due"
 	}
 	base.statusTitle = "Status: Ready"
 	base.transferTitle = "Transfers: Ready"

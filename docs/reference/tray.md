@@ -13,12 +13,12 @@ ship it as `proton-lfs-tray`; `make install` also links it as
 | Invocation | Does | Exit status |
 | --- | --- | --- |
 | `proton-lfs-tray` | Start the tray. A second instance finds the lock held, prints `proton-lfs-cli is already running` and exits | 0 |
-| `proton-lfs-tray login` | Run `proton-drive-cli login --key-password-provider <provider>` with the provider from `config.json` (for `pass-cli`, with `PROTON_PASS_CLI_BIN` set as in [Connect](#connect-to-proton)); the CLI's stderr is shown on failure | 0 on success, 1 on failure or when proton-drive-cli is not found |
-| `proton-lfs-tray logout` | Run `proton-drive-cli logout` (2-minute timeout), which removes the key-password entry, revokes the session and deletes the session file and crypto cache | 0, 1 |
-| `proton-lfs-tray register` | Write the global git LFS registration (see below) and print the adapter path, proton-drive-cli path and provider | 0, 1 when the adapter binary is not found or git fails |
-| `proton-lfs-tray status` | Print `Session:` (`logged in, key password in <provider> (<host>)`, `invalid session file; run proton-drive-cli login` or `not connected`), `LFS:`, `Provider:` (the provider of the next login), `Transfer:`, `Readiness:` and `Refresh:` lines | 0 |
+| `proton-lfs-tray login` | Run `proton-drive-cli login --credential-store <store>` with the store from `config.json` and `PROTON_PASS_CLI_BIN` set as in [Connect](#connect-to-proton); the CLI's stderr is shown on failure | 0 on success, 1 on failure or when proton-drive-cli is not found |
+| `proton-lfs-tray logout` | Run `proton-drive-cli logout` (5-minute timeout), which revokes the session, deletes the session file and crypto cache and then removes the credential-store entry | 0, 1 |
+| `proton-lfs-tray register` | Write the global git LFS registration (see below) and print the adapter path, proton-drive-cli path and credential store | 0, 1 when the adapter binary is not found or git fails |
+| `proton-lfs-tray status` | Print `Session:` (`signed in; credential store <store> (<host>); proton-drive-cli doctor verifies it`, `invalid session file; run proton-drive-cli login` or `not connected`), `LFS:`, `Store:` (the credential store of the next login), `Transfer:`, `Readiness:` and `Refresh:` lines | 0 |
 | `proton-lfs-tray scope-diagnostics [--live]` | Print the redacted JSON diagnostics report (see below) | 0, 1, 2, 3 |
-| `proton-lfs-tray config [provider]` | Print the key-password provider, or set it to `pass-cli` or `git-credential` | 0, 1 on an unknown provider or a write error |
+| `proton-lfs-tray config [store]` | Print the credential store, or set it to `pass-cli` or `git-credential` | 0, 1 on an unknown store or a write error |
 | `proton-lfs-tray --version` | Print `proton-lfs-cli <version>` | 0 |
 | `proton-lfs-tray --help` | Print the usage text | 0 |
 | any other word | Print `unknown command` and the usage text | 1 |
@@ -37,15 +37,15 @@ Items in order, from `menu.go`:
 
 1. `Proton LFS <version>` (disabled title).
 2. `Status: <Ready | Setup needed | Not connected | Checking...>`.
-3. `Session: <Signed in (<provider>)[, token refresh due] | Not connected | Invalid | Refresh failed | Checking...>`, where `<provider>` is the key-password provider recorded in the session.
+3. `Session: <Signed in (<store>)[, token refresh due] | Not connected | Invalid | Refresh failed | Checking...>`, where `<store>` is the credential store recorded in the session.
 4. `Transfers: <Ready | Sign-in required | Reconnect required | Checking...>`.
 5. `Refresh: <Due in … | Due now | Updating... | Last refreshed … | Failed; retry in … | Failed | Reconnect required | No session | Checking...>`.
 6. `Connect to Proton...` while no session file can be read as JSON, `Disconnect from Proton` otherwise.
 7. `Recheck Status`: re-reads everything and runs a refresh when one is due.
-8. `Use Proton Pass` and `Use Git Credential Manager` (check items; exactly one is checked; the choice is saved to `config.json` and applies to the next Connect).
+8. `Use Proton Pass` and `Use Git Credential Helper` (check items; exactly one is checked; the choice is saved to `config.json` and applies to the next Connect).
 9. `Enable LFS Backend` / `LFS Backend Enabled` (check item; writes the git registration).
 10. `Open Logs`: opens a terminal running `tail -n 200 -f ~/.proton-lfs/tray.log`.
-11. `Run Doctor...`: opens a terminal running `proton-drive-cli doctor` without provider options, so the doctor verifies the key-password provider and host recorded in the session; the window stays open until Enter is pressed.
+11. `Run Doctor...`: opens a terminal running `proton-drive-cli doctor` without credential store options, so the doctor verifies the credential store and host recorded in the session; the window stays open until Enter is pressed.
 12. `Start at System Login` (check item).
 13. `Quit Proton LFS`.
 
@@ -62,14 +62,18 @@ from `~/.proton-drive-cli/session.json` and the refresh state
 | Condition (first match wins) | Status | Session | Transfers | Icon |
 | --- | --- | --- | --- | --- |
 | No session file | Not connected | Not connected | Sign-in required | idle |
-| Session file that does not decode as a session, or lacks `uid`, `accessToken`, `refreshToken`, `keyPasswordProvider` or `keyPasswordHost`, has a blank one, or names a provider other than `pass-cli` or `git-credential` (proton-drive-cli's own session check) | Setup needed | Invalid | Reconnect required | error |
+| Session file that does not decode as a session, or lacks `uid`, `credentialStore`, `credentialHost` or `revision`, has a blank one, or names a store other than `pass-cli` or `git-credential` (proton-drive-cli's own session check) | Setup needed | Invalid | Reconnect required | error |
 | A non-recoverable refresh failure was recorded for this `uid` | Setup needed | Refresh failed | Reconnect required | error |
-| otherwise | Ready | Signed in (`keyPasswordProvider`), with `token refresh due` when `tokenExpiresAt` is in the past; bridge commands refresh an expired access token before use | Ready | ok |
+| otherwise | Ready | Signed in (`credentialStore`), with `token refresh due` when `tokenExpiresAt` is in the past; bridge commands refresh an expired access token before use | Ready | ok |
 
-The tray does not query the credential provider. A key-password entry that
-is missing or does not unlock the keys is reported by `bridge auth-state`
-(`needs_key_password`) when a transfer session starts, by the transfer
-itself (`key_password_required`) and by `Run Doctor...`. The `LFS Backend
+Readiness comes from `session.json` alone. The session refresh, logout and
+scope diagnostics the tray starts read the session entry through
+proton-drive-cli, with `PROTON_PASS_CLI_BIN` set as in
+[Connect](#connect-to-proton). A session entry the store cannot return is
+reported by a failed refresh, by `bridge auth-state` (`credentials_unavailable`)
+when a transfer session starts; an entry that cannot be read or whose key
+password does not unlock the keys is reported by the transfer itself
+(`credentials_unavailable`) and by `Run Doctor...`. The `LFS Backend
 Enabled` check mark comes from the global git config (see
 [Register](#register-enable-lfs-backend)).
 
@@ -91,10 +95,11 @@ tooltip appends `(retryable, temporary)` when the status file says so. See
 1. If the status file records a rate-limited login (`state: rate_limited`,
    `lastOp: login`, `errorCode: RATE_LIMITED`) less than one hour old, the
    click is refused with the notification `Login rate-limited; wait before retrying`.
-2. `proton-drive-cli login --key-password-provider <provider> -q` is run with
+2. `proton-drive-cli login --credential-store <store> -q` is run with
    `PROTON_AUTH_TRACE=1` and `PROTON_AUTH_TRACE_ID=tray-<pid>-<nanoseconds>`;
-   for `pass-cli`, `PROTON_PASS_CLI_BIN` is set to the binary found on `PATH`,
-   `~/.local/bin`, `/opt/homebrew/bin` or `/usr/local/bin`.
+   unless the environment sets `PROTON_PASS_CLI_BIN`, it is set to the
+   pass-cli found on `PATH`, `~/.local/bin`, `/opt/homebrew/bin` or
+   `/usr/local/bin`, as for every proton-drive-cli command the tray starts.
 3. Output is streamed line by line to the tray log. Bearer tokens, values of
    secret-named keys (`access…`, `refresh…`, `session…`, `password`,
    `secret`, `token`, `uid`) in JSON, JavaScript-object and `key=value` form,
@@ -105,13 +110,14 @@ tooltip appends `(retryable, temporary)` when the status file says so. See
    `Login rate-limited by Proton` is shown; other failures show `Login failed`.
 
 The browser fork delivers the key password for every account type;
-two-factor authentication and CAPTCHA are completed in the browser. A login
-that yields a new session UID removes the key-password entry of the previous
-UID.
+two-factor authentication and CAPTCHA are completed in the browser.
+proton-drive-cli stores it with the session tokens in the credential store.
+A login that yields a new session UID removes the credential-store entry of
+the previous UID.
 
-`Disconnect from Proton` runs `proton-drive-cli logout` (2-minute timeout),
-which removes the key-password entry, revokes the session and deletes the
-session file and crypto cache; the tray then clears its refresh state and
+`Disconnect from Proton` runs `proton-drive-cli logout` (5-minute timeout),
+which revokes the session, deletes the session file and crypto cache and
+then removes the credential-store entry; the tray then clears its refresh state and
 shows `Disconnected from Proton` (`Disconnect failed` on an error).
 
 ## Session refresh
@@ -124,13 +130,15 @@ Refresh is token maintenance only; it never logs in and never transfers.
   or half the token lifetime when that is shorter, before expiry or later.
   A session without `tokenExpiresAt` (`ExpiresIn` is optional in Proton's
   auth responses) is refreshed 12 hours after `session.json` was last
-  written; login and every refresh rewrite it. No attempt follows a success
+  written; login and every refresh rewrite it (and the credential-store
+  entry). No attempt follows a success
   within 1 minute, and an invalid session is never refreshed.
 - `session refresh --json` reporting `no_session` is a non-recoverable
   failure for that `uid`, not a success.
 - A recorded failure is dropped once `session.json` is written after it,
   by a login or by another process's refresh.
-- Each run is bounded to 2 minutes. A timeout, a non-JSON failure, or a JSON
+- Each run is bounded to 5 minutes, longer than proton-drive-cli's session
+  lock wait plus a credential-store save. A timeout, a non-JSON failure, or a JSON
   result with `recoverable: true` (or without `recoverable`) is retried with
   binary exponential backoff, 1, 2, 4, ... minutes up to 30, or after its
   `retryAfter` seconds when that is later, and shown as
@@ -141,7 +149,7 @@ Refresh is token maintenance only; it never logs in and never transfers.
   and no further refresh is attempted for it. When proton-drive-cli rejected
   the refresh token (a Proton error body with HTTP 4xx other than 408 and
   429, while no other process had rotated it), it has signed the session out: `session.json`, the crypto
-  cache and the key-password entry are deleted and the menu shows
+  cache and the credential-store entry are deleted and the menu shows
   `Not connected`. While the session file remains, the menu shows
   `Session: Refresh failed`, `Transfers: Reconnect required` and
   `Refresh: Reconnect required`.
@@ -160,7 +168,7 @@ Both the menu item and `proton-lfs-tray register` write, with
 | `lfs.customtransfer.proton.args` | `--backend sdk`, plus `--drive-cli-bin <path>` when proton-drive-cli is found next to the tray binary; an argument with characters outside `A-Za-z0-9_@/.-` is single-quoted for the POSIX shell git-lfs uses |
 | `lfs.standalonetransferagent` | `proton` |
 
-The key-password provider is not part of the arguments: the adapter never
+The credential store is not part of the arguments: the adapter never
 logs in. The `LFS Backend Enabled` check mark reflects
 `lfs.standalonetransferagent = proton`; the global config files are re-read
 only when their size or mtime changes.
@@ -169,13 +177,13 @@ only when their size or mtime changes.
 
 `proton-lfs-tray scope-diagnostics` prints one JSON document with
 `generatedAt`, `ok`, `live`, `summary`, `safety`, `config`
-(`driveCliFound`, `driveCliPath`, `keyPasswordProvider` from `config.json`,
+(`driveCliFound`, `driveCliPath`, `credentialStore` from `config.json`,
 `storageBase`, the app-version inputs `adapterRequestAppVersion`,
 `adapterRequestAppVersionSource`, `driveCliEnvAppVersion` and
 `expectedDriveCliDefaultAppVersion`, and `driveApiBase`), `session`
 (`present`, `path`, `fileMode`, `uidFingerprint` (the first 12 hex digits of
-the UID's SHA-256), sorted `scopes`, `tokenExpiresAt`, `accessTokenPresent`,
-`refreshTokenPresent`; `rawTokenValuesIncluded` is always false),
+the UID's SHA-256), sorted `scopes`, `tokenExpiresAt`, `credentialStore`,
+`credentialHost`; `rawTokenValuesIncluded` is always false),
 `commandsAttempted`, `authState` (the redacted `bridge auth-state` run),
 with `--live` `liveProbe`, and `errors`. The bridge runs get the adapter's
 environment allowlist. In their requests, payloads and details, non-boolean
@@ -194,7 +202,7 @@ The live probe is exactly one `bridge list` request with `folder: "/"`
 through `https://drive-api.proton.me`; it never runs login, init, upload,
 download, delete or refresh, and the report contains only the file count of
 the listing. The bridge runs with the adapter's environment allowlist plus
-`PROTON_PASS_CLI_BIN`, bounded by the 2-minute subprocess timeout.
+`PROTON_PASS_CLI_BIN`, bounded by the 5-minute subprocess timeout.
 
 ## Files
 
@@ -230,7 +238,7 @@ in `../Helpers/`.
 ## Design norms
 
 - The tray is a status surface first: readiness lines come before actions.
-- Provider choices are flat check items, not a submenu.
+- Credential store choices are flat check items, not a submenu.
 - Browser-fork progress and refresh maintenance are debuggable from the log
   without exposing tokens or session JSON.
 - Menu bar guidance followed: Apple Human Interface Guidelines (menu bar

@@ -71,12 +71,12 @@ func TestProtonDriveLoginWithTracePassesArgsAndTraceEnv(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	out, err := protonDriveLoginWithTrace(script, config.CredentialProviderGitCredential, "trace-1",
-		"--key-password-provider", config.CredentialProviderGitCredential)
+	out, err := protonDriveLoginWithTrace(script, config.CredentialStoreGitCredential, "trace-1",
+		"--credential-store", config.CredentialStoreGitCredential)
 	if err != nil {
 		t.Fatalf("login: %v", err)
 	}
-	for _, want := range []string{"args=login --key-password-provider git-credential -q", "trace=trace-1"} {
+	for _, want := range []string{"args=login --credential-store git-credential -q", "trace=trace-1"} {
 		if !strings.Contains(string(out), want) {
 			t.Fatalf("output missing %q:\n%s", want, out)
 		}

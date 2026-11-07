@@ -60,7 +60,7 @@ readiness from the session file itself
 | `transferring` | no component | Declared in `internal/config/status.go` for a transfer in progress and rendered by the tray (blue icon, "Uploading…"/"Downloading…" tooltip); the adapter writes `ok` or a failure state when a transfer ends and never writes `transferring` | blue |
 | `error` | adapter | A transfer failed for a reason that is not one of the three states below | red |
 | `rate_limited` | adapter, tray | Proton rate-limited the request (`errorCode: rate_limited`), or the tray's Connect was rate-limited (`lastOp: login`, `errorCode: RATE_LIMITED`); the tray refuses another login for one hour after the timestamp | red |
-| `auth_required` | adapter | A transfer failed because the session or the stored key password is not usable (`auth_required`, `key_password_required`) | red |
+| `auth_required` | adapter | A transfer failed because the session or its credential-store entry is not usable (`auth_required`, `credentials_unavailable`) | red |
 | `captcha` | adapter | Proton requires CAPTCHA verification (`captcha_required`) | red |
 
 The tray has four icons (idle, ok, error, syncing). `rate_limited`,
@@ -80,7 +80,7 @@ message are used only when the failure carries none.
 | --- | --- | --- | --- |
 | `captcha_required` | bridge `CAPTCHA_REQUIRED`, status 407, or "CAPTCHA" in the message | `captcha` | Run: proton-drive-cli login to complete CAPTCHA verification |
 | `rate_limited` | bridge `RATE_LIMITED`, status 429, or "rate limit" in the message | `rate_limited` | Wait before retrying operations. The Proton API has rate-limited requests. |
-| `key_password_required` | bridge `KEY_PASSWORD_REQUIRED` (key password missing or not unlocking the account keys), or "key password" in a transport message | `auth_required` | Run: proton-drive-cli login with the configured key-password provider |
+| `credentials_unavailable` | bridge `CREDENTIALS_UNAVAILABLE` (session entry unreadable from the credential store, or a key password not unlocking the account keys), or "credential store" or "key password" in a transport message | `auth_required` | Fix the credential store of the Proton session, or run: proton-drive-cli login |
 | `auth_required` | bridge `AUTH_FAILED`, `SESSION_EXPIRED`; envelope status 401 with an unmapped code; "invalid or expired session" or "unauthorized" in a transport message; without a backend code, status 401 or 403 or "Authentication" in the message | `auth_required` | Run: proton-drive-cli login to re-authenticate |
 | `insufficient_scope` | bridge `INSUFFICIENT_SCOPE`, or "sufficient scope" in a transport message | `error` | Proton rejected the app/session scope; run proton-lfs-cli scope-diagnostics and do not retry login |
 | `permission_denied` | bridge `PERMISSION_DENIED`, envelope status 403 with an unmapped code | `error` | Proton Drive denied access to this object |

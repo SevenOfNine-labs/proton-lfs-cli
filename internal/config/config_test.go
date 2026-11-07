@@ -168,14 +168,14 @@ func TestPrefsRoundTrip(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
 
-	prefs := Preferences{KeyPasswordProvider: CredentialProviderGitCredential}
+	prefs := Preferences{CredentialStore: CredentialStoreGitCredential}
 	if err := SavePrefs(prefs); err != nil {
 		t.Fatalf("SavePrefs: %v", err)
 	}
 
 	got := LoadPrefs()
-	if got.KeyPasswordProvider != CredentialProviderGitCredential {
-		t.Fatalf("KeyPasswordProvider = %q", got.KeyPasswordProvider)
+	if got.CredentialStore != CredentialStoreGitCredential {
+		t.Fatalf("CredentialStore = %q", got.CredentialStore)
 	}
 }
 
@@ -183,8 +183,8 @@ func TestPrefsLoadMissingReturnsDefaults(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	got := LoadPrefs()
 	defaults := DefaultPreferences()
-	if got.KeyPasswordProvider != defaults.KeyPasswordProvider {
-		t.Fatalf("got %q, want default %q", got.KeyPasswordProvider, defaults.KeyPasswordProvider)
+	if got.CredentialStore != defaults.CredentialStore {
+		t.Fatalf("got %q, want default %q", got.CredentialStore, defaults.CredentialStore)
 	}
 }
 
@@ -196,24 +196,24 @@ func TestPrefsLoadCorruptReturnsDefaults(t *testing.T) {
 	_ = os.WriteFile(configDir+"/"+ConfigFileName, []byte("{invalid json"), 0o600)
 
 	got := LoadPrefs()
-	if got.KeyPasswordProvider != DefaultKeyPasswordProvider {
-		t.Fatalf("corrupt file should return defaults, got %q", got.KeyPasswordProvider)
+	if got.CredentialStore != DefaultCredentialStore {
+		t.Fatalf("corrupt file should return defaults, got %q", got.CredentialStore)
 	}
 }
 
-func TestPrefsLoadWithoutKeyPasswordProviderUsesDefault(t *testing.T) {
+func TestPrefsLoadWithoutCredentialStoreUsesDefault(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	dir := filepath.Join(home, AppDir)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, ConfigFileName), []byte(`{"keyPasswordProvider":""}`), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, ConfigFileName), []byte(`{"credentialStore":""}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
 	got := LoadPrefs()
-	if got.KeyPasswordProvider != DefaultKeyPasswordProvider {
-		t.Fatalf("LoadPrefs() = %+v, want the default provider", got)
+	if got.CredentialStore != DefaultCredentialStore {
+		t.Fatalf("LoadPrefs() = %+v, want the default credential store", got)
 	}
 }

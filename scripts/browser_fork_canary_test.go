@@ -54,7 +54,7 @@ func TestBrowserForkCanaryRejectsMissingAckBeforeLogin(t *testing.T) {
 
 func TestBrowserForkCanaryRejectsUnknownLoginArgBeforeLogin(t *testing.T) {
 	env := newBrowserForkScriptEnv(t, readyDoctorJSON)
-	env.vars = replaceEnv(env.vars, "LIVE_BROWSER_FORK_LOGIN_ARGS", "--key-password-provider git-credential --no-such-option")
+	env.vars = replaceEnv(env.vars, "LIVE_BROWSER_FORK_LOGIN_ARGS", "--credential-store git-credential --no-such-option")
 
 	out, err := runBrowserForkScript(t, env)
 	if err == nil {
@@ -70,13 +70,13 @@ func TestBrowserForkCanaryRejectsUnknownLoginArgBeforeLogin(t *testing.T) {
 
 func TestBrowserForkCanaryRejectsMissingLoginArgValueBeforeLogin(t *testing.T) {
 	env := newBrowserForkScriptEnv(t, readyDoctorJSON)
-	env.vars = replaceEnv(env.vars, "LIVE_BROWSER_FORK_LOGIN_ARGS", "--key-password-provider --key-password-host proton.test")
+	env.vars = replaceEnv(env.vars, "LIVE_BROWSER_FORK_LOGIN_ARGS", "--credential-store --credential-host proton.test")
 
 	out, err := runBrowserForkScript(t, env)
 	if err == nil {
 		t.Fatalf("expected missing login arg value to fail:\n%s", out)
 	}
-	if !strings.Contains(out, "missing value after --key-password-provider") {
+	if !strings.Contains(out, "missing value after --credential-store") {
 		t.Fatalf("expected missing value error, got:\n%s", out)
 	}
 	if commands := readFakeDriveCommands(t, env.logPath); len(commands) != 0 {
@@ -89,7 +89,7 @@ func TestBrowserForkCanaryRejectsPostLoginDoctorMismatch(t *testing.T) {
 		"ok": true,
 		"canAttemptTransfer": false,
 		"canAttemptLiveCanary": false,
-		"authState": {"state": "needs_key_password"}
+		"authState": {"state": "credentials_unavailable"}
 	}`)
 
 	out, err := runBrowserForkScript(t, env)
@@ -127,8 +127,8 @@ func newBrowserForkScriptEnv(t *testing.T, doctorJSON string) browserForkScriptE
 		logPath: logPath,
 		vars: []string{
 			"PROTON_LFS_LIVE_CANARY=" + browserForkCanaryAck,
-			"LIVE_CANARY_DOCTOR_ARGS=--key-password-provider pass-cli",
-			"LIVE_BROWSER_FORK_LOGIN_ARGS=--key-password-provider git-credential",
+			"LIVE_CANARY_DOCTOR_ARGS=--credential-store pass-cli",
+			"LIVE_BROWSER_FORK_LOGIN_ARGS=--credential-store git-credential",
 			"NODE_BIN=" + fakeNodePath,
 			"DRIVE_CLI_BIN=" + filepath.Join(tempDir, "fake-drive-cli.js"),
 			"BROWSER_FORK_FAKE_LOG=" + logPath,
@@ -145,8 +145,8 @@ cmd="${2:-}"
 
 case "${cmd}" in
   login)
-    if [[ "${3:-}" != "--key-password-provider" || "${4:-}" != "git-credential" ]]; then
-      echo "bad login key-password provider" >&2
+    if [[ "${3:-}" != "--credential-store" || "${4:-}" != "git-credential" ]]; then
+      echo "bad login credential store" >&2
       exit 7
     fi
     echo "login ok"

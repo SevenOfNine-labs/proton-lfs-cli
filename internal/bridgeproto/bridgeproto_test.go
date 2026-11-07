@@ -7,19 +7,19 @@ import (
 
 func TestIsSensitiveKeyMirrorsRedactSensitive(t *testing.T) {
 	cases := map[string]bool{
-		"accessToken":         true,
-		"refresh_token":       true,
-		"x-pm-uid":            true,
-		"uid":                 true,
-		"privateKey":          true,
-		"armoredKey":          true,
-		"clientProof":         true,
-		"keyPassword":         true,
-		"keyPasswordProvider": false,
-		"keyPasswordHost":     false,
-		"tokenType":           false,
-		"errorCode":           false,
-		"state":               false,
+		"accessToken":     true,
+		"refresh_token":   true,
+		"x-pm-uid":        true,
+		"uid":             true,
+		"privateKey":      true,
+		"armoredKey":      true,
+		"clientProof":     true,
+		"keyPassword":     true,
+		"credentialStore": false,
+		"credentialHost":  false,
+		"tokenType":       false,
+		"errorCode":       false,
+		"state":           false,
 	}
 	for key, want := range cases {
 		if got := IsSensitiveKey(key); got != want {
@@ -29,8 +29,8 @@ func TestIsSensitiveKeyMirrorsRedactSensitive(t *testing.T) {
 }
 
 func TestFilterEnvKeepsOnlyAllowlistedVariables(t *testing.T) {
-	got := FilterEnv([]string{"PATH=/bin", "GCM_CREDENTIAL_STORE=secretservice", "PROTON_KEY_PASSWORD=x", "AWS_SECRET_ACCESS_KEY=y", "LC_ALL=C"})
-	want := "PATH=/bin GCM_CREDENTIAL_STORE=secretservice LC_ALL=C"
+	got := FilterEnv([]string{"PATH=/bin", "GCM_CREDENTIAL_STORE=secretservice", "PROTON_KEY_PASSWORD=x", "AWS_SECRET_ACCESS_KEY=y", "LC_ALL=C", "GIT_CONFIG_SYSTEM=/etc/gitconfig", "GNUPGHOME=/g", "DISPLAY=:0", "SSH_AUTH_SOCK=/s"})
+	want := "PATH=/bin GCM_CREDENTIAL_STORE=secretservice LC_ALL=C GIT_CONFIG_SYSTEM=/etc/gitconfig GNUPGHOME=/g DISPLAY=:0"
 	if strings.Join(got, " ") != want {
 		t.Fatalf("FilterEnv() = %v, want %s", got, want)
 	}
@@ -64,7 +64,7 @@ func TestMatchesAllowlistIgnoresCaseOnWindows(t *testing.T) {
 }
 
 func TestRedactBeforeTruncateKeepsSecretsOut(t *testing.T) {
-	line := strings.Repeat("x", 230) + " could not read Password for 'https://uid-0123456789abcdef@proton-drive-key.proton-lfs-cli.local'"
+	line := strings.Repeat("x", 230) + " could not read Password for 'https://uid-0123456789abcdef@proton-drive-cli.invalid'"
 	out := Truncate(RedactText(line), 256)
 	if strings.Contains(out, "uid-0123") {
 		t.Fatalf("a cut inside the userinfo leaked part of it: %q", out)

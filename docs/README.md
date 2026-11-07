@@ -26,7 +26,7 @@ Project-owned docs live here. Upstream/vendor docs remain under `submodules/` an
 
 ### Operations
 
-- [Adapter Configuration](operations/adapter-configuration.md): environment, key-password provider, offline doctor, session refresh.
+- [Adapter Configuration](operations/adapter-configuration.md): environment, credential store, offline doctor, session refresh.
 - [Deployment](operations/deployment.md): local bring-up, release bundles, git wiring.
 - [Releasing](operations/releasing.md): the `v*` tag pipeline.
 - [Live Canary Runbook](operations/live-canary-runbook.md)

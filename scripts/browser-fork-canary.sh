@@ -41,7 +41,7 @@ validate_browser_fork_login_args() {
   while [[ "${i}" -lt "${#login_args[@]}" ]]; do
     token="${login_args[${i}]}"
     case "${token}" in
-      --key-password-provider | --key-password-host)
+      --credential-store | --credential-host)
         i=$((i + 1))
         if [[ "${i}" -ge "${#login_args[@]}" ]]; then
           fail "LIVE_BROWSER_FORK_LOGIN_ARGS missing value after ${token}."
@@ -51,14 +51,14 @@ validate_browser_fork_login_args() {
           fail "LIVE_BROWSER_FORK_LOGIN_ARGS missing value after ${token}."
         fi
         ;;
-      --key-password-provider=* | --key-password-host=*)
+      --credential-store=* | --credential-host=*)
         value="${token#*=}"
         if [[ -z "${value}" ]]; then
           fail "LIVE_BROWSER_FORK_LOGIN_ARGS contains empty value for ${token%%=*}."
         fi
         ;;
       *)
-        fail "LIVE_BROWSER_FORK_LOGIN_ARGS contains unsupported login option: ${token}. Allowed options: --key-password-provider and --key-password-host."
+        fail "LIVE_BROWSER_FORK_LOGIN_ARGS contains unsupported login option: ${token}. Allowed options: --credential-store and --credential-host."
         ;;
     esac
     i=$((i + 1))

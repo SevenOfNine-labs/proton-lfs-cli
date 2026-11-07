@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-func TestExportPassEnvEmitsOnlyProviderEnv(t *testing.T) {
+func TestExportPassEnvEmitsOnlyPassCLIBin(t *testing.T) {
 	fakePass := filepath.Join(t.TempDir(), "fake-pass-cli.sh")
 	if err := os.WriteFile(fakePass, []byte(`#!/usr/bin/env bash
 set -euo pipefail

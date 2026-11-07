@@ -1,14 +1,16 @@
 #!/usr/bin/env bash
 # Stand-in for pass-cli 2.7.0 in integration tests: one owned vault holding one
-# key-password login item, in the JSON shapes that proton-drive-cli's
-# src/credentials/pass-cli.ts documents for each pass-cli command.
+# login item with a session entry (proton-drive-cli src/auth/session-secrets.ts),
+# in the JSON shapes that proton-drive-cli's src/credentials/pass-cli.ts
+# documents for each pass-cli command.
 set -euo pipefail
 
 MOCK_VAULT_NAME="${MOCK_PASS_VAULT_NAME:-Personal}"
-MOCK_ITEM_HOST="${MOCK_PASS_ITEM_HOST:-proton-drive-key.proton-lfs-cli.local}"
+MOCK_ITEM_HOST="${MOCK_PASS_ITEM_HOST:-proton-drive-cli.invalid}"
 MOCK_ITEM_TITLE="${MOCK_PASS_ITEM_TITLE:-Proton ${MOCK_ITEM_HOST}}"
-MOCK_USERNAME="${MOCK_PASS_USERNAME:-integration-user@proton.test}"
-MOCK_PASSWORD="${MOCK_PASS_PASSWORD:-integration-key-password}"
+MOCK_USERNAME="${MOCK_PASS_USERNAME:-mock-session-uid}"
+MOCK_SESSION_ENTRY="{\"uid\":\"${MOCK_USERNAME}\",\"revision\":\"00000000-0000-4000-8000-000000000000\",\"accessToken\":\"mock-access-token\",\"refreshToken\":\"mock-refresh-token\",\"keyPassword\":\"integration-key-password\"}"
+MOCK_PASSWORD="${MOCK_PASS_PASSWORD:-${MOCK_SESSION_ENTRY}}"
 MOCK_SHARE_ID="mock-share-id"
 MOCK_VAULT_ID="mock-vault-id"
 MOCK_ITEM_ID="mock-item-id"

@@ -16,7 +16,7 @@ through a custom Git LFS transfer adapter.
 | Node.js 22+ | — | Required to run `proton-drive-cli` from `dist/index.js`; not needed with the bundled standalone binary | Same as SDK backend |
 | Node.js 26 (`.node-version`) | — | Build the standalone `proton-drive-cli` binary (`make build-sea`) | Same |
 | Yarn 4 (via Corepack) | — | Build from source only | Build from source only |
-| pass-cli 2.7.0 | — | When Proton Pass stores the key password | Same |
+| pass-cli 2.7.0 | — | When Proton Pass is the credential store | Same |
 
 Pre-built adapter binaries and platform bundles come from GitHub Releases
 and need neither Go nor Node.js.
@@ -70,7 +70,7 @@ sha256sum -c --ignore-missing SHA256SUMS.txt      # shasum -a 256 -c on macOS
 
 After installing or updating, write the global Git LFS settings for the
 installed programs and sign in whenever `proton-lfs-tray status` does not
-report `logged in, key password in …`:
+report `signed in` or `proton-drive-cli doctor` fails:
 
 ```bash
 proton-lfs-tray register
@@ -153,7 +153,7 @@ Disconnect from Proton          (Connect to Proton... when signed out)
 Recheck Status
 ─────────────────────────────
 ✓ Use Proton Pass
-  Use Git Credential Manager
+  Use Git Credential Helper
 ─────────────────────────────
 ✓ LFS Backend Enabled           (Enable LFS Backend before registration)
 ─────────────────────────────
@@ -165,13 +165,14 @@ Quit Proton LFS
 ```
 
 `Status` is `Ready` when a session file written by `proton-drive-cli login`
-exists (with `uid`, tokens, key-password provider and host) and no
+exists (with `uid`, credential store and host, and `revision`) and no
 non-recoverable refresh failure is recorded for it; an expired access token
 only adds `token refresh due` to the session line, because transfers refresh
 it; otherwise it reads `Setup needed` (signed in but blocked) or
-`Not connected`. The tray does not query the credential provider: a missing
-key-password entry is reported when a transfer starts and by
-`Run Doctor...`.
+`Not connected`. Readiness comes from `session.json` alone; the session
+refresh and logout the tray starts read and write the session entry through
+proton-drive-cli. A missing session entry is reported when a transfer starts,
+by a failed refresh and by `Run Doctor...`.
 
 ### Status indicators
 
@@ -187,26 +188,29 @@ The icon has four images; the adapter's status file has six states:
 Status is read from `~/.proton-lfs/status.json` every 5 seconds; see
 [Status File Reference](docs/reference/status-file.md).
 
-### Key-password provider
+### Credential store
 
-`Use Proton Pass` and `Use Git Credential Manager` choose where
-`proton-drive-cli login` stores the browser-derived key password:
+`Use Proton Pass` and `Use Git Credential Helper` choose where
+`proton-drive-cli login` stores the session tokens and the browser-derived
+key password:
 
 - Proton Pass: through `pass-cli` (run `pass-cli login` first).
-- Git Credential Manager: the system git credential helper (macOS Keychain,
-  Windows Credential Manager, Linux Secret Service).
+- Git Credential Helper: git's credential helper that encrypts secrets at
+  rest (macOS Keychain, Windows Credential Manager, Linux Secret Service, or
+  Git Credential Manager).
 
-The choice is saved as `keyPasswordProvider` in `~/.proton-lfs/config.json`
-(default `pass-cli`). See [Key-password providers](#key-password-providers).
+The choice is saved as `credentialStore` in `~/.proton-lfs/config.json`
+(default `pass-cli`). See [Credential stores](#credential-stores).
 
 ### Connect to Proton
 
 `Connect to Proton...` runs
-`proton-drive-cli login --key-password-provider <provider> -q`. A browser
+`proton-drive-cli login --credential-store <store> -q`. A browser
 window opens on Proton's sign-in page, where two-factor authentication and
-CAPTCHA are completed too; after approval the CLI stores the key password
-the fork delivers in the chosen provider and saves the session tokens to
-`~/.proton-drive-cli/session.json`. The tray then shows `Proton LFS Ready`,
+CAPTCHA are completed too; after approval the CLI stores the session tokens
+and the key password the fork delivers in the chosen credential store and
+records the session in `~/.proton-drive-cli/session.json`, which holds no
+secret. The tray then shows `Proton LFS Ready`,
 or `Signed in; setup needed` when a local blocker remains. If Proton
 rate-limited the sign-in, the tray refuses another attempt for one hour.
 
@@ -227,8 +231,8 @@ with `--backend sdk --drive-cli-bin <bundled proton-drive-cli>`.
 ### Open Logs and Run Doctor
 
 `Open Logs` tails `~/.proton-lfs/tray.log` in a terminal. `Run Doctor...`
-runs `proton-drive-cli doctor`, which checks the key-password provider and
-host recorded in the session; the doctor is offline and reports whether a
+runs `proton-drive-cli doctor`, which reads the session entry from the
+credential store recorded in the session; the doctor is offline and reports whether a
 transfer can be attempted.
 
 ### Start at System Login
@@ -239,13 +243,13 @@ Linux: creates or removes `~/.config/autostart/proton-lfs.desktop`.
 ### Command-line helpers
 
 ```text
-proton-lfs-tray login             browser sign-in with the configured provider
+proton-lfs-tray login             browser sign-in with the configured credential store
 proton-lfs-tray logout            clear the session
 proton-lfs-tray register          write the global git LFS registration
-proton-lfs-tray status            session, LFS, provider, transfer, readiness, refresh
+proton-lfs-tray status            session, LFS, credential store, transfer, readiness, refresh
 proton-lfs-tray scope-diagnostics [--live]
                                   redacted auth/scope evidence
-proton-lfs-tray config [provider] show or set the key-password provider
+proton-lfs-tray config [store]    show or set the credential store
 ```
 
 ## Configuring a Git Repository
@@ -352,14 +356,14 @@ make build-sea            # bin/proton-drive-cli standalone binary (Node.js 26)
 Account login is browser-based and happens before any transfer:
 
 ```bash
-pass-cli login                                        # only for the pass-cli provider
-proton-drive-cli login --key-password-provider pass-cli   # or git-credential
-proton-drive-cli doctor                               # offline readiness check
+pass-cli login                                       # only for the pass-cli store
+proton-drive-cli login --credential-store pass-cli   # or git-credential
+proton-drive-cli doctor                              # offline readiness check
 ```
 
-`login` saves session tokens to `~/.proton-drive-cli/session.json` and
-stores the browser-derived key password in the provider (see
-[Key-password providers](#key-password-providers)). The tray's
+`login` stores the session tokens and the browser-derived key password in
+the credential store (see [Credential stores](#credential-stores)) and
+records the session in `~/.proton-drive-cli/session.json`. The tray's
 "Connect to Proton..." runs the same command.
 
 ### 3. Configure the adapter
@@ -372,7 +376,7 @@ git config lfs.standalonetransferagent proton
 ```
 
 `--drive-cli-bin` accepts the standalone binary or `dist/index.js` (run with
-`node`, or `NODE_BIN`). The key-password provider is not an adapter flag:
+`node`, or `NODE_BIN`). The credential store is not an adapter flag:
 the adapter never logs in, it reuses the saved session.
 
 ### 4. Use git normally
@@ -398,52 +402,64 @@ commands never prompt; a CAPTCHA demanded during a transfer stops it with
 
 The browser fork delivers the key password for every account type, so an
 account with a separate mailbox password needs no extra setup: transfers
-unlock Drive with the stored key password.
+unlock Drive with the key password from the credential store.
 
-## Key-password providers
+## Credential stores
 
-`proton-drive-cli login` derives a key password during browser sign-in and
-stores it, keyed by the session UID, under the host
-`proton-drive-key.proton-lfs-cli.local` in one of two providers. The CLI
-creates and verifies that entry itself; you never create it by hand.
+`proton-drive-cli login` receives the session tokens and a key password from
+the browser sign-in and stores them as one entry, keyed by the session UID,
+under the host `proton-drive-cli.invalid` in one of two credential stores.
+`~/.proton-drive-cli/session.json` records only the UID, scopes, store, host,
+token expiry and a revision; it holds no secret. The CLI creates, verifies
+and rewrites the entry itself (every token refresh replaces it); you never
+create it by hand. A session file without a credential store or revision is
+not a login session: `proton-drive-cli login` replaces it.
 
 ### Proton Pass (pass-cli, default)
 
 ```bash
-pass-cli login                                          # authenticate pass-cli
-proton-drive-cli login --key-password-provider pass-cli
+pass-cli login                                     # authenticate pass-cli
+proton-drive-cli login --credential-store pass-cli
 ```
 
 The entry appears in Proton Pass as a login item titled
-`Proton proton-drive-key.proton-lfs-cli.local`. `pass-cli info` shows whether
-pass-cli itself is logged in. `PROTON_PASS_CLI_BIN` overrides the pass-cli
-binary path (default `pass-cli` on `PATH`); the tray sets it for the bundled
-environment automatically.
+`Proton proton-drive-cli.invalid`; every refresh replaces it with a new item
+and deletes the old one. `pass-cli info` shows whether pass-cli itself is
+logged in. `PROTON_PASS_CLI_BIN` overrides the pass-cli binary path (default
+`pass-cli` on `PATH`); the tray sets it for the bundled environment
+automatically.
 
-### Git Credential Manager (git-credential)
+### Git credential helper (git-credential)
 
 ```bash
-proton-drive-cli login --key-password-provider git-credential
+proton-drive-cli login --credential-store git-credential
 ```
 
-The key password is stored with `git credential approve` for host
-`proton-drive-key.proton-lfs-cli.local` and read back with
-`git credential fill`; which store backs it depends on your git credential
-helper (macOS Keychain, Windows Credential Manager, Linux Secret Service).
+The entry is stored with `git credential approve` for host
+`proton-drive-cli.invalid` and read back with `git credential fill`
+(git-credential(1)). proton-drive-cli runs only the first
+`credential.helper` of the system and global git configuration that
+encrypts secrets at rest: `osxkeychain` (macOS Keychain), `wincred` (Windows
+Credential Manager), `libsecret` (Linux Secret Service), or `manager` (Git
+Credential Manager) with an encrypting store (`keychain`, `wincredman`,
+`dpapi`, `secretservice` or `gpg`). `store` and `cache` are never used. git
+and Git Credential Manager do not prompt for credentials; the operating
+system may still ask to unlock a locked keychain or keyring.
 
-### Provider selection order
+### Store selection order
 
-`--key-password-provider`, then `PROTON_KEY_PASSWORD_PROVIDER`, then
-`pass-cli`. The tray passes the provider from `~/.proton-lfs/config.json`.
-`--key-password-host` / `PROTON_KEY_PASSWORD_HOST` change the host (rarely
+`--credential-store`, then `PROTON_CREDENTIAL_STORE`, then `pass-cli`. The
+tray passes the store from `~/.proton-lfs/config.json`.
+`--credential-host` / `PROTON_CREDENTIAL_HOST` change the host (rarely
 needed). `login` records both in the session; every later command (bridge,
-doctor, logout) uses the recorded values.
+doctor, logout, session refresh) uses the recorded values.
 
-### Lifecycle of the key-password entry
+### Lifecycle of the session entry
 
-`proton-drive-cli logout` (or `Disconnect from Proton`) removes the entry; a
-login that yields a new session UID removes the previous UID's entry; a
-refresh token Proton rejects signs the session out and removes the entry.
+Every token refresh rewrites the entry. `proton-drive-cli logout` (or
+`Disconnect from Proton`) removes it; a login that yields a new session UID
+removes the previous UID's entry; a refresh token Proton rejects signs the
+session out and removes the entry.
 
 ## Global vs Per-Repo Configuration
 
@@ -475,10 +491,10 @@ GIT_TRACE=1 git push
 | Symptom | Cause | Fix |
 | --- | --- | --- |
 | `transfer "proton": not found` | `lfs.customtransfer.proton.path` is wrong or the adapter is not executable | `git config lfs.customtransfer.proton.path` and check the file |
-| `no ready Proton Drive session; run proton-drive-cli login …` (`needs_login`) | No saved session | `proton-drive-cli login --key-password-provider <provider>` or "Connect to Proton..." |
+| `no ready Proton Drive session; run proton-drive-cli login …` (`needs_login`) | No saved session | `proton-drive-cli login --credential-store <store>` or "Connect to Proton..." |
 | `Proton Drive session is invalid …` (`session_invalid`) | The session file was not written by `proton-drive-cli login` | Run `proton-drive-cli login` again |
 | `session is invalid or expired` (`auth_required`) | Proton rejected the refresh token and proton-drive-cli signed the session out | Run `proton-drive-cli login` again |
-| `stored browser-fork key password required …` (`needs_key_password`, `key_password_required`) | The key password is missing from the provider recorded in the session (pass-cli logged out, item deleted) or does not unlock the account keys | For pass-cli run `pass-cli login`; then `proton-drive-cli login` again |
+| `Proton session credentials are unavailable from the credential store` (`credentials_unavailable`) | The credential store recorded in the session cannot return the session entry (pass-cli logged out, item deleted, keyring locked, no OS-store credential helper) or its key password does not unlock the account keys | Fix the store (for pass-cli run `pass-cli login`); otherwise `proton-drive-cli login` again |
 | `Proton rejected this app/session authorization scope` (`insufficient_scope`, Proton 9101) | The app identity or session scope is rejected by Proton | `proton-lfs-tray scope-diagnostics`, then follow `docs/operations/live-canary-runbook.md`; do not retry login |
 | `rate limited by proton api` | Proton rate limit | Wait; the tray blocks sign-in for one hour after a rate-limited login |
 | `captcha verification required` | Proton requires CAPTCHA | Run `proton-drive-cli login` and complete it in the browser |

@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/SevenOfNine-labs/proton-lfs-cli/internal/bridgeproto"
 )
 
 // TransferBackend defines the storage/runtime backend used by adapter transfers.
@@ -36,18 +38,22 @@ type ProgressTransferBackend interface {
 type ErrorCode string
 
 const (
-	ErrCodeNetworkFailure      ErrorCode = "network_failure"
-	ErrCodeAuthRequired        ErrorCode = "auth_required"
-	ErrCodeRateLimited         ErrorCode = "rate_limited"
-	ErrCodeCaptchaRequired     ErrorCode = "captcha_required"
-	ErrCodeKeyPasswordRequired ErrorCode = "key_password_required"
-	ErrCodeInsufficientScope   ErrorCode = "insufficient_scope"
-	ErrCodeNotFound            ErrorCode = "not_found"
-	ErrCodePermissionDenied    ErrorCode = "permission_denied"
-	ErrCodeServerError         ErrorCode = "server_error"
-	ErrCodeInvalidRequest      ErrorCode = "invalid_request"
-	ErrCodeUnknown             ErrorCode = "unknown"
+	ErrCodeNetworkFailure         ErrorCode = "network_failure"
+	ErrCodeAuthRequired           ErrorCode = "auth_required"
+	ErrCodeRateLimited            ErrorCode = "rate_limited"
+	ErrCodeCaptchaRequired        ErrorCode = "captcha_required"
+	ErrCodeCredentialsUnavailable ErrorCode = "credentials_unavailable"
+	ErrCodeInsufficientScope      ErrorCode = "insufficient_scope"
+	ErrCodeNotFound               ErrorCode = "not_found"
+	ErrCodePermissionDenied       ErrorCode = "permission_denied"
+	ErrCodeServerError            ErrorCode = "server_error"
+	ErrCodeInvalidRequest         ErrorCode = "invalid_request"
+	ErrCodeUnknown                ErrorCode = "unknown"
 )
+
+// credentialsUnavailableMessage reports a session whose credential-store entry
+// (tokens and key password) cannot be read or does not unlock the account keys.
+const credentialsUnavailableMessage = "Proton session credentials are unavailable from the credential store"
 
 // BackendError maps backend-specific failures to protocol-safe transfer errors.
 type BackendError struct {
@@ -301,13 +307,13 @@ func mapAuthStateForTransfer(state *BridgeAuthStateResponse) error {
 		return newBackendError(502, "proton drive auth state is unavailable", nil)
 	}
 
-	// The bridge reports why a state is not ready in errors[]; carry that
-	// into the message so the tray and git-lfs show the cause.
+	// The bridge reports why a state is not ready in errors[]; carry that,
+	// redacted, into the message so the tray and git-lfs show the cause.
 	withCause := func(message string) string {
 		if len(state.Errors) == 0 {
 			return message
 		}
-		return message + ": " + strings.Join(state.Errors, "; ")
+		return message + ": " + bridgeproto.RedactText(strings.Join(state.Errors, "; "))
 	}
 
 	switch strings.TrimSpace(state.State) {
@@ -315,8 +321,8 @@ func mapAuthStateForTransfer(state *BridgeAuthStateResponse) error {
 		// `bridge init` refreshes an expired access token before it uses the
 		// session (proton-drive-cli src/sdk/client.ts loadUsableSession).
 		return nil
-	case "needs_key_password":
-		return newBackendErrorWithCode(401, withCause("stored browser-fork key password required for this Proton session"), nil, ErrCodeKeyPasswordRequired)
+	case "credentials_unavailable":
+		return newBackendErrorWithCode(401, withCause(credentialsUnavailableMessage), nil, ErrCodeCredentialsUnavailable)
 	case "needs_login":
 		return newBackendError(401, withCause("no ready Proton Drive session; run proton-drive-cli login before Git LFS transfer"), nil)
 	case "session_invalid":
@@ -441,8 +447,9 @@ func mapBridgeError(err error, fallbackMessage string) error {
 	msg := strings.ToLower(strings.TrimSpace(err.Error()))
 
 	switch {
-	case strings.Contains(msg, "key password"):
-		return newBackendErrorWithCode(401, "stored browser-fork key password required for this Proton session", err, ErrCodeKeyPasswordRequired)
+	case strings.Contains(msg, "credential store"),
+		strings.Contains(msg, "key password"):
+		return newBackendErrorWithCode(401, credentialsUnavailableMessage, err, ErrCodeCredentialsUnavailable)
 	case strings.Contains(msg, "invalid or expired session"),
 		strings.Contains(msg, "unauthorized"):
 		return newBackendError(401, "session is invalid or expired", err)
@@ -528,8 +535,8 @@ func mapBridgeErrorCode(errorCode string, bridgeErr *BridgeError, msg, fallbackM
 	switch errorCode {
 	case "AUTH_FAILED", "SESSION_EXPIRED":
 		return true, newBackendErrorWithCode(bridgeStatusOrDefault(bridgeErr, 401), "session is invalid or expired", original, ErrCodeAuthRequired)
-	case "KEY_PASSWORD_REQUIRED":
-		return true, newBackendErrorWithCode(bridgeStatusOrDefault(bridgeErr, 401), "stored browser-fork key password required for this Proton session", original, ErrCodeKeyPasswordRequired)
+	case "CREDENTIALS_UNAVAILABLE":
+		return true, newBackendErrorWithCode(bridgeStatusOrDefault(bridgeErr, 401), credentialsUnavailableMessage+": "+bridgeproto.RedactText(msg), original, ErrCodeCredentialsUnavailable)
 	case "CAPTCHA_REQUIRED":
 		return true, newBackendErrorWithCode(bridgeStatusOrDefault(bridgeErr, 407), "captcha verification required — run: proton-drive-cli login", original, ErrCodeCaptchaRequired)
 	case "RATE_LIMITED":

@@ -75,7 +75,7 @@ func TestE2EMockedPipeline(t *testing.T) {
 	t.Logf("E2E mocked pipeline: upload OID=%s, download verified, content matches", oid)
 }
 
-func TestE2EMockedPipelineBlocksMissingBrowserForkKeyPassword(t *testing.T) {
+func TestE2EMockedPipelineBlocksUnavailableCredentials(t *testing.T) {
 	root := repoRoot(t)
 
 	mockBridge := os.Getenv("PROTON_DRIVE_CLI_BIN")
@@ -92,18 +92,18 @@ func TestE2EMockedPipelineBlocksMissingBrowserForkKeyPassword(t *testing.T) {
 		s.env,
 		"PROTON_DRIVE_CLI_BIN="+mockBridge,
 		"MOCK_BRIDGE_STORAGE_DIR="+mockStorageDir,
-		"MOCK_BRIDGE_AUTH_STATE=needs_key_password",
+		"MOCK_BRIDGE_AUTH_STATE=credentials_unavailable",
 	)
 
 	configureSDKCustomTransfer(t, s.repoPath, sdkEnv, s.gitBin, s.adapterPath, mockBridge)
 
 	out, err := runCmd(s.repoPath, sdkEnv, s.gitLFSBin, "push", "origin", "main")
 	if err == nil {
-		t.Fatalf("expected lfs push to fail when browser-fork key password is missing, output:\n%s", out)
+		t.Fatalf("expected lfs push to fail when the session credentials are unavailable, output:\n%s", out)
 	}
 	logOut, _ := runCmd(s.repoPath, sdkEnv, s.gitLFSBin, "logs", "last")
 	combined := out + "\n" + logOut
-	if !containsAnyFold(combined, "key_password_required", "stored browser-fork key password", "missing its stored key password", "needs_key_password") {
-		t.Fatalf("expected missing key-password failure, got:\n%s", combined)
+	if !containsAnyFold(combined, "credentials_unavailable", "credentials are unavailable from the credential store") {
+		t.Fatalf("expected unavailable-credentials failure, got:\n%s", combined)
 	}
 }

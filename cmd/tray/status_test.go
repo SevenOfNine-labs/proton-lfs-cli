@@ -226,20 +226,19 @@ func TestSessionFilePath(t *testing.T) {
 
 func validStatusTestSession(now time.Time) sessionMetadata {
 	return sessionMetadata{
-		UID:                 "uid-123",
-		AccessToken:         "access",
-		RefreshToken:        "refresh",
-		Scopes:              []string{"drive"},
-		KeyPasswordProvider: "pass-cli",
-		KeyPasswordHost:     "proton-drive-key.proton-lfs-cli.local",
-		TokenExpiresAt:      now.Add(24 * time.Hour).UnixMilli(),
+		UID:             "uid-123",
+		Revision:        "rev-1",
+		Scopes:          []string{"drive"},
+		CredentialStore: "pass-cli",
+		CredentialHost:  "proton-drive-cli.invalid",
+		TokenExpiresAt:  now.Add(24 * time.Hour).UnixMilli(),
 	}
 }
 
 func TestInspectAuthReadinessReadyForValidSession(t *testing.T) {
 	now := time.Date(2026, 6, 23, 18, 0, 0, 0, time.UTC)
 	resetRefreshForStatusTest(t, now)
-	home := setupFakeHome(t, fakeHomeOpts{configJSON: `{"keyPasswordProvider":"pass-cli"}`})
+	home := setupFakeHome(t, fakeHomeOpts{configJSON: `{"credentialStore":"pass-cli"}`})
 	writeSessionForStatusTest(t, home, validStatusTestSession(now))
 
 	readiness := inspectAuthReadiness(now)
@@ -270,23 +269,23 @@ func TestInspectAuthReadinessWithoutSessionOffersConnect(t *testing.T) {
 
 func TestInspectAuthReadinessBlocksInvalidSessions(t *testing.T) {
 	now := time.Date(2026, 6, 23, 18, 0, 0, 0, time.UTC)
-	invalid := validStatusTestSession(now)
-	invalid.RefreshToken = ""
-	noKeyPasswordProvider := validStatusTestSession(now)
-	noKeyPasswordProvider.KeyPasswordProvider = ""
-	aliasProvider := validStatusTestSession(now)
-	aliasProvider.KeyPasswordProvider = "pass"
+	noRevision := validStatusTestSession(now)
+	noRevision.Revision = ""
+	noStore := validStatusTestSession(now)
+	noStore.CredentialStore = ""
+	aliasStore := validStatusTestSession(now)
+	aliasStore.CredentialStore = "pass"
 	blankHost := validStatusTestSession(now)
-	blankHost.KeyPasswordHost = "  "
+	blankHost.CredentialHost = "  "
 	cases := []struct {
 		name         string
 		meta         sessionMetadata
 		sessionTitle string
 	}{
-		{"missing refresh token", invalid, "Session: Invalid"},
-		{"missing key-password provider", noKeyPasswordProvider, "Session: Invalid"},
-		{"provider alias", aliasProvider, "Session: Invalid"},
-		{"blank key-password host", blankHost, "Session: Invalid"},
+		{"missing revision", noRevision, "Session: Invalid"},
+		{"missing credential store", noStore, "Session: Invalid"},
+		{"credential store alias", aliasStore, "Session: Invalid"},
+		{"blank credential host", blankHost, "Session: Invalid"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -441,7 +440,7 @@ func TestDecideRefreshAllowsNewSessionAfterTerminalFailure(t *testing.T) {
 func TestInspectAuthReadinessBlocksTerminalRefreshFailure(t *testing.T) {
 	now := time.Date(2026, 6, 23, 18, 0, 0, 0, time.UTC)
 	resetRefreshForStatusTest(t, now)
-	home := setupFakeHome(t, fakeHomeOpts{configJSON: `{"keyPasswordProvider":"pass-cli"}`})
+	home := setupFakeHome(t, fakeHomeOpts{configJSON: `{"credentialStore":"pass-cli"}`})
 	writeSessionForStatusTest(t, home, validStatusTestSession(now))
 	refreshMu.Lock()
 	refreshState = sessionRefreshState{
@@ -654,7 +653,7 @@ func TestMaybeRefreshSessionSkipsInvalidSession(t *testing.T) {
 	resetRefreshForStatusTest(t, now)
 	home := setupFakeHome(t, fakeHomeOpts{})
 	meta := validStatusTestSession(now)
-	meta.KeyPasswordProvider = ""
+	meta.CredentialStore = ""
 	meta.TokenExpiresAt = now.Add(-time.Hour).UnixMilli()
 	writeSessionForStatusTest(t, home, meta)
 	origFindDriveCLI := findDriveCLI
@@ -753,7 +752,7 @@ func TestClearRefreshStateKeepsRunningRefresh(t *testing.T) {
 func TestRefreshTitleForInvalidSession(t *testing.T) {
 	now := time.Date(2026, 6, 23, 18, 0, 0, 0, time.UTC)
 	meta := validStatusTestSession(now)
-	meta.KeyPasswordHost = ""
+	meta.CredentialHost = ""
 	if got := refreshTitle(now, meta, true, sessionRefreshState{}); got != "Refresh: Reconnect required" {
 		t.Fatalf("refreshTitle() = %q, want Reconnect required", got)
 	}

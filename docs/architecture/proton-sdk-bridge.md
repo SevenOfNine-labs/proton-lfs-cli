@@ -13,9 +13,10 @@ The adapter's `BridgeClient` spawns `proton-drive-cli bridge <command>` as a
 subprocess, passing JSON via stdin and reading JSON from stdout. The Go adapter
 never sends account username/password fields, credential selectors, or login
 permission flags: every request carries only `storageBase`, `appVersion`
-(when set) and the command's own fields. The bridge unlocks Drive with the
-key password the saved session's provider holds; the browser fork delivers
-that key password for every account type.
+(when set) and the command's own fields. The bridge reads the session
+tokens and the key password from the credential store the saved session
+names and unlocks Drive with that key password; the browser fork delivers
+it for every account type.
 
 ## Subprocess Communication Protocol
 
@@ -38,8 +39,8 @@ malformed `exists` and batch helper payloads instead of inferring success.
 ## Bridge Commands
 
 - `auth-state`: Inspect local auth/session readiness without any Proton
-  request; it reads the saved session and checks that the session's
-  key-password entry is readable from its provider.
+  request; it reads the saved session and checks that the session's entry
+  is readable from its credential store.
 - `init`: Ensure the configured LFS storage directory exists.
 - `upload`: Upload a file to Proton Drive by OID.
 - `download`: Download a file from Proton Drive by OID.
@@ -53,7 +54,7 @@ malformed `exists` and batch helper payloads instead of inferring success.
 
 - No account credentials are accepted by bridge transfer commands
 - `auth-state` readiness is local-only. It validates the saved session's
-  shape, its local expiry and the presence of its key-password entry; it
+  shape, its local expiry and the presence of its credential-store entry; it
   cannot prove a remotely revoked Proton session is still accepted by the
   server.
 - Bridge requests are passed via stdin (not visible in `ps` output) and carry
@@ -61,7 +62,7 @@ malformed `exists` and batch helper payloads instead of inferring success.
 - OID validation: strict 64-character hex regex before subprocess spawn
 - Path traversal prevention: reject paths containing `..`
 - One subprocess per command; timeout `--bridge-timeout` / `PROTON_LFS_BRIDGE_TIMEOUT` (default 5 minutes) plus one second per 256 KiB for transfers, with the process group killed on expiry
-- Session tokens stored in `~/.proton-drive-cli/session.json` with 0600 permissions
+- Session tokens and key password live in the credential store; `~/.proton-drive-cli/session.json` (0600) holds no secret
 
 The complete request, payload and error-code tables are in proton-drive-cli's
 bridge protocol reference (`submodules/proton-drive-cli/docs/reference/bridge-protocol.md`,

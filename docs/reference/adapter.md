@@ -80,12 +80,18 @@ everything else in the adapter's environment is dropped. Names ending in `_` are
   key is the secret of pass-cli's `env` key provider)
 - `DBUS_SESSION_BUS_ADDRESS` (Secret Service access for the pass-cli keyring
   and `git credential-libsecret`)
-- `GIT_CONFIG_GLOBAL` and `GCM_*` (the git configuration and Git Credential
-  Manager settings `git credential` reads for the `git-credential` provider)
+- `GIT_CONFIG_GLOBAL`, `GIT_CONFIG_SYSTEM`, `GIT_CONFIG_NOSYSTEM` and `GCM_*`
+  (the git configuration and Git Credential Manager settings `git config`
+  and `git credential` read for the `git-credential` store)
+- `DISPLAY`, `WAYLAND_DISPLAY`, `GPG_TTY`, `SSH_TTY`, `PASSWORD_STORE_DIR`,
+  `GNUPGHOME` (Git Credential Manager's `gpg` store needs a desktop session
+  or a terminal and the pass(1) and gpg(1) directories)
+- `WSL_INTEROP`, `WSLENV` (a Windows `git-credential-manager.exe` started
+  from WSL)
 
-`PROTON_KEY_PASSWORD_PROVIDER` and `PROTON_KEY_PASSWORD_HOST` are not
-forwarded: only `proton-drive-cli login` reads them, and bridge commands use
-the provider and host recorded in the saved session. Any other variable,
+`PROTON_CREDENTIAL_STORE` and `PROTON_CREDENTIAL_HOST` are not forwarded:
+only `proton-drive-cli login` reads them, and bridge commands use the
+credential store and host recorded in the saved session. Any other variable,
 secret-shaped names such as `PROTON_PASSWORD` included, never reaches the
 bridge.
 

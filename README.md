@@ -30,8 +30,9 @@ End-to-end encrypted Git LFS backend for Proton Drive.
 - Yarn 4 (via Corepack) for proton-drive-cli's dependencies; npm for the
   vendored Proton SDK build
 - git-lfs
-- pass-cli 2.7.0 when Proton Pass stores the browser-fork key password (the
-  `git-credential` provider needs no extra tool)
+- pass-cli 2.7.0 when Proton Pass is the credential store; the
+  `git-credential` store needs a git credential helper that encrypts secrets
+  at rest (`osxkeychain`, `wincred`, `libsecret` or Git Credential Manager)
 
 No .NET SDK is required.
 
@@ -83,16 +84,16 @@ SDK-backed integration path (one real Proton Drive round trip per test):
 
 ```bash
 pass-cli login
-proton-drive-cli login --key-password-provider pass-cli
+proton-drive-cli login --credential-store pass-cli
 make check-sdk-prereqs
 make test-integration-sdk
 ```
 
 Two-factor authentication and CAPTCHA are completed in the browser during
 `proton-drive-cli login`. The browser fork delivers the key password for
-every account type, two-password accounts included; transfers unlock Drive
-with the stored key password. `proton-drive-cli doctor` checks the setup
-offline.
+every account type, two-password accounts included; login stores it with
+the session tokens in the credential store, and transfers unlock Drive with
+it. `proton-drive-cli doctor` checks the setup offline.
 
 If your Node binary is managed in shell startup (for example `nvm` in
 `~/.zshrc`), pass it explicitly:
@@ -110,8 +111,10 @@ make test-integration-sdk
 
 ## Credentials
 
-Account authorization uses browser sign-in. Proton Pass or `git-credential`
-only stores the browser-derived key password, keyed by the session UID:
+Account authorization uses browser sign-in. The credential store, Proton
+Pass or `git-credential`, holds the session tokens and the browser-derived key
+password as one entry keyed by the session UID;
+`~/.proton-drive-cli/session.json` holds no secret:
 
 ```bash
 pass-cli login

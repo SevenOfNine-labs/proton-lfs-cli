@@ -17,7 +17,7 @@ System Tray App (cmd/tray/)
 Go Adapter (cmd/adapter/) → proton-drive-cli (subprocess, stdin/stdout JSON) → Proton API
                                     ↓
                         pass-cli or git-credential
-              (browser-fork key password, stored and read by proton-drive-cli)
+       (session tokens and key password, stored and read by proton-drive-cli)
 ```
 
 Shared configuration lives in `internal/config/` and is used by both the adapter and tray app.
@@ -32,7 +32,7 @@ The project has five main components:
 
 2. **System Tray App** (`cmd/tray/`): Cross-platform menu bar application
    - `main.go`: Entry point, subcommand dispatch, `--version`, single-instance lock, login-shell PATH adoption (macOS and Linux)
-   - `menu.go`: Menu structure, key-password provider toggle, LFS registration, Open Logs, Run Doctor, native notifications
+   - `menu.go`: Menu structure, credential store toggle, LFS registration, Open Logs, Run Doctor, native notifications
    - `connect.go`: "Connect to Proton" browser-fork login flow and login rate-limit guard
    - `cli.go`: CLI subcommand handlers (login, logout, status, config, register)
    - `scope_diagnostics.go`: `scope-diagnostics [--live]` redacted auth/scope report
@@ -43,7 +43,7 @@ The project has five main components:
 3. **Shared Config** (`internal/config/`): Constants and helpers shared by adapter + tray
    - `config.go`: Env var names, defaults, `EnvTrim`/`EnvOrDefault`/`EnvBoolOrDefault`
    - `status.go`: `StatusReport` struct, atomic `WriteStatus`/`ReadStatus`
-   - `prefs.go`: `Preferences` struct (`keyPasswordProvider`), `LoadPrefs`/`SavePrefs`
+   - `prefs.go`: `Preferences` struct (`credentialStore`), `LoadPrefs`/`SavePrefs`
    - `fsutil.go`: `WriteFileAtomic` (temporary file, fsync, rename)
    - `internal/bridgeproto/`: bridge contract shared by adapter and tray: response envelope parser, environment allowlist, redaction
 
@@ -90,8 +90,8 @@ make lint               # Run go vet, golangci-lint and the comment policy check
 ### Credential Management
 ```bash
 pass-cli login          # Authenticate with Proton Pass
-eval "$(make -s pass-env)"  # Export pass-cli provider binary only
-./scripts/export-pass-env.sh  # Direct provider-env export
+eval "$(make -s pass-env)"  # Export the pass-cli binary path only
+./scripts/export-pass-env.sh  # Direct pass-cli env export
 ```
 
 ## Backend Modes
@@ -114,46 +114,53 @@ Account login is browser-fork-only and happens in `proton-drive-cli login`
 before Git LFS transfers; two-factor authentication and CAPTCHA are
 completed in the browser. The fork delivers the key password for every
 account type; there is no separate mailbox/data password. proton-drive-cli
-stores the key password, keyed by the session UID, in the chosen provider
-and records the provider and host in `~/.proton-drive-cli/session.json`;
-bridge commands, `doctor` and `logout` use the recorded values. The Go
-adapter never sends account username/password fields, credential selectors,
-`credentialProvider`, or `allowLogin`: bridge requests carry only
-`appVersion`, `storageBase` and the command fields. The tray's key-password
-provider preference is `keyPasswordProvider` in `~/.proton-lfs/config.json`,
-passed to `login` as `--key-password-provider`.
+stores the session secrets (access token, refresh token and key password)
+as one entry, keyed by the session UID, in the chosen credential store, and
+writes only non-secret fields to `~/.proton-drive-cli/session.json`: UID,
+scopes, credential store and host, token expiry and a revision that changes
+with every login and refresh. Bridge commands, `doctor` and `logout` use the
+recorded store. The Go adapter never sends account username/password
+fields, credential selectors, `credentialProvider`, or `allowLogin`: bridge
+requests carry only `appVersion`, `storageBase` and the command fields. The
+tray's credential store preference is `credentialStore` in
+`~/.proton-lfs/config.json`, passed to `login` as `--credential-store`.
 
-Key-password entry lifecycle: `proton-drive-cli logout` removes it (and
-revokes the session); a login that yields a new UID removes the previous
+Session entry lifecycle: every token refresh rewrites it under the session
+lock; `proton-drive-cli logout` revokes the session, deletes session.json
+and then removes it; a login that yields a new UID removes the previous
 UID's entry; a refresh token the API rejects with a Proton error body and
 HTTP 4xx other than 408 and 429, when no other process rotated it, signs
-the session out (session.json,
-crypto cache and the entry deleted, `auth-state` then reports
-`needs_login`).
+the session out (session.json, crypto cache and the entry deleted,
+`auth-state` then reports `needs_login`). An entry the store cannot return
+makes `auth-state` report `credentials_unavailable`.
 
 ### pass-cli (default)
 
-`proton-drive-cli` can store the browser-fork key password in Proton Pass.
+`proton-drive-cli` can store the session entry in Proton Pass.
 
 ```bash
-PROTON_KEY_PASSWORD_PROVIDER=pass-cli  # Read by proton-drive-cli login and the Makefile's live targets
-PROTON_PASS_CLI_BIN=pass-cli           # Binary path (respected by proton-drive-cli)
+PROTON_CREDENTIAL_STORE=pass-cli  # Read by proton-drive-cli login and the Makefile's live targets
+PROTON_PASS_CLI_BIN=pass-cli      # Binary path (respected by proton-drive-cli)
 ```
 
 **Setup:**
 ```bash
 pass-cli login
-proton-drive-cli login --key-password-provider pass-cli
+proton-drive-cli login --credential-store pass-cli
 ```
 
 ### git-credential
 
-Uses Git Credential Manager (GCM), macOS Keychain, Windows Credential Manager,
-or Linux Secret Service to store the browser-fork key password:
+Stores the session entry through git's credential helper protocol
+(git-credential(1)). proton-drive-cli uses only the first helper of the
+system and global git configuration that encrypts secrets at rest
+(`osxkeychain`, `wincred`, `libsecret`, or `manager` with an encrypting
+Git Credential Manager store) and pins it, so `store` or `cache` never
+receive the session secrets:
 
 ```bash
-PROTON_KEY_PASSWORD_PROVIDER=git-credential
-proton-drive-cli login --key-password-provider git-credential
+PROTON_CREDENTIAL_STORE=git-credential
+proton-drive-cli login --credential-store git-credential
 ```
 
 ## proton-drive-cli Bridge
@@ -171,7 +178,7 @@ The `proton-drive-cli` submodule (`submodules/proton-drive-cli/`) provides:
 
 ## Important Configuration Files
 
-- `.env` / `.env.example`: Environment configuration (backend, paths, timeouts, provider defaults; never credentials)
+- `.env` / `.env.example`: Environment configuration (backend, paths, timeouts, credential store defaults; never credentials)
 - `Makefile`: Build orchestration, test runners, prerequisite checks
 - `submodules/proton-drive-cli/package.json` and `yarn.lock`: the JavaScript dependencies (the root has no JS project)
 - `go.mod`: Go 1.25 module (deps: `fyne.io/systray`, `github.com/gofrs/flock`)
@@ -209,11 +216,11 @@ cd submodules/proton-drive-cli && yarn build && yarn test
 - Never commit credentials to `.env` (use `.env.example` patterns)
 - Account login is browser-fork-only and must happen outside Git LFS transfer commands
 - Transfer bridge requests never contain account username/password fields, credential selectors, `credentialProvider`, or `allowLogin`; they travel via stdin (never command-line args)
-- Environment allowlist (`internal/bridgeproto/env.go`) filters subprocess env (named variables such as PATH, HOME, NODE_BIN, MOCK_BRIDGE_* and the credential-tool settings; `PROTON_KEY_PASSWORD_*` is not forwarded)
+- Environment allowlist (`internal/bridgeproto/env.go`) filters subprocess env (named variables such as PATH, HOME, NODE_BIN, MOCK_BRIDGE_* and the credential-tool settings; `PROTON_CREDENTIAL_STORE` is not forwarded)
 - OID validation: `/^[a-f0-9]{64}$/i` before subprocess spawn
 - Path traversal prevention: reject paths containing `..`
 - One bridge subprocess per command, bounded by `--bridge-timeout` (default 5 min, plus 1 s per 256 KiB for transfers) and killed with its process group on expiry; concurrency comes from git-lfs starting one adapter process per transfer slot
-- Session tokens stored in `~/.proton-drive-cli/session.json` (0600, directory 0700); no password is written to disk
+- Session tokens and key password live in the credential store; `~/.proton-drive-cli/session.json` (0600, directory 0700) holds no secret
 - See `docs/security/threat-model.md` for full threat model
 
 ## Status File Protocol

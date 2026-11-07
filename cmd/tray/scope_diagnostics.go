@@ -39,7 +39,7 @@ type scopeDiagnosticsReport struct {
 type scopeDiagnosticsConfig struct {
 	DriveCLIFound                  bool   `json:"driveCliFound"`
 	DriveCLIPath                   string `json:"driveCliPath,omitempty"`
-	KeyPasswordProvider            string `json:"keyPasswordProvider"`
+	CredentialStore                string `json:"credentialStore"`
 	StorageBase                    string `json:"storageBase"`
 	AdapterRequestAppVersion       string `json:"adapterRequestAppVersion"`
 	AdapterRequestAppVersionSource string `json:"adapterRequestAppVersionSource"`
@@ -55,8 +55,8 @@ type scopeDiagnosticsSession struct {
 	UIDFingerprint         string   `json:"uidFingerprint,omitempty"`
 	Scopes                 []string `json:"scopes,omitempty"`
 	TokenExpiresAt         string   `json:"tokenExpiresAt,omitempty"`
-	AccessTokenPresent     bool     `json:"accessTokenPresent,omitempty"`
-	RefreshTokenPresent    bool     `json:"refreshTokenPresent,omitempty"`
+	CredentialStore        string   `json:"credentialStore,omitempty"`
+	CredentialHost         string   `json:"credentialHost,omitempty"`
 	RawTokenValuesIncluded bool     `json:"rawTokenValuesIncluded"`
 }
 
@@ -102,7 +102,7 @@ func cliScopeDiagnostics(w io.Writer, args []string) int {
 		Config: scopeDiagnosticsConfig{
 			DriveCLIFound:                  driveCLI != "",
 			DriveCLIPath:                   displayPath(driveCLI),
-			KeyPasswordProvider:            prefs.KeyPasswordProvider,
+			CredentialStore:                prefs.CredentialStore,
 			StorageBase:                    config.EnvOrDefault(config.EnvStorageBase, config.DefaultStorageBase),
 			AdapterRequestAppVersion:       envOrUnset(config.EnvAppVersion),
 			AdapterRequestAppVersionSource: appVersionSource(),
@@ -249,10 +249,7 @@ func runDriveScopeBridgeCommand(driveCLI, command string, request map[string]any
 	defer cancel()
 	cmd := driveCLICommand(ctx, driveCLI, "bridge", command)
 	cmd.Stdin = bytes.NewReader(body)
-	cmd.Env = bridgeproto.FilterEnv(os.Environ())
-	if passCLI := discoverPassCLIBinary(); passCLI != "" {
-		cmd.Env = append(cmd.Env, "PROTON_PASS_CLI_BIN="+passCLI)
-	}
+	cmd.Env = driveCLIEnv(bridgeproto.FilterEnv(os.Environ()))
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -297,8 +294,8 @@ func readScopeSessionDiagnostics() scopeDiagnosticsSession {
 	if expiry := tokenExpiry(meta); !expiry.IsZero() {
 		out.TokenExpiresAt = expiry.UTC().Format(time.RFC3339)
 	}
-	out.AccessTokenPresent = meta.AccessToken != ""
-	out.RefreshTokenPresent = meta.RefreshToken != ""
+	out.CredentialStore = meta.CredentialStore
+	out.CredentialHost = meta.CredentialHost
 	return out
 }
 
@@ -374,10 +371,9 @@ func redactMap(in map[string]any) map[string]any {
 	return out
 }
 
-// redactValue masks the value of a sensitive key except a boolean, which
-// only reports presence (keyPasswordAvailable, accessTokenPresent).
+// redactValue masks the value of a sensitive key.
 func redactValue(key string, value any) any {
-	if _, isBool := value.(bool); bridgeproto.IsSensitiveKey(key) && !isBool {
+	if bridgeproto.IsSensitiveKey(key) {
 		if value == nil || fmt.Sprint(value) == "" {
 			return value
 		}

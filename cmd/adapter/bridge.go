@@ -52,16 +52,16 @@ type BridgeClientConfig struct {
 
 // BridgeAuthStateResponse is the `bridge auth-state` payload
 // (schemas/bridge/v1/auth-state-payload.schema.json): no token refresh and no
-// Proton Drive request; the key-password check runs the session's provider.
+// Proton Drive request; the credentials check reads the session's credential store.
 type BridgeAuthStateResponse struct {
 	State                string   `json:"state"`
 	HasSession           bool     `json:"hasSession"`
 	SessionValid         bool     `json:"sessionValid"`
 	SessionExpired       bool     `json:"sessionExpired"`
 	SessionUIDPresent    bool     `json:"sessionUidPresent"`
-	KeyPasswordAvailable bool     `json:"keyPasswordAvailable,omitempty"`
-	KeyPasswordProvider  string   `json:"keyPasswordProvider,omitempty"`
-	KeyPasswordHost      string   `json:"keyPasswordHost,omitempty"`
+	CredentialsAvailable bool     `json:"credentialsAvailable,omitempty"`
+	CredentialStore      string   `json:"credentialStore,omitempty"`
+	CredentialHost       string   `json:"credentialHost,omitempty"`
 	WillAttemptNetwork   bool     `json:"willAttemptNetwork"`
 	Errors               []string `json:"errors"`
 	Actions              []string `json:"actions"`
@@ -271,7 +271,7 @@ func (bc *BridgeClient) baseRequest() map[string]any {
 }
 
 // AuthState runs `bridge auth-state`, which checks the saved session and its
-// key-password entry without refreshing tokens or calling the Proton Drive API.
+// credential-store entry without refreshing tokens or calling the Proton Drive API.
 func (bc *BridgeClient) AuthState() (*BridgeAuthStateResponse, error) {
 	req := bc.baseRequest()
 	resp, err := bc.runBridgeCommand("auth-state", req)

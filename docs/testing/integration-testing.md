@@ -33,8 +33,8 @@ Integration tests validate Git LFS client behavior against the adapter runtime a
 
 Proton account authorization is browser-fork-only and must already have
 produced a saved local session before real SDK transfers run. proton-drive-cli
-reads the session's key password from the provider recorded in the session
-(`pass-cli` or `git-credential`); account usernames, passwords and
+reads the session tokens and key password from the credential store recorded
+in the session (`pass-cli` or `git-credential`); account usernames, passwords and
 second-factor codes are never supplied to Git LFS transfers.
 
 Preferred path:
@@ -46,8 +46,8 @@ make test-integration-sdk
 
 `make test-integration-sdk` runs `make check-submodules` and
 `make check-sdk-prereqs` (git-lfs on `PATH`, a built proton-drive-cli entry
-point, a resolvable node binary and, when the key-password provider
-`PROTON_KEY_PASSWORD_PROVIDER` is `pass-cli` (the default), a logged-in
+point, a resolvable node binary and, when the credential store
+`PROTON_CREDENTIAL_STORE` is `pass-cli` (the default), a logged-in
 pass-cli), then, for `pass-cli`, exports `PROTON_PASS_CLI_BIN` via
 `scripts/export-pass-env.sh` and runs the tests matching `SDK` with
 `PROTON_LFS_RUN_SDK_INTEGRATION=1`. The script prints only that one export.
@@ -57,22 +57,23 @@ If Node is only configured via shell startup files (`~/.zshrc`, `nvm`, `fnm`), r
 make test-integration-sdk NODE="$(command -v node)"
 ```
 
-Sign in once with `proton-drive-cli login --key-password-provider <provider>`
+Sign in once with `proton-drive-cli login --credential-store <store>`
 before real SDK tests; two-factor authentication is completed in the browser.
 The browser fork delivers the key password for every account type, and
-transfers unlock Drive with the stored UID-scoped key password.
+transfers unlock Drive with the UID-scoped key password from the credential
+store.
 
 ## Personal Account Practical Steps
 
 If you are testing with a personal Proton account:
 
-1. With the `pass-cli` key-password provider, authenticate pass-cli; with
-   `git-credential`, set `PROTON_KEY_PASSWORD_PROVIDER=git-credential`. Then
+1. With the `pass-cli` credential store, authenticate pass-cli; with
+   `git-credential`, set `PROTON_CREDENTIAL_STORE=git-credential`. Then
    complete the browser-fork login and run the prerequisite checks:
 
 ```bash
 pass-cli login
-proton-drive-cli login --key-password-provider pass-cli
+proton-drive-cli login --credential-store pass-cli
 make check-sdk-prereqs
 ```
 
@@ -99,8 +100,8 @@ This uses `tests/testdata/mock-proton-drive-cli.js` (CI also points
 `PROTON_PASS_CLI_BIN` at `scripts/mock-pass-cli.sh`) to exercise the full
 pipeline: `git lfs push` -> adapter -> mock proton-drive-cli -> mock storage,
 then clone and pull back. A second test sets the mock's auth state to
-`needs_key_password` and checks that the push fails with the key-password
-error.
+`credentials_unavailable` and checks that the push fails with the
+`credentials_unavailable` error.
 
 ## Coverage Expectations
 
@@ -128,7 +129,7 @@ logged-in pass-cli (`scripts/export-pass-env.sh`):
 
 ```bash
 PROTON_LFS_LIVE_CANARY=I_UNDERSTAND_THIS_TOUCHES_A_REAL_PROTON_ACCOUNT \
-LIVE_CANARY_DOCTOR_ARGS="--key-password-provider pass-cli" \
+LIVE_CANARY_DOCTOR_ARGS="--credential-store pass-cli" \
   make test-e2e-real
 ```
 
@@ -141,7 +142,7 @@ Git repository, LFS object, or transfer adapter. The Makefile and Go test both
 parse the structured `doctor --json` readiness fields instead of matching
 free-form doctor output.
 Offline readiness is deliberately local: it proves session shape, local
-expiry, file permissions, and that the session's key-password entry is
+expiry, file permissions, and that the session's credential-store entry is
 readable. It does not prove a remotely revoked or server-expired Proton
 session is still valid; that can only be found by the guarded live metadata
 path, and failures there must not cause a retry-login loop or continue into
@@ -161,7 +162,7 @@ only inspects local status and offline doctor readiness. Its post-login doctor
 inspection requires `ok`, `authState.state` `ready` and `canAttemptTransfer`,
 and its script tests (`scripts/browser_fork_canary_test.go`) prove that no
 transfer command is attempted in this path. The script accepts only
-`--key-password-provider` and `--key-password-host` login args, so account
+`--credential-store` and `--credential-host` login args, so account
 credential flags and unknown options fail before proton-drive-cli is
 invoked.
 

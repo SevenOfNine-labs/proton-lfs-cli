@@ -29,10 +29,10 @@ SDK_JS_DIR := $(DRIVE_CLI_DIR)/submodules/sdk/client/js
 GO_CACHE_DIR := .cache/go-build
 GO_TEST_PKGS := ./cmd/... ./internal/...
 LIVE_CANARY_ACK_VALUE := I_UNDERSTAND_THIS_TOUCHES_A_REAL_PROTON_ACCOUNT
-# Key-password provider of the session under test; the Proton Pass export
+# Credential store of the session under test; the Proton Pass export
 # (scripts/export-pass-env.sh) is needed only for pass-cli.
-KEY_PASSWORD_PROVIDER ?= $(or $(PROTON_KEY_PASSWORD_PROVIDER),pass-cli)
-PASS_ENV := $(if $(filter pass-cli,$(KEY_PASSWORD_PROVIDER)),eval "$$(./scripts/export-pass-env.sh)" &&,)
+CREDENTIAL_STORE ?= $(or $(PROTON_CREDENTIAL_STORE),pass-cli)
+PASS_ENV := $(if $(filter pass-cli,$(CREDENTIAL_STORE)),eval "$$(./scripts/export-pass-env.sh)" &&,)
 
 .PHONY: help setup setup-env install-deps \
 	build build-adapter build-tray build-lfs build-sdk build-drive-cli build-sea build-all build-bundle \
@@ -290,27 +290,27 @@ check-live-canary-ack: ## Refuse real Proton tests without explicit acknowledgem
 		echo "This target may touch a real Proton account and must never run by accident."; \
 		echo "Read docs/operations/live-canary-runbook.md first."; \
 		echo "Then run with:"; \
-		echo "  PROTON_LFS_LIVE_CANARY=$(LIVE_CANARY_ACK_VALUE) LIVE_CANARY_DOCTOR_ARGS='--key-password-provider pass-cli' make test-e2e-real"; \
+		echo "  PROTON_LFS_LIVE_CANARY=$(LIVE_CANARY_ACK_VALUE) LIVE_CANARY_DOCTOR_ARGS='--credential-store pass-cli' make test-e2e-real"; \
 		exit 2; \
 	fi
 
 check-live-canary-doctor-args: ## Require explicit offline doctor args for real Proton tests
 	@if [ -z "$${LIVE_CANARY_DOCTOR_ARGS:-}" ]; then \
 		echo "Refusing to run a real Proton canary without LIVE_CANARY_DOCTOR_ARGS."; \
-		echo "The offline doctor must pass with the exact key-password provider args"; \
+		echo "The offline doctor must pass with the exact credential store args"; \
 		echo "that will be used by the live canary."; \
 		echo "Example:"; \
-		echo "  LIVE_CANARY_DOCTOR_ARGS='--key-password-provider pass-cli'"; \
+		echo "  LIVE_CANARY_DOCTOR_ARGS='--credential-store pass-cli'"; \
 		exit 2; \
 	fi
 
 check-browser-fork-canary-args: ## Require explicit browser-fork login args
 	@if [ -z "$${LIVE_BROWSER_FORK_LOGIN_ARGS:-}" ]; then \
 		echo "Refusing to run browser-fork canary without LIVE_BROWSER_FORK_LOGIN_ARGS."; \
-		echo "This must name the key-password provider/host for the single"; \
+		echo "This must name the credential store/host for the single"; \
 		echo "browser login attempt."; \
 		echo "Example:"; \
-		echo "  LIVE_BROWSER_FORK_LOGIN_ARGS='--key-password-provider git-credential'"; \
+		echo "  LIVE_BROWSER_FORK_LOGIN_ARGS='--credential-store git-credential'"; \
 		exit 2; \
 	fi
 
@@ -325,7 +325,7 @@ test-e2e-real: live-drive-scope-canary ## Real Proton Drive E2E (requires explic
 	@$(PASS_ENV) \
 		GO="$(GO)" GOCACHE=$(CURDIR)/$(GO_CACHE_DIR) $(GO) test -tags integration ./tests/integration/... -run E2E -v
 
-pass-env: ## Print the PROTON_PASS_CLI_BIN export for the pass-cli key-password provider
+pass-env: ## Print the PROTON_PASS_CLI_BIN export for the pass-cli credential store
 	@./scripts/export-pass-env.sh
 
 check-submodules: ## Verify pinned root and Proton SDK submodule checkouts
@@ -333,7 +333,7 @@ check-submodules: ## Verify pinned root and Proton SDK submodule checkouts
 
 check-sdk-prereqs: ## Verify prerequisites for sdk integration tests
 	@command -v git-lfs >/dev/null 2>&1 || (echo "git-lfs not found on PATH" && exit 1)
-	@if [ "$(KEY_PASSWORD_PROVIDER)" = "pass-cli" ]; then \
+	@if [ "$(CREDENTIAL_STORE)" = "pass-cli" ]; then \
 		command -v "$${PROTON_PASS_CLI_BIN:-pass-cli}" >/dev/null 2>&1 || { echo "pass-cli not found on PATH (or PROTON_PASS_CLI_BIN invalid)"; exit 1; }; \
 		./scripts/export-pass-env.sh >/dev/null; \
 	fi

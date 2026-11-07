@@ -74,7 +74,7 @@ for a refused `init`. The states and their conditions are listed in
 | `session_expired` | none | none | transfers continue; `bridge init` refreshes the access token before use |
 | `needs_login` | 401 | `auth_required` | `no ready Proton Drive session; run proton-drive-cli login before Git LFS transfer` |
 | `session_invalid` | 401 | `auth_required` | `Proton Drive session is invalid; run proton-drive-cli login before Git LFS transfer` |
-| `needs_key_password` | 401 | `key_password_required` | `stored browser-fork key password required for this Proton session` |
+| `credentials_unavailable` | 401 | `credentials_unavailable` | `Proton session credentials are unavailable from the credential store` |
 | any other value | 502 | `server_error` | `unrecognized Proton Drive auth state` |
 | payload missing, without `state`, not parsable, or with `willAttemptNetwork: true` | 502 | `server_error` | `failed to inspect proton drive auth state` |
 
@@ -95,7 +95,7 @@ bridge emits.
 | Bridge `errorCode` | Code | `errorCode` | Message sent to git-lfs |
 | --- | --- | --- | --- |
 | `AUTH_FAILED`, `SESSION_EXPIRED` | 401 | `auth_required` | `session is invalid or expired` |
-| `KEY_PASSWORD_REQUIRED` | 401 | `key_password_required` | `stored browser-fork key password required for this Proton session` |
+| `CREDENTIALS_UNAVAILABLE` | 401 | `credentials_unavailable` | `Proton session credentials are unavailable from the credential store` |
 | `CAPTCHA_REQUIRED` | 407 | `captcha_required` | `captcha verification required — run: proton-drive-cli login` |
 | `RATE_LIMITED` | 429 | `rate_limited` | `rate limited by proton api — wait and retry` |
 | `INSUFFICIENT_SCOPE` | 403 | `insufficient_scope` | `Proton rejected this app/session authorization scope` |
@@ -154,8 +154,8 @@ mapped to 400 `invalid_request` with `proton-drive-cli could not be started;
 check --drive-cli-bin, PROTON_DRIVE_CLI_BIN and NODE_BIN`, before any keyword
 rule.
 
-Keyword rules, in order, on the lower-cased message: key password (401
-`key_password_required`); invalid or expired session, unauthorized (401
+Keyword rules, in order, on the lower-cased message: credential store, key
+password (401 `credentials_unavailable`); invalid or expired session, unauthorized (401
 `auth_required`); sufficient scope (403 `insufficient_scope`); not found
 (404 `not_found`); captcha (407 `captcha_required`); rate limit (429
 `rate_limited`); timeout, timed out, connection refused, no such host, dial
@@ -174,7 +174,7 @@ order:
 
 1. A structured backend code other than `unknown` decides
    (`statusForErrorCode`): `captcha_required` gives `captcha`;
-   `rate_limited` gives `rate_limited`; `key_password_required` and
+   `rate_limited` gives `rate_limited`; `credentials_unavailable` and
    `auth_required` give `auth_required`; every other
    code gives `error`.
 2. Without a structured code (`classifyErrorByStatus`), the HTTP-style code

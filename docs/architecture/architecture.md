@@ -41,7 +41,7 @@ graph TB
         Status[~/.proton-lfs/status.json]
         Prefs[~/.proton-lfs/config.json]
         Session[~/.proton-drive-cli/session.json]
-        Providers[pass-cli or git credential helper<br/>browser-fork key password]
+        Stores[pass-cli or git credential helper<br/>session tokens and key password]
     end
 
     Git -->|stdin/stdout JSON lines| Main
@@ -51,14 +51,14 @@ graph TB
     BridgeCmd --> SDK
     SDK -->|HTTPS| Proton[Proton Drive API]
     BridgeCmd --> Session
-    BridgeCmd --> Providers
+    BridgeCmd --> Stores
     Main -->|writes| Status
     Tray -->|polls every 5 s| Status
     Tray -->|reads/writes| Prefs
     Tray -->|reads| Session
     Tray -->|login, logout, session refresh, doctor| CLI
     CLI --> Session
-    CLI --> Providers
+    CLI --> Stores
     Main --> Config
     Tray --> Config
 ```
@@ -66,9 +66,11 @@ graph TB
 Design rules that the code enforces:
 
 - Account login happens only in `proton-drive-cli login` (browser session
-  fork), which delivers the key password for every account type. Transfer
-  commands never carry credentials; the adapter's bridge requests contain
-  only `storageBase`, `appVersion` and the object fields.
+  fork), which delivers the key password for every account type; it stores
+  the session tokens and the key password in the credential store and writes
+  no secret to `session.json`. Transfer commands never carry credentials;
+  the adapter's bridge requests contain only `storageBase`, `appVersion` and
+  the object fields.
 - The adapter fails closed: `init` runs `bridge auth-state` and refuses every
   state other than `ready` and `session_expired`; `bridge init` refreshes an
   expired access token before use.
@@ -125,14 +127,14 @@ sequenceDiagram
     participant User
     participant Tray as proton-lfs-tray
     participant CLI as proton-drive-cli
-    participant Provider as pass-cli / git credential
+    participant Store as pass-cli / git credential
     participant Adapter as git-lfs-proton-adapter
 
     User->>Tray: Connect to Proton...
-    Tray->>CLI: login --key-password-provider <p> -q
+    Tray->>CLI: login --credential-store <store> -q
     CLI->>User: browser sign-in (session fork)
-    CLI->>Provider: store key password under proton-drive-key.proton-lfs-cli.local
-    CLI->>CLI: save session.json (tokens only)
+    CLI->>Store: store tokens and key password under proton-drive-cli.invalid
+    CLI->>CLI: save session.json (UID, store, host, revision, expiry)
     CLI-->>Tray: exit 0
     Tray->>Tray: readiness from session.json
 
@@ -142,8 +144,8 @@ sequenceDiagram
 
     Note over Adapter,CLI: later, per transfer session
     Adapter->>CLI: bridge auth-state (offline)
-    CLI->>Provider: verify key password is readable
-    CLI-->>Adapter: ready / needs_login / needs_key_password / ...
+    CLI->>Store: verify the session entry is readable
+    CLI-->>Adapter: ready / needs_login / credentials_unavailable / ...
 ```
 
 The tray derives `Status`, `Session`, `Transfers` and `Refresh` lines from
@@ -163,7 +165,7 @@ login.
 └── tray.lock            # single-instance lock
 
 ~/.proton-drive-cli/     # 0700
-├── session.json         # uid, tokens, scopes, key-password provider and host, expiry (0600)
+├── session.json         # uid, scopes, credential store and host, revision, expiry; no secret (0600)
 ├── session.lock         # proper-lockfile directory guarding refresh-token rotation
 ├── crypto-cache.json    # cached user and address records of the session UID (0600, 1 h)
 └── rate-limit-cooldown.json  # wait-until timestamp after a Proton rate limit (0600)

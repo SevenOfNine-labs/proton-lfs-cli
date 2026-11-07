@@ -9,7 +9,7 @@ import (
 var testAuthStates = []string{
 	"ready",
 	"needs_login",
-	"needs_key_password",
+	"credentials_unavailable",
 	"session_expired",
 	"session_invalid",
 }
@@ -77,14 +77,14 @@ func TestValidateDoctorReadinessAllowsReadyTransfer(t *testing.T) {
 
 func TestValidateDoctorReadinessRejectsBlockedTransfer(t *testing.T) {
 	_, err := ValidateDoctorReadiness(
-		doctorJSON("needs_key_password", false, false, ""),
+		doctorJSON("credentials_unavailable", false, false, ""),
 		testAuthStates,
 		DoctorReadinessRequirements{RequireTransfer: true},
 	)
 	if err == nil {
 		t.Fatal("expected blocked transfer error")
 	}
-	for _, want := range []string{"authState=needs_key_password", "fix the local blocker"} {
+	for _, want := range []string{"authState=credentials_unavailable", "fix the local blocker"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("error missing %q: %v", want, err)
 		}
@@ -160,7 +160,7 @@ func TestLoadBridgeAuthStatesFromSubmoduleSchema(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadBridgeAuthStates returned error: %v", err)
 	}
-	for _, want := range []string{"ready", "needs_login", "needs_key_password"} {
+	for _, want := range []string{"ready", "needs_login", "credentials_unavailable"} {
 		found := false
 		for _, got := range states {
 			if got == want {

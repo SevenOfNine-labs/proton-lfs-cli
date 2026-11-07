@@ -18,7 +18,7 @@ truth: `internal/config/prefs.go` (structure, defaults, load/save) and
 
 | Field | Type | Default | Meaning |
 | --- | --- | --- | --- |
-| `keyPasswordProvider` | string | `pass-cli` | Where `proton-drive-cli login` stores the browser-fork key password: `pass-cli` or `git-credential`. Passed as `--key-password-provider` to `login`. An empty or absent value reads as `pass-cli`. |
+| `credentialStore` | string | `pass-cli` | Where `proton-drive-cli login` stores the session tokens and the browser-fork key password: `pass-cli` or `git-credential`. Passed as `--credential-store` to `login`. An empty or absent value reads as `pass-cli`. |
 
 This field is the whole file. Any other key is ignored when the file
 is read and dropped by the next save.
@@ -27,7 +27,7 @@ Example:
 
 ```json
 {
-  "keyPasswordProvider": "git-credential"
+  "credentialStore": "git-credential"
 }
 ```
 
@@ -35,15 +35,15 @@ Example:
 
 | Component | Access |
 | --- | --- |
-| Tray menu "Use Proton Pass" / "Use Git Credential Manager" | writes `keyPasswordProvider`; the check mark is on "Use Git Credential Manager" for `git-credential` and on "Use Proton Pass" for any other value |
-| `proton-lfs-tray config [provider]` | prints `keyPasswordProvider`, or validates and writes it |
-| Tray "Connect to Proton..." and `proton-lfs-tray login` | read `keyPasswordProvider` for `proton-drive-cli login --key-password-provider` |
-| `proton-lfs-tray register` | prints `keyPasswordProvider` as `provider:`; the git registration does not contain it |
-| `proton-lfs-tray status` | prints `keyPasswordProvider` as `Provider: <provider> (next login)`; the `Session:` line shows the provider recorded in the session |
-| `proton-lfs-tray scope-diagnostics` | reports it as `config.keyPasswordProvider` |
-| `git-lfs-proton-adapter` | does not read this file; transfers use the provider and host recorded in the saved session |
+| Tray menu "Use Proton Pass" / "Use Git Credential Helper" | writes `credentialStore`; the check mark is on "Use Git Credential Helper" for `git-credential` and on "Use Proton Pass" for any other value |
+| `proton-lfs-tray config [store]` | prints `credentialStore`, or validates and writes it |
+| Tray "Connect to Proton..." and `proton-lfs-tray login` | read `credentialStore` for `proton-drive-cli login --credential-store` |
+| `proton-lfs-tray register` | prints `credentialStore` as `store:`; the git registration does not contain it |
+| `proton-lfs-tray status` | prints `credentialStore` as `Store: <store> (next login)`; the `Session:` line shows the store recorded in the session |
+| `proton-lfs-tray scope-diagnostics` | reports it as `config.credentialStore` |
+| `git-lfs-proton-adapter` | does not read this file; transfers use the credential store and host recorded in the saved session |
 
-The provider recorded in `~/.proton-drive-cli/session.json` by the last
-`login` is the one later proton-drive-cli commands (bridge commands,
-`doctor`, `logout`) use. Changing `keyPasswordProvider` takes effect with the
-next Connect.
+The credential store recorded in `~/.proton-drive-cli/session.json` by the
+last `login` is the one later proton-drive-cli commands (bridge commands,
+`doctor`, `logout`, `session refresh`) use. Changing `credentialStore` takes
+effect with the next Connect.
