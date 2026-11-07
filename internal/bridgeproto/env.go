@@ -39,11 +39,26 @@ var envAllowlist = []string{
 	// Secret Service clients (pass-cli keyring, git credential-libsecret)
 	// connect to the session bus at this address (D-Bus Specification).
 	"DBUS_SESSION_BUS_ADDRESS",
-	// The git-credential provider runs `git credential`, which reads this
-	// file (git(1), ENVIRONMENT) and Git Credential Manager's GCM_* settings
-	// (git-credential-manager docs/environment.md).
+	// Configuration that `git config` and `git credential` read (git(1)
+	// ENVIRONMENT) and Git Credential Manager's settings (docs/environment.md).
 	"GIT_CONFIG_GLOBAL",
+	"GIT_CONFIG_SYSTEM",
+	"GIT_CONFIG_NOSYSTEM",
 	"GCM_",
+	// Git Credential Manager's gpg store requires a desktop session or a
+	// terminal (src/Core/CredentialStore.cs ValidateGpgPass) and writes
+	// pass(1) files under PASSWORD_STORE_DIR with the keys of GNUPGHOME.
+	"DISPLAY",
+	"WAYLAND_DISPLAY",
+	"GPG_TTY",
+	"SSH_TTY",
+	"PASSWORD_STORE_DIR",
+	"GNUPGHOME",
+	// A Windows git-credential-manager.exe started from WSL needs the interop
+	// socket and receives the GCM_* variables named in WSLENV (Microsoft WSL
+	// documentation, "Working across Windows and Linux file systems").
+	"WSL_INTEROP",
+	"WSLENV",
 	"TMPDIR",
 	"TMP",
 	"TEMP",

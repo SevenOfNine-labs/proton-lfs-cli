@@ -25,7 +25,7 @@ the flag named in the reference page):
 
 Read by proton-drive-cli. The adapter forwards the variables of the first
 three rows to the bridge subprocess (they are on its environment
-allowlist); the key-password variables are read only by
+allowlist); the credential store variables are read only by
 `proton-drive-cli login` and are not forwarded:
 
 | Variable | Default | Purpose |
@@ -33,26 +33,31 @@ allowlist); the key-password variables are read only by
 | `PROTON_PASS_CLI_BIN` | `pass-cli` | Proton Pass CLI binary path |
 | `PROTON_DRIVE_CLI_APP_VERSION` | `external-drive-protonlfscli@<cli version>` | proton-drive-cli's own app-version default |
 | `PROTON_AUTH_TRACE`, `PROTON_AUTH_TRACE_ID` | unset | Redacted `[AUTH_TRACE]` lines on stderr and their correlation id; the tray sets both during Connect |
-| `PROTON_KEY_PASSWORD_PROVIDER` | `pass-cli` | Provider that `login` stores the browser-fork key password in |
-| `PROTON_KEY_PASSWORD_HOST` | `proton-drive-key.proton-lfs-cli.local` | Host/key of that entry |
+| `PROTON_CREDENTIAL_STORE` | `pass-cli` | Credential store that `login` saves the session tokens and key password in |
+| `PROTON_CREDENTIAL_HOST` | `proton-drive-cli.invalid` | Credential host of that entry |
 
 The Go adapter does **not** resolve Proton credentials and never sends
 account or credential fields to proton-drive-cli. Account login is
 browser-fork-only and happens outside Git LFS transfers with
-`proton-drive-cli login --key-password-provider <provider>`. Transfer bridge
+`proton-drive-cli login --credential-store <store>`. Transfer bridge
 requests carry only `storageBase`, `appVersion` (when set) and the command
 fields (`oid`, `path`, `outputPath`, `oids`).
 
-## Key-Password Provider
+## Credential Store
 
-`proton-drive-cli login` receives the key password from the browser session
-fork, for every account type, and stores it, keyed by the session UID, under
-`proton-drive-key.proton-lfs-cli.local` in the chosen provider. The CLI
-creates and verifies that entry itself; it is never created by hand. The
-provider is chosen by `--key-password-provider`, then
-`PROTON_KEY_PASSWORD_PROVIDER`, then the default `pass-cli`, and recorded in
-the session; every later command (bridge, doctor, logout) uses the recorded
-provider and host. The tray stores the choice as `keyPasswordProvider` in
+`proton-drive-cli login` receives the session tokens and the key password
+from the browser session fork, for every account type, and stores them as
+one entry (the JSON object `{uid, revision, previous, accessToken,
+refreshToken, keyPassword}`), keyed by the session UID, under
+`proton-drive-cli.invalid` in the chosen
+credential store. `~/.proton-drive-cli/session.json` records the UID,
+scopes, store, host, token expiry and a revision that changes with every
+write; it holds no secret. The CLI creates, verifies and rewrites the entry
+itself (every token refresh replaces it); it is never created by hand. The
+store is chosen by `--credential-store`, then `PROTON_CREDENTIAL_STORE`, then
+the default `pass-cli`, and recorded in the session; every later command
+(bridge, doctor, logout, session refresh) uses the recorded store and host.
+The tray stores the choice as `credentialStore` in
 `~/.proton-lfs/config.json` ([Config File](../reference/config-file.md)) and
 passes it to `login`.
 
@@ -60,43 +65,60 @@ passes it to `login`.
 
 ```bash
 pass-cli login
-proton-drive-cli login --key-password-provider pass-cli
+proton-drive-cli login --credential-store pass-cli
 ```
 
 The entry appears in Proton Pass as a login item titled
-`Proton proton-drive-key.proton-lfs-cli.local` with URL
-`https://proton-drive-key.proton-lfs-cli.local`. When the lookup fails
-(`needs_key_password`), run `pass-cli login` and then `proton-drive-cli login`
-again with the same provider; the tray's Connect does not prompt for account
-credentials. `PROTON_PASS_CLI_BIN` names a non-default pass-cli binary; the
+`Proton proton-drive-cli.invalid` with URL `https://proton-drive-cli.invalid`;
+every write creates a new item and then deletes the items it replaces. When
+the lookup fails (`credentials_unavailable`), run `pass-cli login` and then
+`proton-drive-cli login` again with the same store; the tray's Connect does
+not prompt for account credentials. `PROTON_PASS_CLI_BIN` names a non-default pass-cli binary; the
 tray sets it to the binary it finds on `PATH`, `~/.local/bin`,
 `/opt/homebrew/bin` or `/usr/local/bin`.
 
 ### git-credential
 
 ```bash
-proton-drive-cli login --key-password-provider git-credential
+proton-drive-cli login --credential-store git-credential
 ```
 
-proton-drive-cli stores the key password with `git credential approve` and
-reads it back with `git credential fill` for host
-`proton-drive-key.proton-lfs-cli.local`; the backing store is whatever git
-credential helper is configured (macOS Keychain, Windows Credential Manager,
-Linux Secret Service).
+proton-drive-cli stores the entry with `git credential approve` and reads it
+back with `git credential fill` for host `proton-drive-cli.invalid`; a
+helper that kept the existing item gets `reject` and `approve`
+(git-credential(1)). The git-credential store needs git 2.26 or newer
+(`git config --show-scope`). It runs only the first `credential.helper` of the
+system and global git configuration (git-config(1) SCOPES) that encrypts
+secrets at rest, pinned with
+`git -c credential.helper= -c credential.helper=<helper>`:
+
+| Helper | Secret store | Condition |
+| --- | --- | --- |
+| `osxkeychain` | macOS Keychain | none |
+| `wincred` | Windows Credential Manager | none |
+| `libsecret` | freedesktop Secret Service (GNOME Keyring, KWallet) | none |
+| `manager` | Git Credential Manager | `GCM_CREDENTIAL_STORE` or `credential.credentialStore` is `keychain`, `gpg` or unset on macOS, `wincredman`, `dpapi` or unset on Windows, `secretservice` or `gpg` elsewhere; the validated store is pinned through `GCM_CREDENTIAL_STORE` |
+
+`store`, `cache` and shell (`!`) helpers are never run; without an allowed
+helper the store fails. git and Git Credential Manager do not prompt for
+credentials (`GIT_TERMINAL_PROMPT=0`, `credential.interactive=false`,
+`GCM_INTERACTIVE=false`, `GCM_GUI_PROMPT=false`, `GCM_PROVIDER=generic`); the
+operating system may still ask to unlock a locked keychain or keyring.
 
 ### Lifecycle of the entry
 
-- `proton-drive-cli logout` removes it, revokes the session and deletes the
-  session file and crypto cache.
+- Every token refresh rewrites it under the session lock and reads it back;
+  a failed save is retried three times.
+- `proton-drive-cli logout` revokes the session, deletes the session file
+  and crypto cache, then removes the entry, and warns when it cannot.
 - A login that yields a new session UID removes the entry of the previous UID.
 - A refresh token the API rejects with a Proton error body and HTTP 4xx
   other than 408 and 429, while no other process has rotated it, signs the
-  session out: `session.json`, the
-  crypto cache and the entry are deleted, and `auth-state` reports
-  `needs_login`.
-- A stored key password that does not decrypt the account keys makes
-  transfers fail with `key_password_required`; `proton-drive-cli login`
-  stores a new one.
+  session out: `session.json`, the crypto cache and the entry are deleted,
+  and `auth-state` reports `needs_login`.
+- An entry the store cannot return, or a key password that does not
+  decrypt the account keys, makes transfers fail with
+  `credentials_unavailable`; fix the store or run `proton-drive-cli login`.
 
 ## Offline Doctor
 
@@ -104,13 +126,13 @@ Check the configuration offline before a transfer or a live canary:
 
 ```bash
 proton-drive-cli doctor
-proton-drive-cli doctor --key-password-provider git-credential --json
+proton-drive-cli doctor --credential-store git-credential --json
 ```
 
-Without options the doctor verifies the provider and host recorded in the
-session; `--key-password-provider` and `--key-password-host` verify another
-entry. It checks the bridge entry point (`drive-cli-bin`), the UID-scoped
-key-password entry (`key-password-credential`) and the session file's
+Without options the doctor verifies the store and host recorded in the
+session; `--credential-store` and `--credential-host` verify another entry.
+It checks the bridge entry point (`drive-cli-bin`), the UID-scoped
+credential-store entry (`session-credentials`) and the session file's
 permissions and shape (`session-file`) without contacting Proton, and
 reports `ok`, `summary`, `authState`, `canAttemptTransfer`,
 `canAttemptLiveCanary` and `checks`
@@ -171,10 +193,10 @@ rejects the saved session during the live metadata gate:
 proton-lfs-tray scope-diagnostics
 ```
 
-This local mode prints JSON evidence only: the key-password provider
-selection, session-file presence and mode, a UID fingerprint, token presence
-flags, token expiry, local scope names, app-version inputs, and the offline
-`bridge auth-state` result. It does not contact Proton.
+This local mode prints JSON evidence only: the credential store selection,
+session-file presence and mode, a UID fingerprint, the session's credential
+store and host, token expiry, local scope names, app-version inputs, and the
+offline `bridge auth-state` result. It does not contact Proton.
 
 To perform the one read-only server probe, use the same explicit live canary
 acknowledgement:

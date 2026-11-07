@@ -37,7 +37,7 @@ git-lfs-proton-adapter                         proton-drive-cli
     |-- exec <argv>, own process group ------------->|
     |-- stdin: {"oid":"...","path":"...",...} ------>|  (stdin closed after the write)
     |                                                |-- validate fields against request-field-rules.json
-    |                                                |-- run the command (SDK, providers)
+    |                                                |-- run the command (SDK, credential stores)
     |                                                |-- stdout: one JSON envelope line
     |                                                |-- stderr: logs (ERROR level unless DEBUG=true)
     |<-- wait for exit (WaitDelay 5 s) --------------|
@@ -90,10 +90,14 @@ The subprocess receives only the allowlisted variables listed in
 `PROTON_AUTH_TRACE_ID`), and the configuration of the credential tools they
 start (`PROTON_PASS_SESSION_DIR`, `PROTON_PASS_KEY_PROVIDER`,
 `PROTON_PASS_ENCRYPTION_KEY`, `PROTON_PASS_LINUX_KEYRING`,
-`DBUS_SESSION_BUS_ADDRESS`, `GIT_CONFIG_GLOBAL`, `GCM_*`). The key-password
-provider and host come from the saved session, so `PROTON_KEY_PASSWORD_*` is
-not forwarded. The only secret forwarded is `PROTON_PASS_ENCRYPTION_KEY`,
-which pass-cli's `env` key provider reads.
+`DBUS_SESSION_BUS_ADDRESS`, `GIT_CONFIG_GLOBAL`, `GIT_CONFIG_SYSTEM`,
+`GIT_CONFIG_NOSYSTEM`, `GCM_*`, and `DISPLAY`, `WAYLAND_DISPLAY`, `GPG_TTY`,
+`SSH_TTY`, `PASSWORD_STORE_DIR`, `GNUPGHOME` for Git Credential Manager's
+`gpg` store, `WSL_INTEROP` and `WSLENV` for a Windows
+`git-credential-manager.exe` started from WSL). The credential store and host come from the saved session, so
+`PROTON_CREDENTIAL_STORE` and `PROTON_CREDENTIAL_HOST` are not forwarded.
+The only secret forwarded is `PROTON_PASS_ENCRYPTION_KEY`, which pass-cli's
+`env` key provider reads.
 
 ## Error mapping
 
@@ -126,18 +130,18 @@ for cleanup.
 `bridge auth-state` (`schemas/bridge/v1/auth-state-payload.schema.json`,
 parsed into `BridgeAuthStateResponse`) answers with `state`, `hasSession`,
 `sessionValid`, `sessionExpired`, `sessionUidPresent`,
-`keyPasswordAvailable`, `keyPasswordProvider`, `keyPasswordHost`,
+`credentialsAvailable`, `credentialStore`, `credentialHost`,
 `willAttemptNetwork` (always false), `errors` and `actions`. It reads only
-the session file and the session's key-password entry, sends no request to
+the session file and the session's credential-store entry, sends no request to
 Proton and never refreshes tokens. The first state that applies is
 reported:
 
 | State | Condition |
 | --- | --- |
 | `needs_login` | No session file |
-| `session_invalid` | The session file is unreadable, lacks `uid`, `accessToken`, `refreshToken`, `keyPasswordProvider` or `keyPasswordHost`, has a blank one, or names a provider other than `pass-cli` or `git-credential`: any file not written by `proton-drive-cli login` |
+| `session_invalid` | The session file is unreadable, lacks `uid`, `credentialStore`, `credentialHost` or `revision`, has a blank one, or names a store other than `pass-cli` or `git-credential`: any file not written by `proton-drive-cli login` |
 | `session_expired` | `tokenExpiresAt` is in the past |
-| `needs_key_password` | The key-password entry cannot be read from the session's provider |
+| `credentials_unavailable` | The session's entry cannot be read from its credential store |
 | `ready` | Otherwise |
 
 The adapter's classification of each state is in

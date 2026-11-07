@@ -2,12 +2,14 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/xml"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -376,5 +378,39 @@ func TestIsAutoStartEnabled(t *testing.T) {
 
 	if !isAutoStartEnabled() {
 		t.Fatal("expected true after creating autostart file")
+	}
+}
+
+func TestDriveCLIEnvSetsPassCLIOnlyWhenAbsent(t *testing.T) {
+	bin := t.TempDir()
+	name := "pass-cli"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	passCLI := filepath.Join(bin, name)
+	if err := os.WriteFile(passCLI, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin)
+	t.Setenv("PROTON_PASS_CLI_BIN", "")
+
+	got := driveCLIEnv([]string{"HOME=/h"})
+	if want := "PROTON_PASS_CLI_BIN=" + passCLI; got[len(got)-1] != want {
+		t.Fatalf("driveCLIEnv() = %v, want a trailing %s", got, want)
+	}
+
+	userSet := []string{"HOME=/h", "PROTON_PASS_CLI_BIN=/opt/pass-cli"}
+	if got := driveCLIEnv(userSet); len(got) != len(userSet) || got[1] != userSet[1] {
+		t.Fatalf("driveCLIEnv() replaced a user-set PROTON_PASS_CLI_BIN: %v", got)
+	}
+
+	blank := []string{"PROTON_PASS_CLI_BIN= "}
+	if got := driveCLIEnv(blank); got[len(got)-1] != "PROTON_PASS_CLI_BIN="+passCLI {
+		t.Fatalf("driveCLIEnv() kept a blank PROTON_PASS_CLI_BIN: %v", got)
+	}
+
+	cmd := driveCLICommand(context.Background(), "proton-drive-cli", "logout")
+	if !slices.Contains(cmd.Env, "PROTON_PASS_CLI_BIN="+passCLI) {
+		t.Fatalf("driveCLICommand() env lacks the pass-cli path: %v", cmd.Env)
 	}
 }

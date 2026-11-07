@@ -9,19 +9,19 @@ import (
 
 // Preferences stores user-facing settings managed by the tray application.
 type Preferences struct {
-	// KeyPasswordProvider stores the browser-fork key password: pass-cli or
-	// git-credential.
-	KeyPasswordProvider string `json:"keyPasswordProvider"`
+	// CredentialStore is the store `proton-drive-cli login` saves the session
+	// tokens and key password in: pass-cli or git-credential.
+	CredentialStore string `json:"credentialStore"`
 }
 
 // DefaultPreferences returns the default preferences.
 func DefaultPreferences() Preferences {
-	return Preferences{KeyPasswordProvider: DefaultKeyPasswordProvider}
+	return Preferences{CredentialStore: DefaultCredentialStore}
 }
 
 // LoadPrefs reads preferences from the config file. It returns the defaults
-// when the file is missing or unreadable, and the default key-password
-// provider when the file names none.
+// when the file is missing or unreadable, and the default credential store
+// when the file names none.
 func LoadPrefs() Preferences {
 	path, err := PrefsFilePath()
 	if err != nil {
@@ -35,8 +35,8 @@ func LoadPrefs() Preferences {
 	if err := json.Unmarshal(data, &prefs); err != nil {
 		return DefaultPreferences()
 	}
-	if prefs.KeyPasswordProvider == "" {
-		prefs.KeyPasswordProvider = DefaultKeyPasswordProvider
+	if prefs.CredentialStore == "" {
+		prefs.CredentialStore = DefaultCredentialStore
 	}
 	return prefs
 }

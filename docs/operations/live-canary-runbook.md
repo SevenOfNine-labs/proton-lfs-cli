@@ -9,8 +9,8 @@ testing, CI, or exploratory debugging.
 The canary answers only these questions:
 
 - Can one browser-fork login complete without retry loops?
-- Is a session saved only after the browser approval and the key-password
-  storage complete?
+- Is a session saved only after the browser approval and the credential
+  store write complete?
 - Can one tiny Drive metadata read succeed from that saved session?
 - Do auth challenges stop cleanly instead of escalating into repeated login
   attempts?
@@ -34,7 +34,7 @@ or download.
 To include the offline doctor, pass its arguments:
 
 ```bash
-LIVE_CANARY_DOCTOR_ARGS="--key-password-provider git-credential" \
+LIVE_CANARY_DOCTOR_ARGS="--credential-store git-credential" \
   make live-canary-preflight
 ```
 
@@ -45,7 +45,7 @@ which validates `authState.state` against the bridge auth-state schema and
 requires `ok` and `canAttemptLiveCanary` (`authState.state` is `ready` or
 `needs_login`). `state=ready` means the saved session has every field
 `proton-drive-cli login` writes, its access token has not expired locally,
-and its key-password entry is readable from the recorded provider. It does
+and its entry is readable from the recorded credential store. It does
 not prove the server still accepts the session; remote revocation or
 server-side expiry is discovered only by the guarded live metadata read, and
 must not trigger an automatic retry login.
@@ -57,9 +57,9 @@ must not trigger an automatic retry login.
 - Do not use a primary personal account for the first canary.
 - Do not run from CI.
 - Do not run multiple terminals, tray refresh, or LFS transfers in parallel.
-- Let `proton-drive-cli login` store the browser-fork key password through
-  `git-credential` or `pass-cli`; never put a password in an environment
-  variable or a command line.
+- Let `proton-drive-cli login` store the session tokens and the
+  browser-fork key password through `git-credential` or `pass-cli`; never
+  put a password in an environment variable or a command line.
 
 ## Hard Stop Conditions
 
@@ -70,8 +70,8 @@ Stop immediately if any of these appear:
 - Proton API 9101 / `INSUFFICIENT_SCOPE`.
 - Unexpected second login prompt.
 - More than one browser-fork login attempt in logs.
-- Key password that does not unlock the account keys (`key_password_required`
-  after a successful login).
+- Credentials unavailable or a key password that does not unlock the
+  account keys (`credentials_unavailable` after a successful login).
 - Any log line containing a raw password or token.
 
 After a hard stop, do not retry live. Return to mocked fixtures and add a
@@ -96,13 +96,13 @@ The guarded form is the browser-fork canary below. The manual form is
 exactly one login:
 
 ```bash
-proton-drive-cli login --key-password-provider git-credential
+proton-drive-cli login --credential-store git-credential
 ```
 
 For Proton Pass:
 
 ```bash
-proton-drive-cli login --key-password-provider pass-cli
+proton-drive-cli login --credential-store pass-cli
 ```
 
 Complete the sign-in, including two-factor authentication, in the browser.
@@ -117,15 +117,14 @@ proton-drive-cli status
 proton-drive-cli doctor
 ```
 
-Without options the doctor verifies the key-password provider and host
+Without options the doctor verifies the credential store and host
 recorded in the session. Expected local properties:
 
 - Session file exists under `~/.proton-drive-cli/session.json`.
 - Session file mode is owner-only (`600`).
-- Session JSON contains `uid`, `accessToken`, `refreshToken`,
-  `keyPasswordProvider`, `keyPasswordHost`, and `scopes` and
-  `tokenExpiresAt` when Proton reported them.
-- Session JSON contains no password-like fields.
+- Session JSON contains `uid`, `credentialStore`, `credentialHost`,
+  `revision`, and `scopes` and `tokenExpiresAt` when Proton reported them.
+- Session JSON contains no token or password.
 
 ## Browser-Fork Canary
 
@@ -135,8 +134,8 @@ the Git LFS real E2E transfer.
 
 ```bash
 PROTON_LFS_LIVE_CANARY=I_UNDERSTAND_THIS_TOUCHES_A_REAL_PROTON_ACCOUNT \
-LIVE_CANARY_DOCTOR_ARGS="--key-password-provider git-credential" \
-LIVE_BROWSER_FORK_LOGIN_ARGS="--key-password-provider git-credential" \
+LIVE_CANARY_DOCTOR_ARGS="--credential-store git-credential" \
+LIVE_BROWSER_FORK_LOGIN_ARGS="--credential-store git-credential" \
   make browser-fork-canary
 ```
 
@@ -144,8 +143,8 @@ For Proton Pass, name `pass-cli` in both variables:
 
 ```bash
 PROTON_LFS_LIVE_CANARY=I_UNDERSTAND_THIS_TOUCHES_A_REAL_PROTON_ACCOUNT \
-LIVE_CANARY_DOCTOR_ARGS="--key-password-provider pass-cli" \
-LIVE_BROWSER_FORK_LOGIN_ARGS="--key-password-provider pass-cli" \
+LIVE_CANARY_DOCTOR_ARGS="--credential-store pass-cli" \
+LIVE_BROWSER_FORK_LOGIN_ARGS="--credential-store pass-cli" \
   make browser-fork-canary
 ```
 
@@ -153,7 +152,7 @@ The target refuses to start without the acknowledgement, without
 `LIVE_CANARY_DOCTOR_ARGS` or without `LIVE_BROWSER_FORK_LOGIN_ARGS`, then
 runs `make live-canary-preflight` (whose doctor gate accepts `needs_login`
 before the login) and `scripts/browser-fork-canary.sh`. The script accepts
-only `--key-password-provider` and `--key-password-host` (also in
+only `--credential-store` and `--credential-host` (also in
 `--option=value` form) in `LIVE_BROWSER_FORK_LOGIN_ARGS`, and only tokens of
 letters, digits and `._=:/@,+-` in either variable; anything else fails
 before proton-drive-cli is invoked. After the login it requires the doctor
@@ -168,7 +167,7 @@ Run the guarded metadata-read target:
 
 ```bash
 PROTON_LFS_LIVE_CANARY=I_UNDERSTAND_THIS_TOUCHES_A_REAL_PROTON_ACCOUNT \
-LIVE_CANARY_DOCTOR_ARGS="--key-password-provider pass-cli" \
+LIVE_CANARY_DOCTOR_ARGS="--credential-store pass-cli" \
   make live-drive-scope-canary
 ```
 
@@ -196,16 +195,16 @@ The `test-e2e-real` target is guarded: it depends on
 `make live-drive-scope-canary`, so it refuses to run without the explicit
 acknowledgement and the offline doctor arguments, and the Git LFS transfer
 cannot start until one read-only Drive metadata request succeeds. When the
-session's provider is pass-cli (`KEY_PASSWORD_PROVIDER`, default
-`$PROTON_KEY_PASSWORD_PROVIDER` or `pass-cli`), it then exports
+session's credential store is pass-cli (`CREDENTIAL_STORE`, default
+`$PROTON_CREDENTIAL_STORE` or `pass-cli`), it then exports
 `PROTON_PASS_CLI_BIN` through `scripts/export-pass-env.sh`, which requires
 pass-cli to be installed and logged in; with
-`KEY_PASSWORD_PROVIDER=git-credential` pass-cli is not needed. It runs the
+`CREDENTIAL_STORE=git-credential` pass-cli is not needed. It runs the
 integration tests matching `E2E`:
 
 ```bash
 PROTON_LFS_LIVE_CANARY=I_UNDERSTAND_THIS_TOUCHES_A_REAL_PROTON_ACCOUNT \
-LIVE_CANARY_DOCTOR_ARGS="--key-password-provider pass-cli" \
+LIVE_CANARY_DOCTOR_ARGS="--credential-store pass-cli" \
   make test-e2e-real
 ```
 
@@ -233,7 +232,7 @@ Record only redacted evidence:
 
 - Date and local branch/commit.
 - Account class, for example a disposable account.
-- Which key-password provider was used.
+- Which credential store was used.
 - Whether two-factor authentication was required in the browser.
 - Whether `doctor` passed after login.
 - Whether one `ls /` metadata read passed.
@@ -251,6 +250,6 @@ proton-drive-cli logout
 unset PROTON_LFS_LIVE_CANARY
 ```
 
-`logout` removes the key-password entry, revokes the session and deletes the
+`logout` removes the credential-store entry, revokes the session and deletes the
 local session files. If a hard stop exposed secrets in logs, rotate the
 affected credential before trying again.

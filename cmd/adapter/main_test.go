@@ -593,7 +593,7 @@ func TestSendBackendTransferErrorPreservesNonRetryableAuthMetadata(t *testing.T)
 
 	adapter := NewAdapter()
 	buf := new(bytes.Buffer)
-	err := newBackendErrorWithCode(401, "stored browser-fork key password required for this Proton session", nil, ErrCodeKeyPasswordRequired)
+	err := newBackendErrorWithCode(401, credentialsUnavailableMessage, nil, ErrCodeCredentialsUnavailable)
 	if sendErr := adapter.sendBackendTransferError(json.NewEncoder(buf), validOID, err); sendErr != nil {
 		t.Fatalf("sendBackendTransferError returned error: %v", sendErr)
 	}
@@ -605,8 +605,8 @@ func TestSendBackendTransferErrorPreservesNonRetryableAuthMetadata(t *testing.T)
 	if report.State != config.StateAuthRequired {
 		t.Fatalf("status state=%q, want auth_required", report.State)
 	}
-	if report.ErrorCode != string(ErrCodeKeyPasswordRequired) {
-		t.Fatalf("status errorCode=%q, want %q", report.ErrorCode, ErrCodeKeyPasswordRequired)
+	if report.ErrorCode != string(ErrCodeCredentialsUnavailable) {
+		t.Fatalf("status errorCode=%q, want %q", report.ErrorCode, ErrCodeCredentialsUnavailable)
 	}
 	if report.Retryable || report.Temporary {
 		t.Fatalf("auth blocker must not be retryable/temporary: %+v", report)

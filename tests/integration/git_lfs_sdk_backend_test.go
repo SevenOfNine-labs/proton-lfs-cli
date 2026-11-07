@@ -18,7 +18,7 @@ func sdkPassCLIPath() string {
 	return passCLIBin
 }
 
-func sdkProviderEnv(base []string) []string {
+func sdkPassCLIEnv(base []string) []string {
 	passCLIBin := strings.TrimSpace(os.Getenv("PROTON_PASS_CLI_BIN"))
 	if passCLIBin == "" {
 		return base
@@ -61,7 +61,7 @@ func TestGitLFSCustomTransferSDKBackendRoundTrip(t *testing.T) {
 	s := setupRepositoryForUpload(t)
 
 	driveCliBin := sdkDriveCliBin(t, s.root)
-	sdkEnv := sdkProviderEnv(s.env)
+	sdkEnv := sdkPassCLIEnv(s.env)
 
 	configureSDKCustomTransfer(t, s.repoPath, sdkEnv, s.gitBin, s.adapterPath, driveCliBin)
 

@@ -267,7 +267,7 @@ requirements:
       Root bridge requests may include only `storageBase`, `appVersion`
       and the operation fields of the command. They must not include
       `credentialProvider`, `allowLogin`, username, password, credential
-      provider or host selectors, or second-factor fields.
+      store or host selectors, or second-factor fields.
 
   - id: AUTH-004
     source: submodules/proton-drive-cli/schemas/bridge/v1/auth-state-payload.schema.json
@@ -297,7 +297,7 @@ requirements:
       - tests/integration/git_lfs_e2e_mock_test.go
     requirement: >-
       `ready`, `needs_login`, `session_invalid`, `session_expired` and
-      `needs_key_password` must each have
+      `credentials_unavailable` must each have
       deterministic root classification.
 
   - id: AUTH-006
@@ -307,16 +307,18 @@ requirements:
     status: covered
     tests:
       - submodules/proton-drive-cli/src/auth/session.test.ts
-      - submodules/proton-drive-cli/src/auth/key-password-store.test.ts
+      - submodules/proton-drive-cli/src/auth/session-secrets.test.ts
+      - submodules/proton-drive-cli/src/credentials/git-credential.test.ts
       - submodules/proton-drive-cli/src/auth/browser-fork.test.ts
       - submodules/proton-drive-cli/src/auth/index.test.ts
       - tests/integration/credential_security_test.go
     requirement: >-
-      Session tokens and browser-fork key passwords must be stored
-      only in owner-restricted session files or the configured secure local
-      provider. Failed persistence, logout, a login with a new session UID
-      and a refresh token the API rejects must remove the key-password
-      entry of the affected session.
+      Session tokens and browser-fork key passwords must be stored only
+      in the configured credential store: Proton Pass, or a git credential
+      helper backed by the operating system's secret store; session.json
+      holds no secret. Failed persistence, logout, a login with a new
+      session UID and a refresh token the API rejects must remove the
+      credential-store entry of the affected session.
 
   - id: AUTH-007
     source: docs/operations/live-canary-runbook.md
@@ -341,7 +343,7 @@ requirements:
       - scripts/browser_fork_canary_test.go
     requirement: >-
       `LIVE_BROWSER_FORK_LOGIN_ARGS` may pass only
-      `--key-password-provider` and `--key-password-host`. Account
+      `--credential-store` and `--credential-host`. Account
       credential flags, username flags, auth-mode flags, and unknown options
       must fail before proton-drive-cli is invoked.
 

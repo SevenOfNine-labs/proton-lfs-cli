@@ -17,17 +17,18 @@ const (
 	BackendSDK   = "sdk"
 )
 
-// Credential provider kinds that store the browser-fork key password.
+// Credential stores that hold the session tokens and key password of a
+// proton-drive-cli login (proton-drive-cli src/credentials/types.ts).
 const (
-	CredentialProviderPassCLI       = "pass-cli"
-	CredentialProviderGitCredential = "git-credential"
+	CredentialStorePassCLI       = "pass-cli"
+	CredentialStoreGitCredential = "git-credential"
 )
 
 // Default values
 const (
-	DefaultDriveCLIBin         = "submodules/proton-drive-cli/dist/index.js"
-	DefaultStorageBase         = "LFS"
-	DefaultKeyPasswordProvider = CredentialProviderPassCLI
+	DefaultDriveCLIBin     = "submodules/proton-drive-cli/dist/index.js"
+	DefaultStorageBase     = "LFS"
+	DefaultCredentialStore = CredentialStorePassCLI
 	// DefaultDriveCLIAppVersion equals proton-drive-cli's x-pm-appversion
 	// identity, external-drive-protonlfscli@<package.json version>.
 	DefaultDriveCLIAppVersion = "external-drive-protonlfscli@0.1.2"

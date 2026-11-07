@@ -134,12 +134,12 @@ func TestHelperProcess(_ *testing.T) {
 		writeOKResponse(os.Stdout, map[string]any{
 			"state":                state,
 			"hasSession":           hasSession,
-			"sessionValid":         state == "ready" || state == "needs_key_password",
+			"sessionValid":         state == "ready" || state == "credentials_unavailable",
 			"sessionExpired":       state == "session_expired",
 			"sessionUidPresent":    hasSession,
-			"keyPasswordAvailable": state == "ready",
-			"keyPasswordProvider":  "git-credential",
-			"keyPasswordHost":      "proton-drive-key.proton-lfs-cli.local",
+			"credentialsAvailable": state == "ready",
+			"credentialStore":      "git-credential",
+			"credentialHost":       "proton-drive-cli.invalid",
 			"willAttemptNetwork":   false,
 			"errors":               []string{},
 			"actions":              []string{},
@@ -343,23 +343,23 @@ func TestBridgeAuthState(t *testing.T) {
 	}
 }
 
-func TestBridgeAuthStateKeyPasswordDiagnostics(t *testing.T) {
-	bc := helperBridgeClient(t, "MOCK_BRIDGE_AUTH_STATE=needs_key_password")
+func TestBridgeAuthStateCredentialsDiagnostics(t *testing.T) {
+	bc := helperBridgeClient(t, "MOCK_BRIDGE_AUTH_STATE=credentials_unavailable")
 	state, err := bc.AuthState()
 	if err != nil {
 		t.Fatalf("AuthState failed: %v", err)
 	}
-	if state.State != "needs_key_password" {
-		t.Fatalf("expected needs_key_password auth state, got %q", state.State)
+	if state.State != "credentials_unavailable" {
+		t.Fatalf("expected credentials_unavailable auth state, got %q", state.State)
 	}
-	if state.KeyPasswordAvailable {
-		t.Fatal("expected key password to be unavailable")
+	if state.CredentialsAvailable {
+		t.Fatal("expected credentials to be unavailable")
 	}
-	if state.KeyPasswordProvider != "git-credential" {
-		t.Fatalf("expected git-credential key-password provider, got %q", state.KeyPasswordProvider)
+	if state.CredentialStore != "git-credential" {
+		t.Fatalf("expected credential store git-credential, got %q", state.CredentialStore)
 	}
-	if state.KeyPasswordHost != "proton-drive-key.proton-lfs-cli.local" {
-		t.Fatalf("unexpected key-password host %q", state.KeyPasswordHost)
+	if state.CredentialHost != "proton-drive-cli.invalid" {
+		t.Fatalf("unexpected credential host %q", state.CredentialHost)
 	}
 	if state.WillAttemptNetwork {
 		t.Fatal("auth-state must remain offline-only")
@@ -367,9 +367,9 @@ func TestBridgeAuthStateKeyPasswordDiagnostics(t *testing.T) {
 }
 
 func TestBridgeErrorPreservesStructuredDetails(t *testing.T) {
-	details := `{"errorCode":"KEY_PASSWORD_REQUIRED"}`
+	details := `{"errorCode":"CREDENTIALS_UNAVAILABLE"}`
 	bc := helperBridgeClient(t,
-		"MOCK_BRIDGE_ERROR=Browser-fork session is missing its stored key password",
+		"MOCK_BRIDGE_ERROR=The credentials of the session could not be read from pass-cli",
 		"MOCK_BRIDGE_ERROR_CODE=401",
 		"MOCK_BRIDGE_ERROR_DETAILS="+details,
 	)
@@ -657,7 +657,7 @@ func TestMatchesAllowlist(t *testing.T) {
 		{"NODE_ENV", true},
 		{"MOCK_BRIDGE_FOO", true},
 		{"PROTON_PASS_CLI_BIN", true},
-		{"PROTON_KEY_PASSWORD_PROVIDER", false},
+		{"PROTON_CREDENTIAL_STORE", false},
 		{"PROTON_DRIVE_UPLOAD_TIMEOUT_MS", false},
 		{"USERPROFILE", true},
 		{"SYSTEMROOT", true},
@@ -696,11 +696,11 @@ func TestSanitizeStderr(t *testing.T) {
 		{"session redaction", "debug: session=abc123 extra", func(s string) bool {
 			return s == "debug: session=[redacted] extra"
 		}},
-		{"session.json fields", `{"uid":"uid-1","accessToken":"at-1","refreshToken":"rt-1"}`, func(s string) bool {
+		{"token fields", `{"uid":"uid-1","accessToken":"at-1","refreshToken":"rt-1"}`, func(s string) bool {
 			return !strings.Contains(s, "uid-1") && !strings.Contains(s, "at-1") && !strings.Contains(s, "rt-1")
 		}},
-		{"URL userinfo", "could not read Password for 'https://uid-1@proton-drive-key.proton-lfs-cli.local'", func(s string) bool {
-			return !strings.Contains(s, "uid-1") && strings.Contains(s, "proton-drive-key.proton-lfs-cli.local")
+		{"URL userinfo", "could not read Password for 'https://uid-1@proton-drive-cli.invalid'", func(s string) bool {
+			return !strings.Contains(s, "uid-1") && strings.Contains(s, "proton-drive-cli.invalid")
 		}},
 		{"token redaction", "error: token=xyz456", func(s string) bool {
 			return strings.HasSuffix(s, "[redacted]") && !strings.Contains(s, "xyz456")

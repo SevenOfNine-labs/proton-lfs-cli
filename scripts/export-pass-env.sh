@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Prints the export of PROTON_PASS_CLI_BIN, the pass-cli binary that
-# proton-drive-cli uses as key-password provider.
+# proton-drive-cli uses as credential store.
 DEFAULT_PASS_CLI_BIN="${PROTON_PASS_CLI_BIN:-pass-cli}"
 
 usage() {

@@ -182,7 +182,7 @@ func TestE2ERealProtonDrivePipeline(t *testing.T) {
 
 	driveCliBin := sdkDriveCliBin(t, root)
 
-	sdkEnv := append(sdkProviderEnv(env), "LFS_STORAGE_BASE="+storageBase)
+	sdkEnv := append(sdkPassCLIEnv(env), "LFS_STORAGE_BASE="+storageBase)
 	t.Logf("real canary storage base: %s", storageBase)
 
 	base := t.TempDir()

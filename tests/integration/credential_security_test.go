@@ -96,7 +96,7 @@ if (dir) {
   fs.writeFileSync(path.join(dir, name), JSON.stringify({ command, env: process.env, request }));
 }
 const responses = {
-  'auth-state': { ok: true, payload: { state: 'ready', hasSession: true, sessionValid: true, sessionExpired: false, sessionUidPresent: true, keyPasswordAvailable: true, willAttemptNetwork: false, errors: [], actions: [] } },
+  'auth-state': { ok: true, payload: { state: 'ready', hasSession: true, sessionValid: true, sessionExpired: false, sessionUidPresent: true, credentialsAvailable: true, willAttemptNetwork: false, errors: [], actions: [] } },
   init: { ok: true, payload: { initialized: true, storageBase: 'LFS' } },
   exists: { ok: true, payload: { exists: false } },
   upload: { ok: true, payload: { uploaded: true } },

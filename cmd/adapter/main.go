@@ -366,8 +366,8 @@ func statusForErrorCode(errorCode ErrorCode) (state string, errorDetail string) 
 		return config.StateCaptcha, "Run: proton-drive-cli login to complete CAPTCHA verification"
 	case ErrCodeRateLimited:
 		return config.StateRateLimited, "Wait before retrying operations. The Proton API has rate-limited requests."
-	case ErrCodeKeyPasswordRequired:
-		return config.StateAuthRequired, "Run: proton-drive-cli login with the configured key-password provider"
+	case ErrCodeCredentialsUnavailable:
+		return config.StateAuthRequired, "Fix the credential store of the Proton session, or run: proton-drive-cli login"
 	case ErrCodeAuthRequired:
 		return config.StateAuthRequired, "Run: proton-drive-cli login to re-authenticate"
 	case ErrCodeInsufficientScope:

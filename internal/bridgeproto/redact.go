@@ -37,18 +37,15 @@ func RedactText(text string) string {
 	return urlUserinfoPattern.ReplaceAllString(text, "${1}"+Redacted+"@")
 }
 
-// exactSensitiveKeys and secretLocationKeys mirror proton-drive-cli
-// src/utils/redaction.ts (keys lower-cased, non-alphanumerics removed).
-var (
-	exactSensitiveKeys = map[string]bool{
-		"accesstoken": true, "authorization": true, "armoredkey": true,
-		"captchatoken": true, "clientephemeral": true, "clientproof": true,
-		"humanverificationtoken": true, "privatekey": true, "refreshtoken": true,
-		"serverproof": true, "srpsession": true, "uid": true,
-		"xpmhumanverificationtoken": true, "xpmuid": true,
-	}
-	secretLocationKeys = map[string]bool{"keypasswordprovider": true, "keypasswordhost": true}
-)
+// exactSensitiveKeys mirrors proton-drive-cli src/utils/redaction.ts (keys
+// lower-cased, non-alphanumerics removed).
+var exactSensitiveKeys = map[string]bool{
+	"accesstoken": true, "authorization": true, "armoredkey": true,
+	"captchatoken": true, "clientephemeral": true, "clientproof": true,
+	"humanverificationtoken": true, "privatekey": true, "refreshtoken": true,
+	"serverproof": true, "srpsession": true, "uid": true,
+	"xpmhumanverificationtoken": true, "xpmuid": true,
+}
 
 // IsSensitiveKey reports whether a JSON key holds a secret, by the rules of
 // proton-drive-cli's redactSensitive.
@@ -57,8 +54,6 @@ func IsSensitiveKey(key string) bool {
 	switch {
 	case exactSensitiveKeys[normalized]:
 		return true
-	case secretLocationKeys[normalized]:
-		return false
 	case strings.Contains(normalized, "password"), strings.Contains(normalized, "secret"),
 		strings.Contains(normalized, "privatekey"), strings.Contains(normalized, "armoredkey"):
 		return true

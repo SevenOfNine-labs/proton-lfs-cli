@@ -40,20 +40,24 @@
   (`proton-drive-cli login`, browser session fork); no program in this
   repository or in proton-drive-cli accepts or stores it
 - The fork delivers the key password for every account type;
-  proton-drive-cli stores it, keyed by the session UID, in the configured
-  provider (`pass-cli` or `git credential`) under
-  `proton-drive-key.proton-lfs-cli.local`, reads it back to verify, and
-  removes it when the session cannot be saved
-- Key-password lifecycle: `proton-drive-cli logout` removes the entry; a
-  login that yields a new session UID removes the entry of the previous UID;
-  a refresh token the API rejects signs the session out and removes it
+  proton-drive-cli stores it with the access and refresh tokens as one
+  entry, keyed by the session UID, in the configured credential store
+  (`pass-cli` or `git credential`) under `proton-drive-cli.invalid`, reads
+  the entry back to verify it after every write, and removes it when login
+  cannot save the session (RFC 6749, 10.4: refresh tokens confidential in
+  storage; CWE-312)
+- Session entry lifecycle: every token refresh rewrites the entry under the
+  session lock; `proton-drive-cli logout` removes it after deleting
+  session.json; a login that yields a
+  new session UID removes the entry of the previous UID; a refresh token
+  the API rejects signs the session out and removes it
 - The Go adapter resolves no credential and sends none: bridge requests carry
   only `storageBase`, `appVersion` and the command fields (OIDs and paths)
 - **No HTTP layer** — the adapter talks to proton-drive-cli over subprocess
   pipes, never over a network connection, even localhost
-- Session file (`~/.proton-drive-cli/session.json`) contains only revocable
-  tokens and metadata (`uid`, `accessToken`, `refreshToken`, `scopes`,
-  `keyPasswordProvider`, `keyPasswordHost`, `tokenExpiresAt`), no password
+- Session file (`~/.proton-drive-cli/session.json`) holds no secret: `uid`,
+  `scopes`, `credentialStore`, `credentialHost`, `revision` and
+  `tokenExpiresAt`
 - Session directory `0700`, session file `0600` (owner-only)
 - Error messages sanitized: stderr quoted in adapter errors and the tray log
   are redacted by `internal/bridgeproto` (bearer tokens, secret-named fields,
@@ -88,15 +92,15 @@
 
 ### 5. Session Token Theft
 
-**Risk**: Session file readable by other users on shared systems.
+**Risk**: Session tokens read from disk by other users, backups or synchronized home directories.
 
 **Mitigations**:
 
-- Session file at `~/.proton-drive-cli/session.json` contains only revocable tokens (no passwords)
+- The access and refresh tokens live in the credential store entry, never in a file of this project; `~/.proton-drive-cli/session.json` holds no secret
 - Directory permissions: `0700` (set by `ensureDir`)
 - File permissions: `0600` (set by atomic write, `write-file-atomic`)
 - Session stored in user home directory, not shared locations
-- `proton-drive-cli logout` removes the key-password entry, revokes the session on the server (`DELETE /auth/v4`; a failed revocation is logged and the local cleanup still completes) and deletes the session file and crypto cache
+- `proton-drive-cli logout` removes the session entry, revokes the session on the server (`DELETE /auth/v4`; a failed revocation is logged and the local cleanup still completes) and deletes the session file and crypto cache
 - A session revoked elsewhere (Proton account settings, "log out all other sessions") fails at its next API call; a refresh token the API rejects with a Proton error body and HTTP 4xx other than 408 and 429 signs the local session out
 
 **Validation**: `TestCredentialSessionFilePermissions` in integration tests
@@ -119,30 +123,30 @@
 **Mitigations**:
 
 - Environment allowlist in `internal/bridgeproto/env.go` — only approved prefixes/names forwarded
-- Allowed: `PATH`, `HOME`, `USER`, `SHELL`, `LANG`, `LC_*`, `TERM`, `NODE_ENV`, `NODE_OPTIONS`, `NODE_PATH`, `NODE_BIN`, `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_CACHE_HOME`, `XDG_RUNTIME_DIR`, `TMPDIR`, `TMP`, `TEMP`, the Windows profile and system variables (`USERPROFILE`, `HOMEDRIVE`, `HOMEPATH`, `APPDATA`, `LOCALAPPDATA`, `SYSTEMROOT`, `WINDIR`, `COMSPEC`, `PATHEXT`), `MOCK_BRIDGE_*`, the variables bridge commands read: `PROTON_DRIVE_CLI_APP_VERSION`, `PROTON_PASS_CLI_BIN`, `PROTON_AUTH_TRACE`, `PROTON_AUTH_TRACE_ID`, and the configuration of the processes they start: `PROTON_PASS_SESSION_DIR`, `PROTON_PASS_KEY_PROVIDER`, `PROTON_PASS_ENCRYPTION_KEY`, `PROTON_PASS_LINUX_KEYRING`, `DBUS_SESSION_BUS_ADDRESS`, `GIT_CONFIG_GLOBAL`, `GCM_*`
+- Allowed: `PATH`, `HOME`, `USER`, `SHELL`, `LANG`, `LC_*`, `TERM`, `NODE_ENV`, `NODE_OPTIONS`, `NODE_PATH`, `NODE_BIN`, `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_CACHE_HOME`, `XDG_RUNTIME_DIR`, `TMPDIR`, `TMP`, `TEMP`, the Windows profile and system variables (`USERPROFILE`, `HOMEDRIVE`, `HOMEPATH`, `APPDATA`, `LOCALAPPDATA`, `SYSTEMROOT`, `WINDIR`, `COMSPEC`, `PATHEXT`), `MOCK_BRIDGE_*`, the variables bridge commands read: `PROTON_DRIVE_CLI_APP_VERSION`, `PROTON_PASS_CLI_BIN`, `PROTON_AUTH_TRACE`, `PROTON_AUTH_TRACE_ID`, and the configuration of the processes they start: `PROTON_PASS_SESSION_DIR`, `PROTON_PASS_KEY_PROVIDER`, `PROTON_PASS_ENCRYPTION_KEY`, `PROTON_PASS_LINUX_KEYRING`, `DBUS_SESSION_BUS_ADDRESS`, `GIT_CONFIG_GLOBAL`, `GIT_CONFIG_SYSTEM`, `GIT_CONFIG_NOSYSTEM`, `GCM_*`, and for Git Credential Manager's `gpg` store `DISPLAY`, `WAYLAND_DISPLAY`, `GPG_TTY`, `SSH_TTY`, `PASSWORD_STORE_DIR`, `GNUPGHOME`, and `WSL_INTEROP`, `WSLENV` for a Windows `git-credential-manager.exe` started from WSL
 - Every other variable, secret-shaped names such as `PROTON_PASSWORD` included, is dropped; no proton-drive-cli command reads a password from the environment. `PROTON_PASS_ENCRYPTION_KEY` is forwarded only because pass-cli's `env` key provider reads its local-key secret from it; the user who sets it already exposes it to every process of that shell
 - Test coverage verifies allowlist behavior
 
 **Tests**: `cmd/adapter/bridge_test.go` (TestFilteredEnv, TestMatchesAllowlist)
 
-### 8. Git Credential Manager Integration
+### 8. Git Credential Helper Integration
 
-**Risk**: Credentials resolved via `git credential fill` could be intercepted or the git credential helper could be compromised.
+**Risk**: Session secrets passed to `git credential approve` could reach a helper that writes them in plaintext (`store`) or keeps them only in memory (`cache`), or the git credential helper could be compromised.
 
 **Mitigations**:
 
 - `execFile` used (not `exec`) — prevents shell injection in the git binary path
 - Attributes travel on stdin, never as command-line arguments; values containing CR, LF or NUL are rejected
-- 10-second timeout on every call, and `GIT_TERMINAL_PROMPT=0` with empty `GIT_ASKPASS`/`SSH_ASKPASS`, so a missing entry fails instead of prompting
-- `git credential fill/approve/reject` manage the key-password entry's lifecycle (read, store, remove)
-- When `--key-password-provider git-credential` is used, the browser-fork key
-  password is stored entirely within proton-drive-cli's key-password flow; it
-  never passes through the Go adapter
-- The Go adapter resolves no credentials from any provider; proton-drive-cli does, and only for the key password
+- 10-second timeout on every call; `GIT_TERMINAL_PROMPT=0` with empty `GIT_ASKPASS`/`SSH_ASKPASS`, `credential.interactive=false`, `GCM_INTERACTIVE=false` and `GCM_GUI_PROMPT=false`, so a missing entry fails instead of prompting for credentials; the operating system may still ask to unlock a locked keychain or keyring
+- Only a helper that encrypts secrets at rest is used: the first `osxkeychain`, `wincred`, `libsecret`, or `manager` of the system and global git configuration whose Git Credential Manager store encrypts (`keychain`, `wincredman`, `dpapi`, `secretservice`, `gpg`, pinned through `GCM_CREDENTIAL_STORE`); it is pinned with `-c credential.helper= -c credential.helper=<helper>`, because `git credential approve` sends the credential to every configured helper (git-credential(1)); values with quotes, expansions or shell operators are never selected; without such a helper the store fails
+- git runs from the file-system root without `GIT_DIR`, so repository configuration never applies; a save runs `reject` before `approve`, so a helper that keeps an existing item cannot leave the previous refresh token in place
+- `GCM_PROVIDER=generic` and the reserved host `proton-drive-cli.invalid` (RFC 6761, 6.4) keep Git Credential Manager from probing a server
+- `git credential fill/approve/reject` manage the session entry's lifecycle (read, store, remove); every write is read back
+- The session secrets never pass through the Go adapter; the Go adapter resolves no credential
 
-**Note**: The security of stored credentials depends on the underlying credential helper (macOS Keychain, Windows Credential Manager, etc.). The git credential protocol itself does not encrypt data in transit between git and the helper.
+**Note**: The git credential protocol does not encrypt data in transit between git and the helper; it runs over pipes between processes of the same user.
 
 ## Known Gaps
 
 1. Debug logging (`--debug`) could expose API response bodies containing tokens. Debug mode should only be used in development.
-2. Git credential helpers vary in security: some may store credentials in plaintext files (e.g., `git-credential-store`). Users should prefer OS-integrated helpers (macOS Keychain, GCM).
+2. The session entry has no per-application access control in Proton Pass, the Linux Secret Service (Secret Service API, 10) or the Windows Credential Manager: any process of the same user can read it while the store is unlocked.

@@ -24,14 +24,7 @@ func cliDriveLogin(driveCLI string, args ...string) error {
 	var stderr bytes.Buffer
 	cmd := exec.Command(driveCLI, cmdArgs...)
 	cmd.Stderr = &stderr
-	// proton-drive-cli resolves pass-cli through PROTON_PASS_CLI_BIN, which
-	// carries the absolute path because launchd's PATH lacks it.
-	provider := extractKeyPasswordProviderFromArgs(args)
-	if provider == config.CredentialProviderPassCLI {
-		if passCLI := discoverPassCLIBinary(); passCLI != "" {
-			cmd.Env = append(cmd.Environ(), "PROTON_PASS_CLI_BIN="+passCLI)
-		}
-	}
+	cmd.Env = driveCLIEnv(cmd.Environ())
 	if err := cmd.Run(); err != nil {
 		if stderr.Len() > 0 {
 			return fmt.Errorf("%w: %s", err, strings.TrimSpace(stderr.String()))
@@ -41,22 +34,11 @@ func cliDriveLogin(driveCLI string, args ...string) error {
 	return nil
 }
 
-// extractKeyPasswordProviderFromArgs scans args for --key-password-provider
-// and returns the value, or empty string if not found.
-func extractKeyPasswordProviderFromArgs(args []string) string {
-	for i, arg := range args {
-		if arg == "--key-password-provider" && i+1 < len(args) {
-			return args[i+1]
-		}
-	}
-	return ""
-}
-
-// cliStatus prints session, LFS, provider, and transfer status.
+// cliStatus prints session, LFS, credential store, and transfer status.
 func cliStatus(w io.Writer) int {
 	switch meta, ok := readSessionMetadata(); {
 	case ok && validSessionShape(meta):
-		_, _ = fmt.Fprintf(w, "Session:  logged in, key password in %s (%s)\n", meta.KeyPasswordProvider, meta.KeyPasswordHost)
+		_, _ = fmt.Fprintf(w, "Session:  signed in; credential store %s (%s); proton-drive-cli doctor verifies it\n", meta.CredentialStore, meta.CredentialHost)
 	case isSessionActive():
 		_, _ = fmt.Fprintln(w, "Session:  invalid session file; run proton-drive-cli login")
 	default:
@@ -70,7 +52,7 @@ func cliStatus(w io.Writer) int {
 	}
 
 	prefs := config.LoadPrefs()
-	_, _ = fmt.Fprintf(w, "Provider: %s (next login)\n", prefs.KeyPasswordProvider)
+	_, _ = fmt.Fprintf(w, "Store:    %s (next login)\n", prefs.CredentialStore)
 
 	report, err := config.ReadStatus()
 	if err != nil {
@@ -109,38 +91,39 @@ func cliLogout(w io.Writer) int {
 	return 0
 }
 
-// cliConfig shows or sets the browser-fork key-password provider.
+// cliConfig shows or sets the credential store the next login saves the
+// session tokens and key password in.
 func cliConfig(w io.Writer, args []string) int {
 	if len(args) == 0 {
 		prefs := config.LoadPrefs()
-		_, _ = fmt.Fprintln(w, prefs.KeyPasswordProvider)
+		_, _ = fmt.Fprintln(w, prefs.CredentialStore)
 		return 0
 	}
 
-	provider := args[0]
-	switch provider {
+	store := args[0]
+	switch store {
 	case "--help", "-h":
-		_, _ = fmt.Fprintln(w, "Usage: proton-lfs-cli config [provider]")
-		_, _ = fmt.Fprintf(w, "\nShow or set the browser-fork key-password provider.\n")
-		_, _ = fmt.Fprintf(w, "With no argument, prints the current provider.\n\n")
-		_, _ = fmt.Fprintf(w, "Providers: %s, %s\n",
-			config.CredentialProviderGitCredential, config.CredentialProviderPassCLI)
+		_, _ = fmt.Fprintln(w, "Usage: proton-lfs-cli config [store]")
+		_, _ = fmt.Fprintf(w, "\nShow or set the credential store the next login saves the session tokens and key password in.\n")
+		_, _ = fmt.Fprintf(w, "With no argument, prints the current store.\n\n")
+		_, _ = fmt.Fprintf(w, "Stores: %s, %s\n",
+			config.CredentialStoreGitCredential, config.CredentialStorePassCLI)
 		return 0
-	case config.CredentialProviderGitCredential, config.CredentialProviderPassCLI:
+	case config.CredentialStoreGitCredential, config.CredentialStorePassCLI:
 	default:
-		_, _ = fmt.Fprintf(w, "unknown provider: %s\n", provider)
-		_, _ = fmt.Fprintf(w, "valid providers: %s, %s\n",
-			config.CredentialProviderGitCredential, config.CredentialProviderPassCLI)
+		_, _ = fmt.Fprintf(w, "unknown credential store: %s\n", store)
+		_, _ = fmt.Fprintf(w, "valid stores: %s, %s\n",
+			config.CredentialStoreGitCredential, config.CredentialStorePassCLI)
 		return 1
 	}
 
 	prefs := config.LoadPrefs()
-	prefs.KeyPasswordProvider = provider
+	prefs.CredentialStore = store
 	if err := config.SavePrefs(prefs); err != nil {
 		_, _ = fmt.Fprintf(w, "error saving config: %v\n", err)
 		return 1
 	}
-	_, _ = fmt.Fprintf(w, "Key-password provider set to %s\n", provider)
+	_, _ = fmt.Fprintf(w, "Credential store set to %s\n", store)
 	return 0
 }
 
@@ -165,11 +148,11 @@ func cliRegister(w io.Writer) int {
 	if driveCLIPath != "" {
 		_, _ = fmt.Fprintf(w, "  drive-cli: %s\n", driveCLIPath)
 	}
-	_, _ = fmt.Fprintf(w, "  provider: %s\n", prefs.KeyPasswordProvider)
+	_, _ = fmt.Fprintf(w, "  store: %s\n", prefs.CredentialStore)
 	return 0
 }
 
-// cliLogin handles browser-fork login for the configured key-password provider.
+// cliLogin handles browser-fork login with the configured credential store.
 func cliLogin(w io.Writer) int {
 	driveCLI := findDriveCLI()
 	if driveCLI == "" {
@@ -178,10 +161,8 @@ func cliLogin(w io.Writer) int {
 	}
 
 	prefs := config.LoadPrefs()
-	provider := prefs.KeyPasswordProvider
-
 	_, _ = fmt.Fprintln(w, "Logging in...")
-	if err := loginDrive(driveCLI, "--key-password-provider", provider); err != nil {
+	if err := loginDrive(driveCLI, "--credential-store", prefs.CredentialStore); err != nil {
 		_, _ = fmt.Fprintf(w, "error: login failed: %v\n", err)
 		return 1
 	}

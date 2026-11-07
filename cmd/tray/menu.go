@@ -88,11 +88,11 @@ func setupMenu() {
 
 	systray.AddSeparator()
 
-	mCredPass = systray.AddMenuItemCheckbox("Use Proton Pass", "The next Connect to Proton stores the key password in Proton Pass CLI", false)
-	mCredGit = systray.AddMenuItemCheckbox("Use Git Credential Manager", "The next Connect to Proton stores the key password in the OS credential manager", false)
+	mCredPass = systray.AddMenuItemCheckbox("Use Proton Pass", "The next Connect to Proton stores the session tokens and key password in Proton Pass CLI", false)
+	mCredGit = systray.AddMenuItemCheckbox("Use Git Credential Helper", "The next Connect to Proton stores the session tokens and key password with git's OS-store credential helper", false)
 
 	prefs := config.LoadPrefs()
-	applyCredCheckmarks(prefs.KeyPasswordProvider)
+	applyCredCheckmarks(prefs.CredentialStore)
 
 	systray.AddSeparator()
 
@@ -112,9 +112,9 @@ func setupMenu() {
 		for {
 			select {
 			case <-mCredGit.ClickedCh:
-				switchCredentialProvider(config.CredentialProviderGitCredential)
+				switchCredentialStore(config.CredentialStoreGitCredential)
 			case <-mCredPass.ClickedCh:
-				switchCredentialProvider(config.CredentialProviderPassCLI)
+				switchCredentialStore(config.CredentialStorePassCLI)
 			case <-mPrimaryAuth.ClickedCh:
 				handlePrimaryAuthAction()
 			case <-mRecheck.ClickedCh:
@@ -159,11 +159,11 @@ func applyRegisterStatus(enabled bool) {
 	}
 }
 
-func applyCredCheckmarks(provider string) {
+func applyCredCheckmarks(store string) {
 	if mCredGit == nil || mCredPass == nil {
 		return
 	}
-	if provider == config.CredentialProviderGitCredential {
+	if store == config.CredentialStoreGitCredential {
 		mCredGit.Check()
 		mCredPass.Uncheck()
 	} else {
@@ -172,11 +172,11 @@ func applyCredCheckmarks(provider string) {
 	}
 }
 
-func switchCredentialProvider(provider string) {
+func switchCredentialStore(store string) {
 	prefs := config.LoadPrefs()
-	prefs.KeyPasswordProvider = provider
+	prefs.CredentialStore = store
 	_ = config.SavePrefs(prefs)
-	applyCredCheckmarks(provider)
+	applyCredCheckmarks(store)
 }
 
 // registerGitLFS writes the same global git settings as
@@ -251,8 +251,8 @@ func runDoctor() {
 		sendNotification("Error: CLI not found")
 		return
 	}
-	// Without --key-password-provider, doctor checks the provider and host
-	// recorded in the session (proton-drive-cli src/cli/doctor.ts).
+	// Without --credential-store, doctor checks the store and host recorded
+	// in the session (proton-drive-cli src/cli/doctor.ts).
 	args := []string{shellQuoteArg(driveCLI), "doctor"}
 	openInTerminal(strings.Join(args, " ")+"; echo; echo 'Press Enter to close...'; read -r",
 		"Doctor could not open terminal")

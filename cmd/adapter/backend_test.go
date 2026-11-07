@@ -93,7 +93,7 @@ func TestDriveCLIBackendInitializeBlocksAllNonReadyStatesBeforeInitOrAuth(t *tes
 		errorCode ErrorCode
 	}{
 		{state: "needs_login", code: 401, errorCode: ErrCodeAuthRequired},
-		{state: "needs_key_password", code: 401, errorCode: ErrCodeKeyPasswordRequired},
+		{state: "credentials_unavailable", code: 401, errorCode: ErrCodeCredentialsUnavailable},
 		{state: "session_invalid", code: 401, errorCode: ErrCodeAuthRequired},
 	}
 
@@ -254,7 +254,8 @@ func TestMapBridgeError(t *testing.T) {
 		{"429 prefix", "[429] rate limited", 429},
 		{"text captcha", "captcha verification required", 407},
 		{"text rate limit", "rate limit exceeded", 429},
-		{"text key password", "Browser-fork session is missing its stored key password", 401},
+		{"text key password", "The stored key password unlocks no user key", 401},
+		{"text credential store", "The session could not be saved to pass-cli (locked). Fix the credential store", 401},
 		{"unknown error", "something unexpected", 502},
 	}
 	for _, tc := range cases {
@@ -287,14 +288,14 @@ func TestMapStructuredBridgeErrorAuthStates(t *testing.T) {
 		wantClass ErrorCode
 	}{
 		{
-			name: "key password required",
+			name: "credentials unavailable",
 			err: &BridgeError{
 				Code:    401,
-				Message: "Browser-fork session is missing its stored key password",
-				Details: `{"errorCode":"KEY_PASSWORD_REQUIRED"}`,
+				Message: "The credentials of the session could not be read from pass-cli",
+				Details: `{"errorCode":"CREDENTIALS_UNAVAILABLE"}`,
 			},
 			wantCode:  401,
-			wantClass: ErrCodeKeyPasswordRequired,
+			wantClass: ErrCodeCredentialsUnavailable,
 		},
 		{
 			name: "insufficient scope",
@@ -404,8 +405,8 @@ func TestDriveCLIBackendInitializeBlocksNeedsLoginState(t *testing.T) {
 	}
 }
 
-func TestDriveCLIBackendInitializeMapsKeyPasswordState(t *testing.T) {
-	bc := helperBridgeClient(t, "MOCK_BRIDGE_AUTH_STATE=needs_key_password")
+func TestDriveCLIBackendInitializeMapsCredentialsUnavailableState(t *testing.T) {
+	bc := helperBridgeClient(t, "MOCK_BRIDGE_AUTH_STATE=credentials_unavailable")
 	backend := NewDriveCLIBackend(bc)
 	session := &Session{Initialized: true, CreatedAt: time.Now()}
 
@@ -414,11 +415,11 @@ func TestDriveCLIBackendInitializeMapsKeyPasswordState(t *testing.T) {
 	if !errors.As(err, &backendErr) {
 		t.Fatalf("expected BackendError, got %T", err)
 	}
-	if backendErr.Code != 401 || backendErr.ErrorCode != ErrCodeKeyPasswordRequired {
-		t.Fatalf("expected key_password_required 401, got %+v", backendErr)
+	if backendErr.Code != 401 || backendErr.ErrorCode != ErrCodeCredentialsUnavailable {
+		t.Fatalf("expected credentials_unavailable 401, got %+v", backendErr)
 	}
 	if backend.authenticated {
-		t.Fatal("backend must not authenticate when key-password auth-state is not ready")
+		t.Fatal("backend must not authenticate when the credentials are unavailable")
 	}
 }
 
@@ -808,7 +809,7 @@ func TestMapStructuredBridgeErrorUsesErrorCodeNotMessage(t *testing.T) {
 	err := mapBridgeError(&BridgeError{
 		Command: "download",
 		Code:    500,
-		Message: "Browser-fork session is missing its stored key password",
+		Message: "The stored key password unlocks no user key",
 		Details: `{"errorCode":"UNKNOWN_ERROR"}`,
 	}, "fallback")
 	var backendErr *BackendError
@@ -878,5 +879,33 @@ func TestBridgeClientReportsNonExecutableProgramAsStartError(t *testing.T) {
 	var backendErr *BackendError
 	if !errors.As(mapBridgeError(err, "fallback"), &backendErr) || backendErr.Code != 400 || backendErr.Retryable {
 		t.Fatalf("a start error must map to a non-retryable 400, got %+v", backendErr)
+	}
+}
+
+func TestCredentialsUnavailableCarriesRedactedStoreReason(t *testing.T) {
+	err := mapAuthStateForTransfer(&BridgeAuthStateResponse{
+		State:  "credentials_unavailable",
+		Errors: []string{`Credentials unavailable from pass-cli: {"accessToken":"at-secret"} Bearer tok-secret`},
+	})
+	var backendErr *BackendError
+	if !errors.As(err, &backendErr) || backendErr.ErrorCode != ErrCodeCredentialsUnavailable {
+		t.Fatalf("expected credentials_unavailable BackendError, got %v", err)
+	}
+	for _, secret := range []string{"at-secret", "tok-secret"} {
+		if strings.Contains(backendErr.Message, secret) {
+			t.Fatalf("auth-state cause leaked %q: %s", secret, backendErr.Message)
+		}
+	}
+	if !strings.Contains(backendErr.Message, "Credentials unavailable from pass-cli") {
+		t.Fatalf("auth-state cause missing from message: %s", backendErr.Message)
+	}
+
+	matched, mapped := mapBridgeErrorCode("CREDENTIALS_UNAVAILABLE", &BridgeError{Code: 401},
+		"git has no credential helper that encrypts secrets at rest (Bearer tok-secret)", "fallback", nil)
+	if !matched || !errors.As(mapped, &backendErr) {
+		t.Fatalf("CREDENTIALS_UNAVAILABLE not mapped: %v", mapped)
+	}
+	if strings.Contains(backendErr.Message, "tok-secret") || !strings.Contains(backendErr.Message, "git has no credential helper") {
+		t.Fatalf("store reason not carried redacted: %s", backendErr.Message)
 	}
 }

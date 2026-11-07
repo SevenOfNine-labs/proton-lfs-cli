@@ -19,7 +19,7 @@ const authRateLimitCooldown = time.Hour
 const subprocessWaitDelay = 5 * time.Second
 
 // connectToProton runs `proton-drive-cli login`, the browser-fork sign-in,
-// with the configured key-password provider.
+// with the configured credential store.
 func connectToProton() {
 	if remaining, blocked := activeAuthRateLimit(time.Now()); blocked {
 		trayLog.Printf("connect: auth rate limit active; skipping login for %s", formatCooldown(remaining))
@@ -36,14 +36,14 @@ func connectToProton() {
 	trayLog.Printf("connect: using drive-cli at %s", driveCLI)
 
 	prefs := config.LoadPrefs()
-	provider := prefs.KeyPasswordProvider
-	trayLog.Printf("connect: key-password provider = %s", provider)
+	store := prefs.CredentialStore
+	trayLog.Printf("connect: credential store = %s", store)
 	traceID := newAuthTraceID()
 	trayLog.Printf("connect: auth trace id = %s", traceID)
 
 	sendNotification("Connecting…")
 	go func() {
-		out, err := protonDriveLoginWithTrace(driveCLI, provider, traceID, "--key-password-provider", provider)
+		out, err := protonDriveLoginWithTrace(driveCLI, store, traceID, "--credential-store", store)
 		if err != nil {
 			trayLog.Printf("connect: login failed: %v", err)
 			if isAuthRateLimitedOutput(out) {
@@ -70,21 +70,14 @@ func connectToProton() {
 	}()
 }
 
-func protonDriveLoginWithTrace(driveCLI string, provider string, traceID string, args ...string) ([]byte, error) {
+func protonDriveLoginWithTrace(driveCLI string, store string, traceID string, args ...string) ([]byte, error) {
 	cmdArgs := append([]string{"login"}, args...)
 	cmdArgs = append(cmdArgs, "-q")
 	trayLog.Printf("connect: exec %s %v", driveCLI, cmdArgs)
 	cmd := exec.Command(driveCLI, cmdArgs...)
-	cmd.Env = append(cmd.Environ(), withAuthTraceEnv(nil, traceID)...)
-	// proton-drive-cli resolves pass-cli through PROTON_PASS_CLI_BIN, which
-	// carries the absolute path because launchd's PATH lacks it.
-	if provider == config.CredentialProviderPassCLI {
-		if passCLI := discoverPassCLIBinary(); passCLI != "" {
-			cmd.Env = append(cmd.Env, "PROTON_PASS_CLI_BIN="+passCLI)
-			trayLog.Printf("connect: set PROTON_PASS_CLI_BIN=%s", passCLI)
-		} else {
-			trayLog.Print("connect: warning: pass-cli not found in PATH")
-		}
+	cmd.Env = driveCLIEnv(append(cmd.Environ(), withAuthTraceEnv(nil, traceID)...))
+	if store == config.CredentialStorePassCLI && discoverPassCLIBinary() == "" {
+		trayLog.Print("connect: warning: pass-cli not found in PATH")
 	}
 	out, err := runLoggedCommand("connect", cmd)
 	if err != nil {

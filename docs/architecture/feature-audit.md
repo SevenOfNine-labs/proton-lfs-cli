@@ -26,7 +26,7 @@ Runtime behavior and tests remain authoritative.
 | SDK backend | Spawns `proton-drive-cli bridge` subprocess and stores objects in Proton Drive under `/LFS`. | Beta | `cmd/adapter/bridge.go`, `cmd/adapter/backend.go`. | Bridge unit tests, mocked E2E, opt-in SDK integration. |
 | Tray/helper CLI | `proton-lfs-tray` (linked as `proton-lfs-cli` by `make install`): login, logout, register, status, config, scope-diagnostics, and the tray itself. | Beta | `cmd/tray/*.go`. | `cmd/tray/*_test.go`. |
 | Status reporting | Writes transfer state, machine error code, retryability, and temporary-failure metadata for tray/CLI display. | Stable | `internal/config/status.go`. | `internal/config/status_test.go`, tray status tests. |
-| Preferences | Stores the key-password provider and the enabled flag. | Stable | `internal/config/prefs.go`. | `internal/config/config_test.go`, tray CLI tests. |
+| Preferences | Stores the credential store of the next login. | Stable | `internal/config/prefs.go`. | `internal/config/config_test.go`, tray CLI tests. |
 | Build/package automation | Builds Go adapter/tray, proton-drive-cli, Git LFS, SEA bundle, and app bundles. | Beta | `Makefile`, `scripts/*.sh`. | Exercised by the Build and Release Bundle workflows and by hand; not fully unit-tested. |
 | Submodule pin verification | Verifies root submodule pins and the nested Proton SDK gitlink without recursive SDK traversal. | Stable | `scripts/check-submodules.sh`, `Makefile`. | `make check-submodules`. |
 | Live canary workflow | Real Proton E2E with explicit acknowledgement. | Guarded | `Makefile`, `docs/operations/live-canary-runbook.md`. | Not run by default; requires `PROTON_LFS_LIVE_CANARY`. |
@@ -67,8 +67,8 @@ The adapter is invoked by Git LFS, not directly by end users.
 
 The root adapter never resolves Proton credentials and never sends account
 or credential fields to `proton-drive-cli` transfer commands. Account login
-must already exist as a browser-fork session, whose key password the bridge
-reads from the session's provider. The adapter sends only `storageBase`,
+must already exist as a browser-fork session, whose tokens and key
+password the bridge reads from the session's credential store. The adapter sends only `storageBase`,
 `appVersion` and operation fields.
 proton-drive-cli owns the per-command request-field matrix in
 `schemas/bridge/v1/request-field-rules.json`; root contract tests verify every
@@ -97,11 +97,11 @@ proceed only when the state is `ready` or `session_expired`.
 | `needs_login` | `auth_required` 401 | Refuse transfer; no session file; user must login outside Git LFS transfer. |
 | `session_invalid` | `auth_required` 401 | Refuse transfer; the session file is unreadable or lacks a field `login` writes; replace it with `proton-drive-cli login`. |
 | `session_expired` | OK | Continue to `init`, which refreshes the access token before use; a rejected refresh token fails `init` with `SESSION_EXPIRED` (`auth_required` 401). |
-| `needs_key_password` | `key_password_required` 401 | Refuse transfer; the session's key-password entry is missing; rerun browser login. |
+| `credentials_unavailable` | `credentials_unavailable` 401 | Refuse transfer; the session's credential-store entry cannot be read; fix the store or rerun browser login. |
 | Unknown state | `server_error` 502 | Refuse transfer; update compatibility. |
 
 The bridge reports the first state that applies in the order `needs_login`,
-`session_invalid`, `session_expired`, `needs_key_password`, `ready`. The refusal answers `init` with a protocol error; the
+`session_invalid`, `session_expired`, `credentials_unavailable`, `ready`. The refusal answers `init` with a protocol error; the
 status file is not written.
 
 ## Tray and Helper CLI Surface
@@ -110,13 +110,13 @@ The tray binary also provides a small CLI when launched with arguments.
 
 | Command/action | Behavior | Status | Tests |
 | --- | --- | --- | --- |
-| `proton-lfs-tray login` | Run browser-fork-only `proton-drive-cli login --key-password-provider <provider>`. | Beta | `cmd/tray/cli_test.go`. |
+| `proton-lfs-tray login` | Run browser-fork-only `proton-drive-cli login --credential-store <store>`. | Beta | `cmd/tray/cli_test.go`. |
 | `proton-lfs-tray logout` | Delegate to `proton-drive-cli logout`. | Beta | `cmd/tray/cli_test.go`. |
 | `proton-lfs-tray register` | Configure global Git LFS custom transfer for Proton. | Stable | `cmd/tray/cli_test.go`, `custom_transfer_args_test.go`. |
-| `proton-lfs-tray status` | Print session, LFS registration, provider, transfer status, readiness, and refresh state. | Stable | `cmd/tray/status_test.go`, `cmd/tray/cli_test.go`. |
-| `proton-lfs-tray config [provider]` | Show or set preferred browser-fork key-password provider. | Stable | `cmd/tray/cli_test.go`. |
+| `proton-lfs-tray status` | Print session, LFS registration, credential store, transfer status, readiness, and refresh state. | Stable | `cmd/tray/status_test.go`, `cmd/tray/cli_test.go`. |
+| `proton-lfs-tray config [store]` | Show or set the credential store of the next login. | Stable | `cmd/tray/cli_test.go`. |
 | `proton-lfs-tray scope-diagnostics [--live]` | Redacted auth/session evidence; `--live` performs one read-only `bridge list` behind the canary acknowledgement. | Beta | `cmd/tray/cli_test.go`. |
-| Tray Connect | Run browser-fork-only login with the configured key-password provider. | Beta | `cmd/tray/connect_test.go`, `cmd/tray/cli_test.go`. |
+| Tray Connect | Run browser-fork-only login with the configured credential store. | Beta | `cmd/tray/connect_test.go`, `cmd/tray/cli_test.go`. |
 | Tray status watcher | Poll transfer status and session/LFS registration; display retryability/temporary failure hints; schedule visible token refresh from saved token expiry. | Beta | `cmd/tray/status_test.go`. |
 | Autostart | macOS LaunchAgent and Linux desktop autostart. | Beta | `cmd/tray/setup_test.go`; packaging/manual validation still needed. |
 
@@ -125,9 +125,9 @@ The tray binary also provides a small CLI when launched with arguments.
 | File/location | Owner | Contents | Security expectation |
 | --- | --- | --- | --- |
 | `~/.proton-lfs/status.json` | Root adapter/tray | Last transfer state, OID, operation, error code/detail. | No secrets. |
-| `~/.proton-lfs/config.json` | Tray/helper CLI | Key-password provider, enabled flag. | No secrets. |
-| `~/.proton-drive-cli/session.json` | proton-drive-cli | Revocable Proton session tokens, scopes, key-password provider and host, token expiry. | Mode `0600`; no passwords. |
-| Credential helper / Proton Pass | proton-drive-cli providers | The UID-scoped browser-fork key password. | Managed by provider, never root adapter config; removed on logout, on a login with a new UID and on a rejected refresh token. |
+| `~/.proton-lfs/config.json` | Tray/helper CLI | Credential store of the next login. | No secrets. |
+| `~/.proton-drive-cli/session.json` | proton-drive-cli | Session UID, scopes, credential store and host, revision, token expiry. | Mode `0600`; no secrets. |
+| Credential helper / Proton Pass | proton-drive-cli credential stores | The UID-scoped session entry: access token, refresh token and browser-fork key password. | Managed by proton-drive-cli, never root adapter config; rewritten on every token refresh; removed on logout, on a login with a new UID and on a rejected refresh token. |
 | Temp download files | Adapter | Staged objects returned to Git LFS. | Cleaned after transfer where possible; stale cleanup exists. |
 
 ## Test Coverage Matrix
@@ -160,8 +160,8 @@ The tray binary also provides a small CLI when launched with arguments.
 | --- | --- | --- |
 | Local Git LFS adapter | Stable | Full protocol and integration coverage without Proton dependency. |
 | Proton SDK bridge transfer path | Beta | Mocked E2E and offline auth gates are strong; real Proton canary remains opt-in. |
-| Browser-fork session handling across repos | Experimental to Beta | Key-password storage and transfer gating are covered; the real browser canary is pending. |
-| Credential-provider delegation | Stable | Root never handles secrets; drive-cli provider contracts are tested. |
+| Browser-fork session handling across repos | Experimental to Beta | Credential-store storage and transfer gating are covered; the real browser canary is pending. |
+| Credential-store delegation | Stable | Root never handles secrets; drive-cli credential-store contracts are tested. |
 | Tray UX | Beta | Menu, readiness rules and refresh behaviour are documented in `docs/reference/tray.md`; visual/platform behavior still needs the manual release checklist. |
 | Packaging/install | Beta | Scripts exist; cross-platform validation is manual. |
 
@@ -187,6 +187,6 @@ one of these surfaces:
 1. Public CLI flags or commands.
 2. Adapter flags, environment variables, or Git config snippets.
 3. Bridge request/response fields or auth states.
-4. Credential provider behavior or secret storage keys.
+4. Credential store behavior or secret storage keys.
 5. Error codes, retryability, or tray status states.
 6. Test maturity classification.

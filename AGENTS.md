@@ -23,7 +23,7 @@
 - `make test`: Run the Go unit tests for `./cmd/...` and `./internal/...`.
 - `cd submodules/proton-drive-cli && yarn test`: Run the proton-drive-cli Jest tests.
 - `make test-integration`: Run Go integration tests (`-tags integration`).
-- `make check-sdk-prereqs && make test-integration-sdk`: Validate prerequisites, then run the SDK integration path against a saved browser-fork session (requires a logged-in pass-cli unless `KEY_PASSWORD_PROVIDER=git-credential`).
+- `make check-sdk-prereqs && make test-integration-sdk`: Validate prerequisites, then run the SDK integration path against a saved browser-fork session (requires a logged-in pass-cli unless `CREDENTIAL_STORE=git-credential`).
 - `make build-drive-cli`: Build the proton-drive-cli TypeScript bridge.
 - `make test-e2e-mock`: Run the mocked end-to-end pipeline through `tests/testdata/mock-proton-drive-cli.js`.
 - `make test-integration-credentials`: Run credential flow security tests.
@@ -42,7 +42,7 @@
 - Add unit tests with every behavior change in both Go and TypeScript layers.
 - Add/extend integration tests in `tests/integration/` for protocol or workflow changes.
 - Target meaningful coverage on new code paths (project guidance: ~80%+ for new logic).
-- For SDK backend checks, set prerequisites first (`make build-drive-cli`, one `proton-drive-cli login --key-password-provider <provider>`, and `pass-cli login` when the provider is pass-cli; the Makefile reads the provider from `KEY_PASSWORD_PROVIDER`).
+- For SDK backend checks, set prerequisites first (`make build-drive-cli`, one `proton-drive-cli login --credential-store <store>`, and `pass-cli login` when the store is pass-cli; the Makefile reads the store from `CREDENTIAL_STORE`).
 
 ## Code Comments and Legacy (MANDATORY)
 

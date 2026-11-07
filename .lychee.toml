@@ -10,4 +10,6 @@ exclude = [
   "^http://localhost(:\\d+)?",
   "^http://127\\.0\\.0\\.1(:\\d+)?",
   "^http://0\\.0\\.0\\.0(:\\d+)?",
+  # RFC 6761, 6.4: names under .invalid never resolve.
+  "^https?://([^/]+\\.)?invalid([:/]|$)",
 ]

@@ -32,7 +32,7 @@ func main() {
 			return
 		case "login":
 			if hasHelpFlag(os.Args[2:]) {
-				fmt.Println("Usage: proton-lfs-cli login\n\nSign in to Proton in the browser and store the key password with the configured key-password provider.")
+				fmt.Println("Usage: proton-lfs-cli login\n\nSign in to Proton in the browser and store the session tokens and key password in the configured credential store.")
 				return
 			}
 			augmentPath()
@@ -53,7 +53,7 @@ func main() {
 			os.Exit(cliRegister(os.Stdout))
 		case "status":
 			if hasHelpFlag(os.Args[2:]) {
-				fmt.Println("Usage: proton-lfs-cli status\n\nShow session, LFS registration, key-password provider, and transfer status.")
+				fmt.Println("Usage: proton-lfs-cli status\n\nShow session, LFS registration, credential store, and transfer status.")
 				return
 			}
 			augmentPath()
@@ -94,11 +94,11 @@ Usage:
   proton-lfs-cli status            Show session, LFS, and transfer status
   proton-lfs-cli scope-diagnostics [--live]
                                    Print redacted Drive auth/scope evidence
-  proton-lfs-cli config [provider] Show or set the key-password provider
+  proton-lfs-cli config [store]    Show or set the credential store
   proton-lfs-cli --version         Print version and exit
   proton-lfs-cli --help            Show this help
 
-Key-password providers: git-credential, pass-cli
+Credential stores (session tokens and key password): git-credential, pass-cli
 `
 
 func onReady() {
