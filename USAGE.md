@@ -143,8 +143,10 @@ git config --global 'credential.https://proton-drive-cli.invalid.helper' \
 proton-drive-cli login --credential-store git-credential
 ```
 
-`proton-drive-cli login` prints the sign-in URL; open it in the Windows
-browser. Without the tray nothing refreshes the token in the background:
+`proton-drive-cli login` prints the sign-in URL and opens it in the Windows
+browser through Windows PowerShell, except in an SSH session; it says so
+when that fails, and the printed URL works as well. Without the tray nothing
+refreshes the token in the background:
 each transfer refreshes it when it has expired. pass-cli keeps its own
 Linux login in the kernel keyring, which a WSL restart clears.
 

@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -346,7 +348,7 @@ func TestCliLoginPassesCredentialStore(t *testing.T) {
 			findDriveCLI = func() string { return "/tmp/test-drive-cli" }
 			var gotDriveCLI string
 			var gotArgs []string
-			loginDrive = func(driveCLI string, args ...string) error {
+			loginDrive = func(_ io.Writer, driveCLI string, args ...string) error {
 				gotDriveCLI = driveCLI
 				gotArgs = append([]string(nil), args...)
 				return nil
@@ -378,7 +380,7 @@ func TestCliLoginLoginFails(t *testing.T) {
 	setupFakeHome(t, fakeHomeOpts{configJSON: `{"credentialStore":"pass-cli"}`})
 
 	findDriveCLI = func() string { return "/tmp/test-drive-cli" }
-	loginDrive = func(_ string, _ ...string) error {
+	loginDrive = func(_ io.Writer, _ string, _ ...string) error {
 		return errors.New("captcha required")
 	}
 
@@ -413,7 +415,7 @@ func TestCliLoginCreatesSession(t *testing.T) {
 	setupGitConfig(t, "")
 
 	findDriveCLI = func() string { return "/tmp/test-drive-cli" }
-	loginDrive = func(_ string, _ ...string) error {
+	loginDrive = func(_ io.Writer, _ string, _ ...string) error {
 		dir := filepath.Join(home, ".proton-drive-cli")
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			return err
@@ -696,5 +698,24 @@ func TestCliStatusReportsInvalidSessionFile(t *testing.T) {
 	}
 	if !strings.Contains(buf.String(), "Session:  invalid session file; run proton-drive-cli login") {
 		t.Errorf("status must not report an invalid session file as logged in:\n%s", buf.String())
+	}
+}
+
+func TestCliDriveLoginShowsTheSignInURL(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the fake proton-drive-cli is a POSIX shell script")
+	}
+	fake := filepath.Join(t.TempDir(), "proton-drive-cli")
+	script := "#!/bin/sh\necho 'Complete Proton sign-in in your browser:'\necho 'https://account.proton.me/desktop/login?app=drive#payload=x'\n"
+	if err := os.WriteFile(fake, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	var out bytes.Buffer
+	if err := cliDriveLogin(&out, fake, "--credential-store", "git-credential"); err != nil {
+		t.Fatalf("cliDriveLogin() = %v", err)
+	}
+	if !strings.Contains(out.String(), "https://account.proton.me/desktop/login?app=drive#payload=x") {
+		t.Fatalf("login output does not reach the user: %q", out.String())
 	}
 }

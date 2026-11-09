@@ -99,6 +99,16 @@ func TestIsAuthRateLimitedOutput(t *testing.T) {
 	}
 }
 
+func TestIsBrowserNotOpenedOutput(t *testing.T) {
+	out := []byte(`[AUTH_TRACE] {"event":"cli.login.browser-fork.failure","errorCode":"AUTH_FAILED","details":{"reason":"browser-not-opened"}}`)
+	if !isBrowserNotOpenedOutput(out) {
+		t.Fatal("the browser-not-opened login failure must be detected")
+	}
+	if isBrowserNotOpenedOutput([]byte(`[AUTH_TRACE] {"errorCode":"AUTH_FAILED"}`)) {
+		t.Fatal("another auth failure must not be reported as a missing browser")
+	}
+}
+
 func TestActiveAuthRateLimitBlocksFreshLoginStatus(t *testing.T) {
 	setupFakeHome(t, fakeHomeOpts{})
 	now := time.Date(2026, 6, 23, 13, 36, 50, 0, time.UTC)

@@ -17,12 +17,14 @@ var (
 	loginDrive   = cliDriveLogin
 )
 
-// cliDriveLogin runs proton-drive-cli login without -q, capturing stderr
-// in the returned error so CLI users see the actual failure reason.
-func cliDriveLogin(driveCLI string, args ...string) error {
+// cliDriveLogin runs proton-drive-cli login without -q, its standard output
+// written to w (the sign-in URL, whether a browser opened) and its stderr
+// returned in the error so CLI users see the actual failure reason.
+func cliDriveLogin(w io.Writer, driveCLI string, args ...string) error {
 	cmdArgs := append([]string{"login"}, args...)
 	var stderr bytes.Buffer
 	cmd := exec.Command(driveCLI, cmdArgs...)
+	cmd.Stdout = w
 	cmd.Stderr = &stderr
 	cmd.Env = driveCLIEnv(cmd.Environ())
 	if err := cmd.Run(); err != nil {
@@ -162,7 +164,7 @@ func cliLogin(w io.Writer) int {
 
 	prefs := config.LoadPrefs()
 	_, _ = fmt.Fprintln(w, "Logging in...")
-	if err := loginDrive(driveCLI, "--credential-store", prefs.CredentialStore); err != nil {
+	if err := loginDrive(w, driveCLI, "--credential-store", prefs.CredentialStore); err != nil {
 		_, _ = fmt.Fprintf(w, "error: login failed: %v\n", err)
 		return 1
 	}
