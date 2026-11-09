@@ -100,6 +100,13 @@ build-bundle: check-submodules build-adapter build-tray build-sea ## Build all c
 INSTALL_APP ?= /Applications/ProtonLFS.app
 INSTALL_BIN ?= $(HOME)/.local/bin
 
+# install_exec copies $(1) beside $(2) and renames it into place: rename(2)
+# atomically replaces an executable a running process uses (cp(1) fails with
+# ETXTBSY); a failed step removes the temporary file.
+define install_exec
+t="$(2).tmp.$$$$"; cp "$(1)" "$$t" && chmod +x "$$t" && mv -f "$$t" "$(2)" || { rm -f "$$t"; exit 1; }
+endef
+
 # Help entries for the platform-specific rules below (one line each in
 # `make help`; the recipes are chosen by host OS).
 install: ## Install bundle (macOS: .app to INSTALL_APP; Linux: binaries to INSTALL_BIN)
@@ -109,12 +116,9 @@ ifeq ($(shell uname -s),Darwin)
 
 install: build-bundle
 	@mkdir -p "$(INSTALL_APP)/Contents/MacOS" "$(INSTALL_APP)/Contents/Helpers" "$(INSTALL_APP)/Contents/Resources"
-	@cp dist/proton-lfs-tray      "$(INSTALL_APP)/Contents/MacOS/proton-lfs-tray"
-	@cp dist/git-lfs-proton-adapter   "$(INSTALL_APP)/Contents/Helpers/git-lfs-proton-adapter"
-	@cp dist/proton-drive-cli         "$(INSTALL_APP)/Contents/Helpers/proton-drive-cli"
-	@chmod +x "$(INSTALL_APP)/Contents/MacOS/proton-lfs-tray" \
-		"$(INSTALL_APP)/Contents/Helpers/git-lfs-proton-adapter" \
-		"$(INSTALL_APP)/Contents/Helpers/proton-drive-cli"
+	@$(call install_exec,dist/proton-lfs-tray,$(INSTALL_APP)/Contents/MacOS/proton-lfs-tray)
+	@$(call install_exec,dist/git-lfs-proton-adapter,$(INSTALL_APP)/Contents/Helpers/git-lfs-proton-adapter)
+	@$(call install_exec,dist/proton-drive-cli,$(INSTALL_APP)/Contents/Helpers/proton-drive-cli)
 	@if [ -f cmd/tray/AppIcon.icns ]; then \
 		cp cmd/tray/AppIcon.icns "$(INSTALL_APP)/Contents/Resources/AppIcon.icns"; \
 	fi
@@ -150,12 +154,9 @@ install: build-bundle
 		exit 1; \
 	fi
 	@mkdir -p "$(INSTALL_BIN)"
-	@cp dist/proton-lfs-tray    "$(INSTALL_BIN)/proton-lfs-tray"
-	@cp dist/git-lfs-proton-adapter "$(INSTALL_BIN)/git-lfs-proton-adapter"
-	@cp dist/proton-drive-cli       "$(INSTALL_BIN)/proton-drive-cli"
-	@chmod +x "$(INSTALL_BIN)/proton-lfs-tray" \
-		"$(INSTALL_BIN)/proton-drive-cli" \
-		"$(INSTALL_BIN)/git-lfs-proton-adapter"
+	@$(call install_exec,dist/proton-lfs-tray,$(INSTALL_BIN)/proton-lfs-tray)
+	@$(call install_exec,dist/git-lfs-proton-adapter,$(INSTALL_BIN)/git-lfs-proton-adapter)
+	@$(call install_exec,dist/proton-drive-cli,$(INSTALL_BIN)/proton-drive-cli)
 	@ln -sf "$(INSTALL_BIN)/proton-lfs-tray" "$(INSTALL_BIN)/proton-lfs-cli"
 	@echo "Installed to $(INSTALL_BIN)"
 

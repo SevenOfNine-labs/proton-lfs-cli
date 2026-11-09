@@ -49,6 +49,8 @@ func connectToProton() {
 			if isAuthRateLimitedOutput(out) {
 				writeAuthRateLimitStatus()
 				sendNotification("Login rate-limited by Proton")
+			} else if isBrowserNotOpenedOutput(out) {
+				sendNotification("No browser opened; run proton-lfs-cli login in a terminal")
 			} else {
 				sendNotification("Login failed")
 			}
@@ -172,6 +174,12 @@ func isAuthRateLimitedOutput(out []byte) bool {
 		strings.Contains(text, `"clientCode":"RATE_LIMITED"`) ||
 		strings.Contains(text, `"protonCode":2028`) ||
 		strings.Contains(text, "Proton code 2028")
+}
+
+// isBrowserNotOpenedOutput reports the login failure proton-drive-cli
+// raises under -q when no browser opened (src/cli/login.ts BROWSER_NOT_OPENED).
+func isBrowserNotOpenedOutput(out []byte) bool {
+	return strings.Contains(string(out), `"reason":"browser-not-opened"`)
 }
 
 func writeAuthRateLimitStatus() {

@@ -87,9 +87,10 @@ proton-drive-cli stores the entry with `git credential approve` and reads it
 back with `git credential fill` for host `proton-drive-cli.invalid`; a
 helper that kept the existing item gets `reject` and `approve`
 (git-credential(1)). The git-credential store needs git 2.26 or newer
-(`git config --show-scope`). It runs only the first `credential.helper` of the
-system and global git configuration (git-config(1) SCOPES) that encrypts
-secrets at rest, pinned with
+(`git config --show-scope`). It runs only the first helper of the system
+and global git configuration (git-config(1) SCOPES), from
+`credential.helper` or `credential.https://proton-drive-cli.invalid.helper`,
+that encrypts secrets at rest, pinned with
 `git -c credential.helper= -c credential.helper=<helper>`:
 
 | Helper | Secret store | Condition |

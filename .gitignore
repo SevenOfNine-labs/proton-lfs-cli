@@ -63,9 +63,6 @@ _book/
 # Local LFS object store (testing only)
 .lfs-store/
 
-# LFS test data binaries (generated, see testdata-lfs/checksums.sha256)
-testdata-lfs/*.bin
-
 # Changeset working files (agent-maintained, never committed)
 .changeset/
 

@@ -13,7 +13,7 @@ ship it as `proton-lfs-tray`; `make install` also links it as
 | Invocation | Does | Exit status |
 | --- | --- | --- |
 | `proton-lfs-tray` | Start the tray. A second instance finds the lock held, prints `proton-lfs-cli is already running` and exits | 0 |
-| `proton-lfs-tray login` | Run `proton-drive-cli login --credential-store <store>` with the store from `config.json` and `PROTON_PASS_CLI_BIN` set as in [Connect](#connect-to-proton); the CLI's stderr is shown on failure | 0 on success, 1 on failure or when proton-drive-cli is not found |
+| `proton-lfs-tray login` | Run `proton-drive-cli login --credential-store <store>` with the store from `config.json` and `PROTON_PASS_CLI_BIN` set as in [Connect](#connect-to-proton); its output (the sign-in URL and whether a browser opened) is shown, and its stderr on failure | 0 on success, 1 on failure or when proton-drive-cli is not found |
 | `proton-lfs-tray logout` | Run `proton-drive-cli logout` (5-minute timeout), which revokes the session, deletes the session file and crypto cache and then removes the credential-store entry | 0, 1 |
 | `proton-lfs-tray register` | Write the global git LFS registration (see below) and print the adapter path, proton-drive-cli path and credential store | 0, 1 when the adapter binary is not found or git fails |
 | `proton-lfs-tray status` | Print `Session:` (`signed in; credential store <store> (<host>); proton-drive-cli doctor verifies it`, `invalid session file; run proton-drive-cli login` or `not connected`), `LFS:`, `Store:` (the credential store of the next login), `Transfer:`, `Readiness:` and `Refresh:` lines | 0 |
@@ -107,7 +107,10 @@ tooltip appends `(retryable, temporary)` when the status file says so. See
 4. On success the refresh state is cleared and one of `Proton LFS Ready`,
    `Signed in; setup needed` or `Signed in` is shown. When the output carries
    `RATE_LIMITED` or Proton code 2028, the rate-limit status is written and
-   `Login rate-limited by Proton` is shown; other failures show `Login failed`.
+   `Login rate-limited by Proton` is shown; when no browser could be opened
+   (`"reason":"browser-not-opened"` in the auth trace) `No browser opened;
+   run proton-lfs-cli login in a terminal` is shown; other failures show
+   `Login failed`.
 
 The browser fork delivers the key password for every account type;
 two-factor authentication and CAPTCHA are completed in the browser.
