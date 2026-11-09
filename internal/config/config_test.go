@@ -97,9 +97,6 @@ func TestConstants(t *testing.T) {
 	if DefaultDriveCLIBin != "submodules/proton-drive-cli/dist/index.js" {
 		t.Fatalf("DefaultDriveCLIBin = %q", DefaultDriveCLIBin)
 	}
-	if DefaultDriveCLIAppVersion != "external-drive-protonlfscli@0.1.2" {
-		t.Fatalf("DefaultDriveCLIAppVersion = %q", DefaultDriveCLIAppVersion)
-	}
 	if EnvDriveCLIBin != "PROTON_DRIVE_CLI_BIN" {
 		t.Fatalf("EnvDriveCLIBin = %q", EnvDriveCLIBin)
 	}

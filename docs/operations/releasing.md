@@ -32,6 +32,12 @@ otherwise consumed from git (the submodule pin).
    (`cliff.toml`, verified download, `GITHUB_TOKEN` for PR links) and creates
    the GitHub Release.
 
+The release notes open with the message of the annotated tag (git-cliff
+`message`, signature removed), followed by a **Breaking changes** list with
+the `BREAKING CHANGE:` footer of every commit marked breaking
+(Conventional Commits 1.0.0, `!` or footer), then the commits grouped by
+type.
+
 `build.yml` on its own (pushes to `main`, pull requests) only uploads the
 adapter binaries as workflow artifacts; it never creates a release.
 
@@ -53,10 +59,19 @@ make check-submodules
 make test && make test-integration
 make live-canary-preflight
 
-# 2. Tag the release (annotated, signed) and push the tag
-git tag -s v0.2.0 -m "v0.2.0"
+# 2. Preview the release notes with the tag message in notes.md
+#    (git-cliff 2.14.2, the version release-bundle.yml installs)
+git-cliff --config cliff.toml --unreleased --tag v0.2.0 --strip header \
+  --with-tag-message "$(cat notes.md)"
+
+# 3. Tag the release (annotated, signed) and push the tag
+git tag -s --cleanup=whitespace -F notes.md v0.2.0
 git push origin v0.2.0
 ```
+
+The tag message is Markdown: upgrade steps and anything a user must do
+before installing. `--cleanup=whitespace` keeps lines starting with `#`,
+which the default `strip` mode of git-tag(1) removes as comments.
 
 `make check-submodules` verifies the root-owned submodules and the
 `proton-drive-cli` SDK gitlink; nested gitlinks inside the Proton SDK (none
