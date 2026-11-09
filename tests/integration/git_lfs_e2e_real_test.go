@@ -4,6 +4,7 @@ package integration
 
 import (
 	"bytes"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -161,10 +162,9 @@ func stringifyJSONMap(in map[string]any) map[string]string {
 func TestE2ERealProtonDrivePipeline(t *testing.T) {
 	root, storageBase := requireRealE2EPrereqs(t)
 
-	testDataPath := filepath.Join(root, "testdata-lfs", "tiny-1kb.bin")
-	originalBytes, err := os.ReadFile(testDataPath)
-	if err != nil {
-		t.Fatalf("failed to read live canary fixture %s: %v", testDataPath, err)
+	originalBytes := make([]byte, 1024)
+	if _, err := rand.Read(originalBytes); err != nil {
+		t.Fatalf("failed to generate the canary object: %v", err)
 	}
 
 	adapterPath := buildAdapter(t, root)
@@ -231,7 +231,7 @@ func TestE2ERealProtonDrivePipeline(t *testing.T) {
 		t.Fatalf("unexpected error in lfs push output:\n%s", lfsPushOutput)
 	}
 
-	t.Logf("upload complete: oid-prefix=%s, fixture=%s, size=%d bytes", oid[:12], filepath.Base(testDataPath), len(originalBytes))
+	t.Logf("upload complete: oid-prefix=%s, size=%d bytes", oid[:12], len(originalBytes))
 
 	cloneBase := t.TempDir()
 	clonePath := filepath.Join(cloneBase, "clone")

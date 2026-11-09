@@ -549,6 +549,7 @@ func TestCliScopeDiagnosticsLocalRedactsSessionAndDoesNotProbeLive(t *testing.T)
 
 func TestCliScopeDiagnosticsLiveRequiresAcknowledgementBeforeList(t *testing.T) {
 	saveFuncVars(t)
+	t.Setenv("PROTON_LFS_LIVE_CANARY", "")
 	setupFakeHome(t, fakeHomeOpts{configJSON: `{"credentialStore":"pass-cli"}`})
 	findDriveCLI = func() string { return "/tmp/proton-drive-cli" }
 
