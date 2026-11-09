@@ -155,10 +155,14 @@ Stores the session entry through git's credential helper protocol
 (git-credential(1)). proton-drive-cli uses only the first helper of the
 system and global git configuration that encrypts secrets at rest
 (`osxkeychain`, `wincred`, `libsecret`, or `manager` with an encrypting
-Git Credential Manager store) and pins it, so `store` or `cache` never
-receive the session secrets:
+Git Credential Manager store), from `credential.helper` or the host-scoped
+`credential.https://proton-drive-cli.invalid.helper`, and pins it, so
+`store` or `cache` never receive the session secrets:
 
 ```bash
+# WSL2: Windows Git Credential Manager for this host only
+git config --global 'credential.https://proton-drive-cli.invalid.helper' \
+  '/mnt/c/Program\ Files/Git/mingw64/bin/git-credential-manager.exe'
 PROTON_CREDENTIAL_STORE=git-credential
 proton-drive-cli login --credential-store git-credential
 ```

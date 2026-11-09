@@ -121,6 +121,33 @@ Launch the app from `/Applications` or Spotlight; the icon appears in the
 menu bar. On Linux run `proton-lfs-tray` by hand or enable "Start at System
 Login" in its menu.
 
+### WSL2 on Windows
+
+WSLg has no system tray, so WSL2 uses the command-line programs; the
+`proton-lfs-tray` binary still serves `register`, `status`, `login` and
+`logout`. Install Go 1.25 and Node.js 26, then:
+
+```bash
+make setup
+make install          # ~/.local/bin: proton-lfs-tray, proton-lfs-cli, git-lfs-proton-adapter, proton-drive-cli
+proton-lfs-cli register
+```
+
+Keep the session entry in Windows Credential Manager through Git for
+Windows' Git Credential Manager, for this host only; proton-drive-cli
+passes its settings to the Windows process through `WSLENV`:
+
+```bash
+git config --global 'credential.https://proton-drive-cli.invalid.helper' \
+  '/mnt/c/Program\ Files/Git/mingw64/bin/git-credential-manager.exe'
+proton-drive-cli login --credential-store git-credential
+```
+
+`proton-drive-cli login` prints the sign-in URL; open it in the Windows
+browser. Without the tray nothing refreshes the token in the background:
+each transfer refreshes it when it has expired. pass-cli keeps its own
+Linux login in the kernel keyring, which a WSL restart clears.
+
 ### Adapter only (build from source)
 
 ```bash
@@ -437,14 +464,22 @@ proton-drive-cli login --credential-store git-credential
 
 The entry is stored with `git credential approve` for host
 `proton-drive-cli.invalid` and read back with `git credential fill`
-(git-credential(1)). proton-drive-cli runs only the first
-`credential.helper` of the system and global git configuration that
-encrypts secrets at rest: `osxkeychain` (macOS Keychain), `wincred` (Windows
-Credential Manager), `libsecret` (Linux Secret Service), or `manager` (Git
-Credential Manager) with an encrypting store (`keychain`, `wincredman`,
-`dpapi`, `secretservice` or `gpg`). `store` and `cache` are never used. git
+(git-credential(1)). proton-drive-cli runs only the first helper of the
+system and global git configuration that git applies to the host, from
+`credential.helper` or a `credential.<url>.helper` such as
+`credential.https://proton-drive-cli.invalid.helper` (gitcredentials(7),
+"CREDENTIAL CONTEXTS"), and that encrypts secrets at rest: `osxkeychain`
+(macOS Keychain), `wincred` (Windows Credential Manager), `libsecret` (Linux
+Secret Service), or `manager` (Git Credential Manager) with an encrypting
+store (`keychain`, `wincredman`, `dpapi`, `secretservice` or `gpg`). `store` and `cache` are never used. git
 and Git Credential Manager do not prompt for credentials; the operating
 system may still ask to unlock a locked keychain or keyring.
+
+A helper for this host only leaves every other remote untouched:
+
+```bash
+git config --global 'credential.https://proton-drive-cli.invalid.helper' osxkeychain
+```
 
 ### Store selection order
 
