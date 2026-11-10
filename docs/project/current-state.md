@@ -1,6 +1,6 @@
 # Current State
 
-Date: 2026-11-06
+Date: 2026-11-10
 
 ## Implemented
 
@@ -64,8 +64,9 @@ Date: 2026-11-06
   an explicitly acknowledged one-read live Drive scope probe for API 9101
   investigations.
 - The tray consumes structured `proton-drive-cli session refresh --json`
-  results. Recoverable refresh failures back off for one minute;
-  non-recoverable failures are not retried for the same session UID.
+  results. Recoverable refresh failures back off exponentially from one to
+  30 minutes; non-recoverable failures are not retried for the same session
+  UID.
 - The vendored Proton Drive SDK is pinned to `js/v0.23.0`. Its dist is ESM
   and upstream ships no npm lockfile, so `make build-sdk` builds it with
   `npm install --no-package-lock`. proton-drive-cli reports the pinned SDK
@@ -81,13 +82,15 @@ Go Adapter -> proton-drive-cli subprocess (stdin/stdout JSON)
              pre-existing browser-fork session only
 ```
 
-No .NET SDK and no HTTP bridge are involved: the Go adapter spawns
-`proton-drive-cli bridge <command>` directly.
+The Go adapter spawns `proton-drive-cli bridge <command>` directly.
+
+The real-account canary (browser sign-in, upload, clone, byte comparison)
+passed with the git-credential store on 2026-11-09 and with pass-cli on
+2026-11-10.
 
 ## Open Work
 
-- Real-account canary validation with a disposable account after mocked
-  auth/session gates stay green and explicit canary acknowledgement is set.
+- The real-account canary before every release.
 - Production observability baseline (metrics, SLOs, alerts, runbooks).
 - SDK streaming transfer progress and resume support where the SDK can expose
   it. The local backend streams progress during filesystem copies.

@@ -16,7 +16,7 @@ the flag named in the reference page):
 | `PROTON_LFS_BACKEND` | `local` | Adapter backend (`local`, `sdk`) |
 | `ADAPTER_ALLOW_MOCK_TRANSFERS` | `false` | Enables mock transfer mode (protocol tests only) |
 | `PROTON_LFS_LOCAL_STORE_DIR` | empty | Local backend object root |
-| `PROTON_DRIVE_CLI_BIN` | `submodules/proton-drive-cli/dist/index.js` | proton-drive-cli entry point: a `.js` file run with node, or the standalone executable |
+| `PROTON_DRIVE_CLI_BIN` | `submodules/proton-drive-cli/dist/index.js` | proton-drive-cli entry point: a `.js` file run with node, or the standalone executable; a path with a directory separator resolves against the directory git-lfs runs in (the worktree root for hooks and filters, the current directory for `git lfs push` and `fetch`), a bare name is looked up on `PATH`; set an absolute path |
 | `PROTON_LFS_BRIDGE_TIMEOUT` | `5m` | Base timeout per bridge command (Go duration); uploads and downloads add 1 s per 256 KiB |
 | `NODE_BIN` | `node` on `PATH` | Node.js binary for a `.js` entry point |
 | `LFS_STORAGE_BASE` | `LFS` | Remote base folder (`/<base>/ab/cd/<oid>`), sent as the bridge `storageBase` field |
@@ -41,7 +41,7 @@ account or credential fields to proton-drive-cli. Account login is
 browser-fork-only and happens outside Git LFS transfers with
 `proton-drive-cli login --credential-store <store>`. Transfer bridge
 requests carry only `storageBase`, `appVersion` (when set) and the command
-fields (`oid`, `path`, `outputPath`, `oids`).
+fields (`oid`, `path`, `outputPath`).
 
 ## Credential Store
 
@@ -75,7 +75,11 @@ the lookup fails (`credentials_unavailable`), run `pass-cli login` and then
 `proton-drive-cli login` again with the same store; the tray's Connect does
 not prompt for account credentials. `PROTON_PASS_CLI_BIN` names a non-default pass-cli binary; the
 tray sets it to the binary it finds on `PATH`, `~/.local/bin`,
-`/opt/homebrew/bin` or `/usr/local/bin`.
+`/opt/homebrew/bin` or `/usr/local/bin`. On Linux, set
+`PROTON_PASS_LINUX_KEYRING=dbus` before `pass-cli login`: with the default
+kernel keyring a reboot or another login session loses pass-cli's key, and
+pass-cli logs itself out
+([Usage Guide](../../USAGE.md#proton-pass-pass-cli-default)).
 
 ### git-credential
 

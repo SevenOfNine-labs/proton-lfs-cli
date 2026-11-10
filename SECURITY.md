@@ -9,11 +9,15 @@ and what is open, and `docs/security/threat-model.md` the trust boundaries.
 ## Reporting A Vulnerability
 
 - Do not open public issues for sensitive findings.
-- Contact maintainers privately with:
+- Report privately through
+  [GitHub private vulnerability reporting](https://github.com/SevenOfNine-labs/proton-lfs-cli/security/advisories/new)
+  with:
   - impact summary
   - affected component/path
   - reproducible steps
   - mitigation suggestion (if available)
+
+Fixes go into the latest release only.
 
 ## Security Requirements For Contributors
 

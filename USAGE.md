@@ -21,6 +21,26 @@ through a custom Git LFS transfer adapter.
 Pre-built adapter binaries and platform bundles come from GitHub Releases
 and need neither Go nor Node.js.
 
+## Platform Support
+
+| Platform | Release assets | Notes |
+| --- | --- | --- |
+| macOS 14 or later, Apple silicon | Bundle (`ProtonLFS.app`), standalone adapter | Ad-hoc signed, not notarized |
+| macOS, Intel | Standalone adapter | Build the tray and `proton-drive-cli` from source |
+| Linux x86-64 | Bundle, standalone adapter | The tray needs a StatusNotifierItem host (GNOME: the AppIndicator extension); `proton-drive-cli` needs glibc 2.28 or later |
+| Linux arm64 | Standalone adapter | Build the tray and `proton-drive-cli` from source |
+| Windows 10 or later, x64 | Bundle, standalone adapter | No start at login; notifications, Open Logs and Run Doctor go to the tray log only; the tray prints nothing in a console |
+| WSL2 | Linux bundle, or `make install` from source | No tray; see [WSL2 on Windows](#wsl2-on-windows) |
+
+## Known Limitations
+
+- Objects are stored in the signed-in account's own Drive; everyone who
+  pushes or pulls a repository needs that account's session.
+- No Git LFS file locking, and no deletion of Drive objects: `git lfs prune`
+  removes local copies only.
+- The sdk backend reports progress once per object and does not resume an
+  interrupted transfer.
+
 ## Installation
 
 ### Adapter only (one-line install)
@@ -60,20 +80,36 @@ Each release ships one archive per platform, listed in `SHA256SUMS.txt`:
 Verify, then install:
 
 ```bash
-sha256sum -c --ignore-missing SHA256SUMS.txt      # shasum -a 256 -c on macOS
+sha256sum -c --ignore-missing SHA256SUMS.txt                  # Linux
+shasum -a 256 -c --ignore-missing SHA256SUMS.txt              # macOS
 ```
 
 - macOS: unzip, move `ProtonLFS.app` to `/Applications`, then clear the
   quarantine attribute once (`xattr -dr com.apple.quarantine /Applications/ProtonLFS.app`);
-  the app is ad-hoc signed, not notarized.
-- Linux and Windows: extract and put the three programs on `PATH`.
+  the app is ad-hoc signed, not notarized. The programs stay inside the app;
+  open it and use **Enable LFS Backend** and **Connect to Proton...**, or put
+  them on `PATH` for the commands below:
+
+  ```bash
+  mkdir -p ~/.local/bin   # add it to PATH in your shell profile if it is not there
+  ln -sf /Applications/ProtonLFS.app/Contents/MacOS/proton-lfs-tray ~/.local/bin/proton-lfs-tray
+  ln -sf /Applications/ProtonLFS.app/Contents/Helpers/proton-drive-cli ~/.local/bin/proton-drive-cli
+  ```
+
+- Linux and Windows: extract and put the three programs on `PATH`. On
+  Windows `proton-lfs-tray` is a GUI program that prints nothing in a
+  console: use its menu, and `proton-drive-cli` for commands.
+
+Before the first sign-in, prepare the [credential store](#credential-stores):
+`pass-cli login` for the default Proton Pass store, or a git credential
+helper and `--credential-store git-credential`.
 
 After installing or updating, write the global Git LFS settings for the
 installed programs and sign in whenever `proton-lfs-tray status` does not
 report `signed in` or `proton-drive-cli doctor` fails:
 
 ```bash
-proton-lfs-tray register
+proton-lfs-tray register      # or Enable LFS Backend in the tray
 proton-drive-cli login        # or Connect to Proton in the tray
 ```
 
@@ -271,6 +307,11 @@ Linux: creates or removes `~/.config/autostart/proton-lfs.desktop`.
 
 ### Command-line helpers
 
+The tray program is also the command-line helper. Release bundles ship it as
+`proton-lfs-tray`, the name below; `make install` installs it as
+`proton-lfs-tray` and links it as `proton-lfs-cli` on Linux, and on macOS
+links only `proton-lfs-cli`, the name its help text and some messages use.
+
 ```text
 proton-lfs-tray login             browser sign-in with the configured credential store
 proton-lfs-tray logout            clear the session
@@ -405,7 +446,9 @@ git config lfs.standalonetransferagent proton
 ```
 
 `--drive-cli-bin` accepts the standalone binary or `dist/index.js` (run with
-`node`, or `NODE_BIN`). The credential store is not an adapter flag:
+`node`, or `NODE_BIN`). Give an absolute path: a relative one resolves
+against the directory git-lfs runs in, which is the current directory for
+`git lfs push` and `git lfs fetch`. The credential store is not an adapter flag:
 the adapter never logs in, it reuses the saved session.
 
 ### 4. Use git normally
@@ -457,6 +500,23 @@ and deletes the old one. `pass-cli info` shows whether pass-cli itself is
 logged in. `PROTON_PASS_CLI_BIN` overrides the pass-cli binary path (default
 `pass-cli` on `PATH`); the tray sets it for the bundled environment
 automatically.
+
+On Linux, pass-cli 2.7.0 keeps the key of its local data in the kernel
+keyring by default. A reboot (or a WSL restart) clears it, and a login
+session with its own session keyring (keyrings(7), such as an SSH login)
+cannot see it; pass-cli then logs itself out and deletes its local data,
+and transfers fail with `credentials_unavailable`. Before `pass-cli login`,
+set `PROTON_PASS_LINUX_KEYRING=dbus` (Secret Service) for every process
+that runs pass-cli: in your shell profile, and for the desktop session that
+starts the tray in a `~/.config/environment.d/*.conf` file
+(environment.d(5)), since the tray takes only `PATH` from the login shell.
+The adapter forwards the variable to proton-drive-cli and pass-cli
+([pass-cli key storage](https://protonpass.github.io/pass-cli/get-started/configuration/#secure-key-storage)).
+Without a Secret Service, `PROTON_PASS_KEY_PROVIDER=fs` keeps the key in a
+plain file next to the encrypted data, which pass-cli documents as less
+secure.
+pass-cli sessions from a personal access token or an agent last two hours,
+too short for unattended use.
 
 ### Git credential helper (git-credential)
 
@@ -532,6 +592,7 @@ GIT_TRACE=1 git push
 | `Proton Drive session is invalid …` (`session_invalid`) | The session file was not written by `proton-drive-cli login` | Run `proton-drive-cli login` again |
 | `session is invalid or expired` (`auth_required`) | Proton rejected the refresh token and proton-drive-cli signed the session out | Run `proton-drive-cli login` again |
 | `Proton session credentials are unavailable from the credential store` (`credentials_unavailable`) | The credential store recorded in the session cannot return the session entry (pass-cli logged out, item deleted, keyring locked, no OS-store credential helper) or its key password does not unlock the account keys | Fix the store (for pass-cli run `pass-cli login`); otherwise `proton-drive-cli login` again |
+| `credentials_unavailable` on Linux after a reboot or from another session, with pass-cli | pass-cli lost the kernel-keyring key of its local data and logged itself out | `pass-cli login` with `PROTON_PASS_LINUX_KEYRING=dbus` set ([Proton Pass](#proton-pass-pass-cli-default)) |
 | `Proton rejected this app/session authorization scope` (`insufficient_scope`, Proton 9101) | The app identity or session scope is rejected by Proton | `proton-lfs-tray scope-diagnostics`, then follow `docs/operations/live-canary-runbook.md`; do not retry login |
 | `rate limited by proton api` | Proton rate limit | Wait; the tray blocks sign-in for one hour after a rate-limited login |
 | `captcha verification required` | Proton requires CAPTCHA | Run `proton-drive-cli login` and complete it in the browser |

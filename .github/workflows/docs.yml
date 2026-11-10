@@ -34,6 +34,7 @@ jobs:
             README.md
             USAGE.md
             SECURITY.md
+            CONTRIBUTING.md
             docs/**/*.md
 
       - name: Check internal markdown links
@@ -48,6 +49,7 @@ jobs:
             README.md
             USAGE.md
             SECURITY.md
+            CONTRIBUTING.md
             docs/**/*.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

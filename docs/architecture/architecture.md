@@ -168,7 +168,8 @@ login.
 ├── session.json         # uid, scopes, credential store and host, revision, expiry; no secret (0600)
 ├── session.lock         # proper-lockfile directory guarding refresh-token rotation
 ├── crypto-cache.json    # cached user and address records of the session UID (0600, 1 h)
-└── rate-limit-cooldown.json  # wait-until timestamp after a Proton rate limit (0600)
+├── rate-limit-cooldown.json  # wait-until timestamp after a Proton rate limit (0600)
+└── client-uid.json      # client UID sent with upload drafts (0600; client-uid.lock guards its creation)
 ```
 
 Objects in Proton Drive live at `/<storageBase>/<oid[0:2]>/<oid[2:4]>/<oid>`

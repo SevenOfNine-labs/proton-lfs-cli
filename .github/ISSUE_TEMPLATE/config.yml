@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/SevenOfNine-labs/proton-lfs-cli/blob/main/SECURITY.md
+    about: Report vulnerabilities privately as described in SECURITY.md.
+  - name: proton-drive-cli
+    url: https://github.com/SevenOfNine-labs/proton-drive-cli/issues
+    about: Problems of proton-drive-cli commands (login, doctor, bridge) on their own.

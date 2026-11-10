@@ -1,6 +1,9 @@
 # Proton LFS CLI
 
-End-to-end encrypted Git LFS backend for Proton Drive.
+End-to-end encrypted Git LFS backend for Proton Drive. Pre-alpha: see the
+[Usage Guide](USAGE.md) for supported platforms and known limitations.
+Release notes and upgrade steps are on
+[GitHub Releases](https://github.com/SevenOfNine-labs/proton-lfs-cli/releases).
 
 [![Documentation](https://img.shields.io/badge/docs-unified-blue)](https://sevenofnine-labs.github.io/proton-lfs-cli/) [![Go Reference](https://pkg.go.dev/badge/github.com/SevenOfNine-labs/proton-lfs-cli.svg)](https://pkg.go.dev/github.com/SevenOfNine-labs/proton-lfs-cli) [![Tests](https://github.com/SevenOfNine-labs/proton-lfs-cli/actions/workflows/test.yml/badge.svg)](https://github.com/SevenOfNine-labs/proton-lfs-cli/actions/workflows/test.yml)
 
@@ -33,8 +36,6 @@ End-to-end encrypted Git LFS backend for Proton Drive.
 - pass-cli 2.7.0 when Proton Pass is the credential store; the
   `git-credential` store needs a git credential helper that encrypts secrets
   at rest (`osxkeychain`, `wincred`, `libsecret` or Git Credential Manager)
-
-No .NET SDK is required.
 
 ## Documentation
 
@@ -145,8 +146,12 @@ eval "$(./scripts/export-pass-env.sh)"
 
 ## Developer Docs
 
-Start at `docs/README.md`.
+Start at `docs/README.md`. To contribute, read [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Security
 
 This repository is pre-production. See `SECURITY.md`.
+
+## License
+
+[MIT](https://github.com/SevenOfNine-labs/proton-lfs-cli/blob/main/LICENSE)

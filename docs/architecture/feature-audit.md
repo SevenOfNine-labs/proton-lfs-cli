@@ -1,6 +1,6 @@
 # proton-lfs-cli Feature Audit
 
-Last audited: 2026-11-06.
+Last audited: 2026-11-10.
 
 This document is the formal feature inventory for `proton-lfs-cli`. It covers
 the Go Git LFS adapter, the tray/helper CLI, the bridge boundary to
@@ -160,7 +160,7 @@ The tray binary also provides a small CLI when launched with arguments.
 | --- | --- | --- |
 | Local Git LFS adapter | Stable | Full protocol and integration coverage without Proton dependency. |
 | Proton SDK bridge transfer path | Beta | Mocked E2E and offline auth gates are strong; real Proton canary remains opt-in. |
-| Browser-fork session handling across repos | Experimental to Beta | Credential-store storage and transfer gating are covered; the real browser canary is pending. |
+| Browser-fork session handling across repos | Beta | Credential-store storage and transfer gating are covered; the real-account canary passed with both credential stores (2026-11-09, 2026-11-10). |
 | Credential-store delegation | Stable | Root never handles secrets; drive-cli credential-store contracts are tested. |
 | Tray UX | Beta | Menu, readiness rules and refresh behaviour are documented in `docs/reference/tray.md`; visual/platform behavior still needs the manual release checklist. |
 | Packaging/install | Beta | Scripts exist; cross-platform validation is manual. |

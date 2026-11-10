@@ -30,7 +30,7 @@ given on the command line wins.
 | Flag | Environment variable | Default | Meaning |
 | --- | --- | --- | --- |
 | `--backend` | `PROTON_LFS_BACKEND` | `local` | `local` (filesystem object store) or `sdk` (Proton Drive through `proton-drive-cli bridge`). Any other value exits with status 2. |
-| `--drive-cli-bin` | `PROTON_DRIVE_CLI_BIN` | `submodules/proton-drive-cli/dist/index.js` | proton-drive-cli entry point. A `.js`, `.cjs` or `.mjs` file runs under node; anything else (the single-executable build `proton-drive-cli`) runs directly. |
+| `--drive-cli-bin` | `PROTON_DRIVE_CLI_BIN` | `submodules/proton-drive-cli/dist/index.js` | proton-drive-cli entry point. A `.js`, `.cjs` or `.mjs` file runs under node; anything else (the single-executable build `proton-drive-cli`) runs directly. A path with a directory separator resolves against the directory git-lfs runs in (the worktree root for hooks and filters, the current directory for `git lfs push` and `fetch`); a bare name is looked up on `PATH`. Set an absolute path, such as the installed `proton-drive-cli`. |
 | `--local-store-dir` | `PROTON_LFS_LOCAL_STORE_DIR` | empty | Object root of the `local` backend. `init` fails with code 501 when it is empty. |
 | `--allow-mock-transfers` | `ADAPTER_ALLOW_MOCK_TRANSFERS` | `false` | Simulate uploads and downloads without any backend (protocol tests only). |
 | `--bridge-timeout` | `PROTON_LFS_BRIDGE_TIMEOUT` | `5m` | Base wall-clock budget for one bridge command (Go duration such as `10m`). `upload` and `download` add one second per 256 KiB of the object size announced by git-lfs. A non-positive or unparsable value exits with status 2. |
@@ -146,6 +146,5 @@ The full list of codes is in [Adapter Errors](adapter-errors.md).
   adapter left behind).
 - Progress is streamed in 64 KiB steps for the local backend; the sdk backend
   reports the whole object once the bridge command returns.
-- The status file is updated on a successful `init`, on `terminate`, and on
-  every completed or failed transfer; a refused `init` leaves it unchanged,
-  and write errors are ignored.
+- The status file is updated on every completed or failed transfer, never on
+  `init` or `terminate`; write errors are ignored.
