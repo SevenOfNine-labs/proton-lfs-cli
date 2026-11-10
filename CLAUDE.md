@@ -242,11 +242,11 @@ Fields: `state`, `lastOid`, `lastOp`, `error`, `errorCode`, `errorDetail`, `retr
 `release-bundle.yml` triggers on `v*` tags and produces self-contained bundles:
 
 1. **adapters**: calls `build.yml` (`workflow_call`) for the standalone adapter binaries
-2. **build-all** (matrix: macos-14, ubuntu, windows): Builds adapter and tray via `scripts/build-go.sh` (cgo only for the macOS tray), proton-drive-cli SEA via `scripts/build-sea.sh` (Node.js per `.node-version`, `--build-sea`)
+2. **build-all** (matrix: macos-15, ubuntu, windows): Builds adapter and tray via `scripts/build-go.sh` (cgo only for the macOS tray), proton-drive-cli SEA via the submodule's `scripts/build-sea.sh` (Node.js per `.node-version`, `--build-sea`)
 3. **package**: Assembles reproducible platform bundles (macOS ad-hoc signed `.app` zip, Linux `.tar.gz`, Windows `.zip`) via `scripts/package-bundle.sh`
 4. **release**: Creates the single GitHub Release with every asset and one `SHA256SUMS.txt`
 
-`build.yml` on its own (pushes, PRs) only uploads adapter artifacts; it never creates a release. `proton-drive-cli` is not published to npm.
+`build.yml` on its own (pushes, PRs) only uploads adapter artifacts; it never creates a release. `proton-drive-cli` is not published to npm; its own `release.yml` publishes the same single executables on its `v*` tags (tag it first, at the pinned commit).
 
 ## Known Issues
 

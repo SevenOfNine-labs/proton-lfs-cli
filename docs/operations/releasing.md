@@ -6,9 +6,10 @@ One artifact family, one tag pattern, one workflow:
 | --- | --- | --- |
 | `v*` (e.g. `v0.2.0`) | `.github/workflows/release-bundle.yml` | GitHub Release with platform bundles, standalone adapter binaries, `SHA256SUMS.txt` and a git-cliff changelog |
 
-`proton-drive-cli` is not published to npm and has no release workflow of
-its own. It ships inside the bundles as a Node.js single executable (SEA) and is
-otherwise consumed from git (the submodule pin).
+`proton-drive-cli` is not published to npm. It ships inside the bundles as a
+Node.js single executable (SEA), built by its own `scripts/build-sea.sh` from
+the submodule pin, and publishes the same executables on its own `v*` tags
+(`submodules/proton-drive-cli/docs/operations/releasing.md`).
 
 ## What a release contains
 
@@ -17,9 +18,10 @@ otherwise consumed from git (the submodule pin).
 1. **adapters** — calls `build.yml` (`workflow_call`) to cross-compile the
    standalone adapter for linux/darwin amd64+arm64 and windows amd64:
    `git-lfs-proton-adapter-<os>-<arch>[.exe]`.
-2. **build-all** — on native runners (macos-14, ubuntu, windows) builds the
-   adapter, the tray (cgo only on macOS) and the `proton-drive-cli` SEA with
-   the Node.js version in `.node-version`.
+2. **build-all** — on native runners (macos-15, ubuntu, windows) builds the
+   adapter, the tray (cgo only on macOS, for macOS 14 or later:
+   `MACOSX_DEPLOYMENT_TARGET` in `scripts/build-go.sh`) and the
+   `proton-drive-cli` SEA with the Node.js version in `.node-version`.
 3. **package** — `scripts/package-bundle.sh` assembles
    `proton-lfs-cli-darwin-arm64.zip` (ad-hoc signed `ProtonLFS.app`, zipped
    with `ditto` on macOS), `proton-lfs-cli-linux-amd64.tar.gz` and
@@ -31,6 +33,12 @@ otherwise consumed from git (the submodule pin).
    covering all of them, generates the changelog with git-cliff
    (`cliff.toml`, verified download, `GITHUB_TOKEN` for PR links) and creates
    the GitHub Release.
+
+The release notes open with the message of the annotated tag (git-cliff
+`message`, signature removed), followed by a **Breaking changes** list with
+the `BREAKING CHANGE:` footer of every commit marked breaking
+(Conventional Commits 1.0.0, `!` or footer), then the commits grouped by
+type.
 
 `build.yml` on its own (pushes to `main`, pull requests) only uploads the
 adapter binaries as workflow artifacts; it never creates a release.
@@ -45,7 +53,8 @@ the Makefile and both workflows call that script.
 ## Steps
 
 Before tagging a release that changes tray/helper behavior, run
-`docs/operations/tray-platform-release-checklist.md`.
+`docs/operations/tray-platform-release-checklist.md`. Tag and release
+`proton-drive-cli` first when its version changed (see Version numbering).
 
 ```bash
 # 1. Ensure submodule pins and tests pass
@@ -53,10 +62,19 @@ make check-submodules
 make test && make test-integration
 make live-canary-preflight
 
-# 2. Tag the release (annotated, signed) and push the tag
-git tag -s v0.2.0 -m "v0.2.0"
+# 2. Preview the release notes with the tag message in notes.md
+#    (git-cliff 2.14.2, the version release-bundle.yml installs)
+git-cliff --config cliff.toml --unreleased --tag v0.2.0 --strip header \
+  --with-tag-message "$(cat notes.md)"
+
+# 3. Tag the release (annotated, signed) and push the tag
+git tag -s --cleanup=whitespace -F notes.md v0.2.0
 git push origin v0.2.0
 ```
+
+The tag message is Markdown: upgrade steps and anything a user must do
+before installing. `--cleanup=whitespace` keeps lines starting with `#`,
+which the default `strip` mode of git-tag(1) removes as comments.
 
 `make check-submodules` verifies the root-owned submodules and the
 `proton-drive-cli` SDK gitlink; nested gitlinks inside the Proton SDK (none
@@ -93,7 +111,10 @@ Releases follow semver on the `v*` tags. The `proton-drive-cli` submodule
 keeps its own `package.json` version (it is the `x-pm-appversion` identity
 sent to Proton and is asserted by `internal/config` tests); bump it in the
 submodule when the bridge changes and advance the submodule pin in the same
-root PR. No separate tag or publish step is needed for it.
+root PR. When it changed since its last release, tag the pinned
+`proton-drive-cli` commit with `v<package.json version>` before tagging
+this repository; its release workflow refuses a tag that differs from
+`package.json`.
 
 ## Dry run
 

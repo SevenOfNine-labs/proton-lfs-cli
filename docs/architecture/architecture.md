@@ -213,7 +213,7 @@ flowchart LR
     GoSrc -->|scripts/build-go.sh, cgo on macOS| TrayBin[proton-lfs-tray]
     SDKSrc[submodules/proton-drive-cli/submodules/sdk/client/js] -->|make build-sdk| SDKDist[SDK dist]
     SDKDist --> CLIBuild[make build-drive-cli: tsc + build-runtime]
-    CLIBuild -->|scripts/build-sea.sh: esbuild + node --build-sea, Node 26| CLIBin[proton-drive-cli SEA]
+    CLIBuild -->|proton-drive-cli scripts/build-sea.sh: esbuild + node --build-sea, Node 26| CLIBin[proton-drive-cli SEA]
     AdapterBin --> Pack[scripts/package-bundle.sh]
     TrayBin --> Pack
     CLIBin --> Pack
@@ -246,7 +246,7 @@ proton-lfs-cli-windows-amd64/
 
 `release-bundle.yml` runs on `v*` tags: `adapters` (standalone adapter for
 linux amd64/arm64, darwin amd64/arm64, windows amd64 via `build.yml`),
-`build-all` (macos-14 darwin-arm64, ubuntu-latest linux-amd64,
+`build-all` (macos-15 darwin-arm64, ubuntu-latest linux-amd64,
 windows-latest windows-amd64), `package`, and `release` (one GitHub Release
 with every asset, `SHA256SUMS.txt` over all of them and a git-cliff
 changelog). Archives are reproducible (`SOURCE_DATE_EPOCH` = commit date,

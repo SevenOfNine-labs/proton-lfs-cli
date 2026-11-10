@@ -88,7 +88,7 @@ build-tray: ## Build the system tray application (cgo only on macOS)
 	@GO="$(GO)" bash scripts/build-go.sh tray "$(TRAY_BIN)"
 
 build-sea: build-drive-cli ## Build proton-drive-cli as a standalone Node.js SEA binary (Node.js 26, see .node-version)
-	@NODE="$(NODE)" bash scripts/build-sea.sh
+	@NODE="$(NODE)" SEA_OUTPUT_DIR=bin bash $(DRIVE_CLI_DIR)/scripts/build-sea.sh
 
 build-bundle: check-submodules build-adapter build-tray build-sea ## Build all components into dist/ for packaging
 	@mkdir -p dist

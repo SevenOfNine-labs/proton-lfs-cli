@@ -31,7 +31,7 @@ const (
 	DefaultCredentialStore = CredentialStorePassCLI
 	// DefaultDriveCLIAppVersion equals proton-drive-cli's x-pm-appversion
 	// identity, external-drive-protonlfscli@<package.json version>.
-	DefaultDriveCLIAppVersion = "external-drive-protonlfscli@0.1.2"
+	DefaultDriveCLIAppVersion = "external-drive-protonlfscli@0.2.0"
 )
 
 // Environment variable names

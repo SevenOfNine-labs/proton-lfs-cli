@@ -12,6 +12,7 @@
 #   SOURCE_DATE_EPOCH  Unix time stamped as BuildTime (default: commit date of HEAD)
 #   GOOS / GOARCH      cross-compile target (default: the host, via go env)
 #   STRIP=1            add -s -w (release builds)
+#   MACOSX_DEPLOYMENT_TARGET  minimum macOS of the darwin tray (default: 14.0)
 #   GO                 go binary (default: go)
 set -euo pipefail
 
@@ -42,6 +43,11 @@ case "$TARGET" in
     # Windows (Win32 syscalls) are pure Go.
     if [ "$GOOS" = "darwin" ]; then
       export CGO_ENABLED=1
+      # clang(1) -mmacosx-version-min: minimum macOS of the cgo objects and the externally
+      # linked tray; cmd/go keys its build cache on CGO_CFLAGS/CGO_LDFLAGS (default -O2 -g).
+      MACOS_MIN="${MACOSX_DEPLOYMENT_TARGET:-14.0}"
+      export CGO_CFLAGS="${CGO_CFLAGS:--O2 -g} -mmacosx-version-min=${MACOS_MIN}"
+      export CGO_LDFLAGS="${CGO_LDFLAGS:--O2 -g} -mmacosx-version-min=${MACOS_MIN}"
     else
       export CGO_ENABLED=0
     fi
