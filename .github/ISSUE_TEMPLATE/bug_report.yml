@@ -1,0 +1,65 @@
+name: Bug report
+description: The adapter, the tray or a release bundle does not behave as documented
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        Never paste a session token, key password, pass-cli output or a
+        credential-store entry. Report vulnerabilities as described in
+        SECURITY.md, not here. Problems of proton-drive-cli commands alone
+        belong to SevenOfNine-labs/proton-drive-cli.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: The git or tray action, what you expected and what you got.
+    validations:
+      required: true
+  - type: textarea
+    id: status
+    attributes:
+      label: proton-lfs-tray status
+      description: Holds no secret. On Windows the tray prints nothing in a console; describe its tooltip instead.
+      render: text
+  - type: textarea
+    id: doctor
+    attributes:
+      label: proton-drive-cli doctor --json
+      description: Holds no secret.
+      render: json
+  - type: textarea
+    id: trace
+    attributes:
+      label: Adapter output with --debug
+      description: "GIT_TRACE=1 git push (or pull) with --debug in lfs.customtransfer.proton.args. Redact remote URLs that contain credentials."
+      render: text
+  - type: input
+    id: version
+    attributes:
+      label: Release version and git lfs version
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: Installation
+      options:
+        - Release bundle
+        - Standalone adapter
+        - make install from source
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - macOS (Apple silicon)
+        - macOS (Intel)
+        - Linux x86-64
+        - Linux arm64
+        - Windows x64
+        - WSL2
+    validations:
+      required: true

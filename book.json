@@ -1,5 +1,5 @@
 {
-  "title": "Proton LFS Backend",
+  "title": "Proton LFS",
   "description": "Documentation for the Proton LFS custom transfer adapter",
   "plugins": ["-sharing", "-search"],
   "pluginsConfig": {},

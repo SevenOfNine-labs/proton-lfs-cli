@@ -417,7 +417,7 @@ docs-lint: ## Lint markdown files
 	fi
 	@npx --yes markdownlint-cli2@$(MARKDOWNLINT_CLI2_VERSION) \
 		--config .markdownlint.json \
-		"README.md" "USAGE.md" "SECURITY.md" "docs/**/*.md"
+		"README.md" "USAGE.md" "SECURITY.md" "CONTRIBUTING.md" "docs/**/*.md"
 
 clean: ## Remove generated files (project-local only; never the global Go caches)
 	rm -rf bin build dist

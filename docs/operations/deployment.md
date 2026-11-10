@@ -6,7 +6,7 @@ and what is open.
 
 ## Prerequisites
 
-- Go toolchain available.
+- Go 1.25 or later.
 - `git-lfs` installed and on `PATH`.
 - Node.js per `.node-version` (26, the active LTS line) for building the
   `proton-drive-cli` SEA binary and for CI; Node.js 22+ is the runtime floor
@@ -15,7 +15,7 @@ and what is open.
   `git-credential` store needs a git credential helper that encrypts secrets
   at rest (`osxkeychain`, `wincred`, `libsecret` or Git Credential Manager).
 
-No .NET SDK and no internal Proton access are required for any path:
+No internal Proton access is required for any path:
 
 | Backend | Needs a Proton account | Who can run it |
 | --- | --- | --- |
@@ -81,7 +81,8 @@ Bundles come from GitHub Releases (`docs/operations/releasing.md`); verify
 the download against the release's `SHA256SUMS.txt` first:
 
 ```bash
-sha256sum -c --ignore-missing SHA256SUMS.txt   # shasum -a 256 -c on macOS
+sha256sum -c --ignore-missing SHA256SUMS.txt       # Linux
+shasum -a 256 -c --ignore-missing SHA256SUMS.txt   # macOS
 ```
 
 ### macOS: Gatekeeper and quarantine
@@ -108,12 +109,18 @@ copies them to `~/.local/bin` on Linux).
 
 ### After installing or updating
 
+Prepare the credential store first: `pass-cli login` for the default
+Proton Pass store (on Linux with `PROTON_PASS_LINUX_KEYRING=dbus`), or a git
+credential helper and `--credential-store git-credential` (Usage Guide,
+"Credential stores"). On macOS the programs stay inside `ProtonLFS.app`; use
+the tray menu or link them onto `PATH` as the Usage Guide shows.
+
 After installing or updating, write the global Git LFS settings for the
 installed programs and sign in whenever `proton-lfs-tray status` does not
 report `signed in` or `proton-drive-cli doctor` fails:
 
 ```bash
-proton-lfs-tray register
+proton-lfs-tray register      # or Enable LFS Backend in the tray
 proton-drive-cli login        # or Connect to Proton in the tray
 ```
 
@@ -131,7 +138,7 @@ git config lfs.standalonetransferagent proton
 Switch to SDK backend:
 
 ```bash
-git config lfs.customtransfer.proton.args "--backend=sdk --drive-cli-bin=submodules/proton-drive-cli/dist/index.js"
+git config lfs.customtransfer.proton.args "--backend=sdk --drive-cli-bin=$HOME/.local/bin/proton-drive-cli"
 ```
 
 ## CI Notes

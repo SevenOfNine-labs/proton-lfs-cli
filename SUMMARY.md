@@ -3,6 +3,7 @@
 - [Introduction](README.md)
 - [Usage Guide](USAGE.md)
 - [Security Policy](SECURITY.md)
+- [Contributing](CONTRIBUTING.md)
 - [Documentation Index](docs/README.md)
 
 ## Project
